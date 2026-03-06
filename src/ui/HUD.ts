@@ -25,136 +25,244 @@ export interface HUDData {
 export class HUD {
   render(renderer: Renderer, data: HUDData) {
     const ctx = renderer.ctx;
+    const pad = 8;
 
-    // Timer bar at top
-    const timerRatio = Math.max(0, data.roundTimer / data.roundDuration);
-    const timerBarWidth = GAME_WIDTH - 20;
-    const timerColor = timerRatio > 0.3 ? COLORS.timerBar : COLORS.timerBarLow;
+    // ═══════════════════════════════════════════════════════════
+    // TOP BAR — Timer + Level + Coins in a sleek panel
+    // ═══════════════════════════════════════════════════════════
+    const topBarH = 32;
+    renderer.drawPanel(pad, pad, GAME_WIDTH - pad * 2, topBarH, {
+      bg: "rgba(6, 6, 18, 0.82)",
+      border: "rgba(40, 60, 100, 0.35)",
+      radius: 6,
+    });
 
-    renderer.drawRect(10, 8, timerBarWidth, 6, "#111");
-    renderer.drawRect(10, 8, timerBarWidth * timerRatio, 6, timerColor);
-    renderer.drawRectStroke(10, 8, timerBarWidth, 6, "#333");
-
-    // Timer text
-    const timeStr = data.roundTimer.toFixed(1) + "s";
-    renderer.drawTextOutline(
-      timeStr,
-      GAME_WIDTH / 2,
-      22,
-      timerRatio > 0.3 ? COLORS.textPrimary : COLORS.timerBarLow,
-      "#000",
-      14,
+    // Level badge (left)
+    const lvlW = 56;
+    renderer.drawRoundedRect(
+      pad + 4,
+      pad + 4,
+      lvlW,
+      topBarH - 8,
+      4,
+      "rgba(0, 255, 204, 0.1)",
+    );
+    renderer.drawRoundedRectStroke(
+      pad + 4,
+      pad + 4,
+      lvlW,
+      topBarH - 8,
+      4,
+      "rgba(0, 255, 204, 0.3)",
+      1,
+    );
+    renderer.drawTitleText(
+      `LV ${data.level}`,
+      pad + 4 + lvlW / 2,
+      pad + topBarH / 2,
+      COLORS.player,
+      10,
       "center",
-      "top",
+      "middle",
     );
 
-    // Level
-    renderer.drawTextOutline(
-      `Level ${data.level}`,
-      10,
-      22,
-      COLORS.textSecondary,
-      "#000",
-      12,
-      "left",
-      "top",
+    // Timer bar (center) — prominent gradient bar
+    const timerRatio = Math.max(0, data.roundTimer / data.roundDuration);
+    const timerBarX = pad + lvlW + 14;
+    const timerBarW = GAME_WIDTH - pad * 2 - lvlW - 14 - 100;
+    const timerBarY = pad + 9;
+    const timerBarH = 14;
+
+    const timerColorStart = timerRatio > 0.3 ? "#2266ff" : "#ff2244";
+    const timerColorEnd = timerRatio > 0.3 ? "#44aaff" : "#ff6644";
+    renderer.drawGradientBar(
+      timerBarX,
+      timerBarY,
+      timerBarW,
+      timerBarH,
+      timerRatio,
+      timerColorStart,
+      timerColorEnd,
+      "rgba(0, 0, 0, 0.4)",
+      "rgba(255, 255, 255, 0.08)",
     );
 
-    // Coins (top right)
-    renderer.drawTextOutline(
-      `💰 ${data.coins}`,
-      GAME_WIDTH - 10,
-      22,
-      COLORS.textGold,
-      "#000",
-      14,
-      "right",
-      "top",
+    // Timer text centered on bar
+    const timeStr = data.roundTimer.toFixed(1) + "s";
+    ctx.save();
+    ctx.font = `bold 9px 'Orbitron', monospace`;
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      timeStr,
+      timerBarX + timerBarW / 2,
+      timerBarY + timerBarH / 2 + 1,
+    );
+    ctx.restore();
+
+    // Coins (right side of top bar)
+    const coinX = GAME_WIDTH - pad - 6;
+    ctx.save();
+    ctx.font = `bold 11px 'Orbitron', monospace`;
+    ctx.fillStyle = COLORS.textGold;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`💰 ${data.coins}`, coinX, pad + topBarH / 2 - 2);
+    ctx.font = `9px monospace`;
+    ctx.fillStyle = "rgba(255, 221, 0, 0.5)";
+    ctx.fillText(`+${data.roundCoins}`, coinX, pad + topBarH / 2 + 10);
+    ctx.restore();
+
+    // ═══════════════════════════════════════════════════════════
+    // LEFT PANEL — Player HP + Shields + Dash
+    // ═══════════════════════════════════════════════════════════
+    const leftPanelX = pad;
+    const leftPanelY = pad + topBarH + 6;
+    const leftPanelW = 140;
+    const leftPanelH = data.playerMaxShields > 0 ? 62 : 46;
+
+    renderer.drawPanel(leftPanelX, leftPanelY, leftPanelW, leftPanelH, {
+      bg: "rgba(6, 6, 18, 0.75)",
+      border: "rgba(50, 30, 30, 0.3)",
+      radius: 6,
+    });
+
+    // HP Bar
+    const hpBarX = leftPanelX + 6;
+    const hpBarY = leftPanelY + 6;
+    const hpBarW = leftPanelW - 12;
+    const hpBarH = 10;
+    const hpRatio = data.playerMaxHp > 0 ? data.playerHp / data.playerMaxHp : 0;
+
+    renderer.drawGradientBar(
+      hpBarX,
+      hpBarY,
+      hpBarW,
+      hpBarH,
+      hpRatio,
+      "#cc2233",
+      "#ff5566",
+      "rgba(60, 10, 10, 0.6)",
+      "rgba(255, 80, 80, 0.2)",
     );
 
-    // Round coins (below total)
-    renderer.drawTextOutline(
-      `+${data.roundCoins} this round`,
-      GAME_WIDTH - 10,
-      40,
-      COLORS.coin,
-      "#000",
-      10,
-      "right",
-      "top",
+    // HP label on top of bar
+    ctx.save();
+    ctx.font = `bold 7px 'Orbitron', monospace`;
+    ctx.fillStyle = "#fff";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      `♥ ${data.playerHp}/${data.playerMaxHp}`,
+      hpBarX + 3,
+      hpBarY + hpBarH / 2 + 1,
     );
+    ctx.restore();
 
-    // === PLAYER HP (prominent display, left side) ===
-    const hpY = 42;
-    const heartSize = 14;
-    const heartSpacing = 18;
-
-    // HP label
-    renderer.drawTextOutline(
-      "HP",
-      10,
-      hpY,
-      COLORS.playerHp,
-      "#000",
-      11,
-      "left",
-      "top",
-    );
-
-    // Draw hearts for HP
-    for (let i = 0; i < data.playerMaxHp; i++) {
-      const hx = 30 + i * heartSpacing;
-      const filled = i < data.playerHp;
-      this.drawHeart(ctx, hx, hpY + heartSize / 2 + 1, heartSize / 2, filled);
-    }
-
-    // Player shields (below HP)
+    // Shield Bar (if applicable)
+    let nextY = hpBarY + hpBarH + 5;
     if (data.playerMaxShields > 0) {
-      const shieldY = hpY + 18;
-      let shieldStr = "🛡";
-      for (let i = 0; i < data.playerMaxShields; i++) {
-        shieldStr += i < data.playerShields ? " ●" : " ○";
-      }
-      renderer.drawTextOutline(
-        shieldStr,
-        10,
-        shieldY,
-        COLORS.shield,
-        "#000",
-        10,
-        "left",
-        "top",
+      const shieldRatio =
+        data.playerMaxShields > 0
+          ? data.playerShields / data.playerMaxShields
+          : 0;
+      renderer.drawGradientBar(
+        hpBarX,
+        nextY,
+        hpBarW,
+        hpBarH,
+        shieldRatio,
+        "#2244aa",
+        "#4488ff",
+        "rgba(10, 10, 40, 0.6)",
+        "rgba(68, 136, 255, 0.2)",
       );
+
+      ctx.save();
+      ctx.font = `bold 7px 'Orbitron', monospace`;
+      ctx.fillStyle = "#aaccff";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        `🛡 ${data.playerShields}/${data.playerMaxShields}`,
+        hpBarX + 3,
+        nextY + hpBarH / 2 + 1,
+      );
+      ctx.restore();
+
+      nextY += hpBarH + 5;
     }
 
-    // Dash indicator (below shields/HP)
-    const dashY = data.playerMaxShields > 0 ? hpY + 36 : hpY + 18;
+    // Dash indicator — cooldown arc style
+    const dashSize = 8;
+    const dashCenterX = leftPanelX + 14;
+    const dashCenterY = nextY + dashSize;
+
     if (data.dashReady) {
-      renderer.drawTextOutline(
-        "⟿ DASH READY",
-        10,
-        dashY,
-        COLORS.dashReady,
-        "#000",
-        10,
-        "left",
-        "top",
-      );
+      // Glowing ready indicator
+      ctx.save();
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = COLORS.dashReady;
+      ctx.beginPath();
+      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      ctx.save();
+      ctx.font = `bold 8px 'Orbitron', monospace`;
+      ctx.fillStyle = COLORS.dashReady;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("DASH", dashCenterX + dashSize + 5, dashCenterY);
+      ctx.restore();
     } else {
-      const pct = Math.floor(data.dashCooldownRatio * 100);
-      renderer.drawTextOutline(
-        `⟿ DASH ${pct}%`,
-        10,
-        dashY,
-        COLORS.dashCooldown,
-        "#000",
-        10,
-        "left",
-        "top",
+      // Cooldown ring
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = "#555";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 2;
+      const arc = data.dashCooldownRatio * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(
+        dashCenterX,
+        dashCenterY,
+        dashSize,
+        -Math.PI / 2,
+        -Math.PI / 2 + arc,
       );
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+
+      const pct = Math.floor(data.dashCooldownRatio * 100);
+      ctx.save();
+      ctx.font = `bold 8px 'Orbitron', monospace`;
+      ctx.fillStyle = COLORS.dashCooldown;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${pct}%`, dashCenterX + dashSize + 5, dashCenterY);
+      ctx.restore();
     }
 
-    // Kill streak (bottom left) with actual coin multiplier from econ_combo
+    // ═══════════════════════════════════════════════════════════
+    // BOTTOM AREA — Streak + Kills
+    // ═══════════════════════════════════════════════════════════
+
+    // Kill streak (bottom left) — flashy
     if (data.killStreak > 1) {
       const streakColor =
         data.killStreak > 10
@@ -163,81 +271,45 @@ export class HUD {
             ? "#ffaa00"
             : "#ffff00";
       const mult = data.streakCoinBonus;
-      const multStr = mult > 1.0 ? ` ×${mult.toFixed(2)} coins` : "";
-      renderer.drawTextOutline(
-        `${data.killStreak}x STREAK!${multStr}`,
-        10,
-        GAME_HEIGHT - 20,
-        streakColor,
-        "#000",
-        14,
-        "left",
-        "bottom",
-      );
+      const multStr = mult > 1.0 ? ` ×${mult.toFixed(1)}` : "";
+
+      const streakY = GAME_HEIGHT - 14;
+      const streakPanelW = 160;
+
+      renderer.drawPanel(pad, streakY - 12, streakPanelW, 22, {
+        bg: "rgba(40, 20, 0, 0.7)",
+        border: renderer.hexToRgba(streakColor, 0.3),
+        radius: 4,
+      });
+
+      ctx.save();
+      ctx.font = `bold 11px 'Orbitron', monospace`;
+      ctx.fillStyle = streakColor;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`🔥 ${data.killStreak}x STREAK${multStr}`, pad + 8, streakY);
+      ctx.restore();
     }
 
     // Kills (bottom right)
-    renderer.drawTextOutline(
-      `☠ ${data.roundKills}`,
-      GAME_WIDTH - 10,
-      GAME_HEIGHT - 20,
-      COLORS.textSecondary,
-      "#000",
-      12,
-      "right",
-      "bottom",
-    );
+    const killY = GAME_HEIGHT - 14;
+    ctx.save();
+    ctx.font = `bold 11px 'Orbitron', monospace`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = "right";
+    ctx.textBaseline = "middle";
+    ctx.fillText(`☠ ${data.roundKills}`, GAME_WIDTH - pad - 4, killY);
+    ctx.restore();
 
     // Mobile controls hint
     if (data.isMobile) {
-      renderer.drawTextOutline(
-        "TAP RIGHT → DASH",
-        GAME_WIDTH - 10,
-        GAME_HEIGHT - 40,
-        COLORS.mobileControl,
-        "#000",
-        9,
-        "right",
-        "bottom",
-      );
+      ctx.save();
+      ctx.font = `8px monospace`;
+      ctx.fillStyle = "rgba(255,255,255,0.15)";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "bottom";
+      ctx.fillText("TAP RIGHT → DASH", GAME_WIDTH - pad - 4, GAME_HEIGHT - 28);
+      ctx.restore();
     }
-  }
-
-  /** Draw a heart shape at the given position */
-  private drawHeart(
-    ctx: CanvasRenderingContext2D,
-    cx: number,
-    cy: number,
-    size: number,
-    filled: boolean,
-  ) {
-    ctx.save();
-    ctx.translate(cx, cy);
-
-    ctx.beginPath();
-    // Heart shape using bezier curves
-    const s = size;
-    ctx.moveTo(0, s * 0.4);
-    ctx.bezierCurveTo(-s * 0.1, s * 0.1, -s, s * 0.1, -s, -s * 0.3);
-    ctx.bezierCurveTo(-s, -s * 0.8, -s * 0.2, -s * 0.9, 0, -s * 0.4);
-    ctx.bezierCurveTo(s * 0.2, -s * 0.9, s, -s * 0.8, s, -s * 0.3);
-    ctx.bezierCurveTo(s, s * 0.1, s * 0.1, s * 0.1, 0, s * 0.4);
-    ctx.closePath();
-
-    if (filled) {
-      ctx.fillStyle = COLORS.playerHp;
-      ctx.fill();
-      ctx.strokeStyle = "#ff6666";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    } else {
-      ctx.fillStyle = COLORS.playerHpBg;
-      ctx.fill();
-      ctx.strokeStyle = "#662222";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-
-    ctx.restore();
   }
 }

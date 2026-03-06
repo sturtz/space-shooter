@@ -52,8 +52,13 @@ export class SpawnSystem {
 
     // Determine enemy type based on level
     if (level <= 3 || Math.random() < 0.5 / level) {
-      // Rocks - 30% chance for big rock
-      const isBig = Math.random() < 0.3;
+      // Rocks — big rock chance ramps up over the round
+      // Early: mostly small rocks (5% big). Late: up to 40% big.
+      const elapsed = game.roundDuration - game.roundTimer;
+      const roundProgress =
+        game.roundDuration > 0 ? Math.min(1, elapsed / game.roundDuration) : 0;
+      const bigRockChance = 0.05 + roundProgress * 0.35; // 5% → 40%
+      const isBig = Math.random() < bigRockChance;
       const baseHp = isBig ? ROCK_BIG_HP : ROCK_BASE_HP;
       const hp = baseHp + Math.floor(level * 0.3);
       const speed = ROCK_BASE_SPEED + level * 2;

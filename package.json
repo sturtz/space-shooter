@@ -4,6 +4,7 @@
   "description": "Incremental space shooter - defend your mothership!",
   "scripts": {
     "dev": "vite",
+    "start": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview"
   },

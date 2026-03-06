@@ -48,11 +48,11 @@ export class UpgradeScreen {
   cantAffordShake: ShakeAnim | null = null;
   cantAffordMessage: { text: string; timer: number } | null = null;
 
-  // Layout constants
+  // Layout constants — larger for mobile
   readonly CX = GAME_WIDTH / 2;
-  readonly CY = GAME_HEIGHT / 2 - 10;
+  readonly CY = GAME_HEIGHT / 2 - 20;
   readonly DEPTH_SPACING = 72;
-  readonly NODE_RADIUS = 14;
+  readonly NODE_RADIUS = 18;
   readonly BRANCH_SPREAD = 0.35;
 
   constructor(upgrades: UpgradeManager, game: IGame) {
@@ -105,7 +105,9 @@ export class UpgradeScreen {
       if (!pos) continue;
       const dx = mx - pos.x;
       const dy = my - pos.y;
-      if (dx * dx + dy * dy <= this.NODE_RADIUS * this.NODE_RADIUS * 1.5) {
+      // Larger hit area for mobile
+      const hitRadius = this.NODE_RADIUS * 1.8;
+      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
         this.tryPurchaseNode(node);
         return;
       }
@@ -138,39 +140,65 @@ export class UpgradeScreen {
     }
   }
 
-  /** Render accepts actual dt now (Bug #6 fix — was hard-coded 1/60) */
   render(renderer: Renderer, dt: number = 1 / 60) {
     this.clickables = [];
     const ctx = renderer.ctx;
 
-    // Dark background
+    // Dark background with subtle vignette
     ctx.fillStyle = COLORS.panelBg;
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Title
-    renderer.drawTextOutline(
+    // Vignette effect
+    const vignetteGrad = ctx.createRadialGradient(
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH * 0.2,
+      GAME_WIDTH / 2,
+      GAME_HEIGHT / 2,
+      GAME_WIDTH * 0.7,
+    );
+    vignetteGrad.addColorStop(0, "rgba(0,0,0,0)");
+    vignetteGrad.addColorStop(1, "rgba(0,0,0,0.4)");
+    ctx.fillStyle = vignetteGrad;
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    // Title panel
+    renderer.drawPanel(GAME_WIDTH / 2 - 130, 4, 260, 28, {
+      bg: "rgba(6, 6, 20, 0.85)",
+      border: "rgba(0, 255, 204, 0.2)",
+      radius: 6,
+      glow: "rgba(0, 255, 204, 0.1)",
+      glowBlur: 8,
+    });
+
+    renderer.drawTitleTextOutline(
       "UPGRADE STATION",
       GAME_WIDTH / 2,
-      16,
+      18,
       COLORS.player,
       "#000",
-      20,
+      14,
       "center",
-      "top",
+      "middle",
     );
 
-    // Coins display
-    renderer.drawText(
-      `Coins: ${this.upgrades.save.coins}   ★ ${this.upgrades.save.starCoins} (prestige currency)   Level: ${this.upgrades.save.currentLevel}`,
-      GAME_WIDTH / 2,
-      40,
-      COLORS.textGold,
-      11,
-      "center",
-      "top",
-    );
+    // Coins display panel
+    const coinsStr = `💰 ${this.upgrades.save.coins}    ⭐ ${this.upgrades.save.starCoins}    LV ${this.upgrades.save.currentLevel}`;
+    renderer.drawPanel(GAME_WIDTH / 2 - 150, 36, 300, 20, {
+      bg: "rgba(6, 6, 20, 0.7)",
+      border: "rgba(255, 221, 0, 0.15)",
+      radius: 4,
+    });
 
-    // Update shake/message timers using actual dt
+    ctx.save();
+    ctx.font = `bold 9px 'Orbitron', monospace`;
+    ctx.fillStyle = COLORS.textGold;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(coinsStr, GAME_WIDTH / 2, 46);
+    ctx.restore();
+
+    // Update shake/message timers
     if (this.cantAffordShake && this.cantAffordShake.timer > 0) {
       this.cantAffordShake.timer -= dt;
       if (this.cantAffordShake.timer <= 0) this.cantAffordShake = null;
@@ -186,21 +214,35 @@ export class UpgradeScreen {
     this.renderTooltip(renderer, ctx);
     this.renderBottomBar(renderer, ctx);
 
-    // Can't afford message
+    // Can't afford message — floating panel
     if (this.cantAffordMessage) {
       const msgAlpha = Math.min(1, this.cantAffordMessage.timer);
+      ctx.save();
       ctx.globalAlpha = msgAlpha;
-      renderer.drawTextOutline(
+
+      const msgW = 280;
+      const msgH = 28;
+      const msgX = GAME_WIDTH / 2 - msgW / 2;
+      const msgY = GAME_HEIGHT / 2 + 90;
+
+      renderer.drawPanel(msgX, msgY, msgW, msgH, {
+        bg: "rgba(40, 8, 8, 0.9)",
+        border: "rgba(255, 68, 68, 0.5)",
+        radius: 6,
+      });
+
+      ctx.font = `bold 10px 'Orbitron', monospace`;
+      ctx.fillStyle = "#ff4444";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
         this.cantAffordMessage.text,
         GAME_WIDTH / 2,
-        GAME_HEIGHT / 2 + 100,
-        "#ff4444",
-        "#000",
-        13,
-        "center",
-        "middle",
+        msgY + msgH / 2,
       );
+
       ctx.globalAlpha = 1;
+      ctx.restore();
     }
   }
 
@@ -220,28 +262,41 @@ export class UpgradeScreen {
 
       if (level > 0) {
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2.5;
         ctx.globalAlpha = 0.8;
+        // Glow effect on purchased connections
+        ctx.save();
+        ctx.shadowColor = BRANCH_COLORS[node.branch];
+        ctx.shadowBlur = 6;
+        ctx.beginPath();
+        ctx.moveTo(parentPos.x, parentPos.y);
+        ctx.lineTo(childPos.x, childPos.y);
+        ctx.stroke();
+        ctx.restore();
       } else if (unlocked) {
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.4;
+        ctx.globalAlpha = 0.35;
+        ctx.beginPath();
+        ctx.moveTo(parentPos.x, parentPos.y);
+        ctx.lineTo(childPos.x, childPos.y);
+        ctx.stroke();
       } else {
         ctx.strokeStyle = "#333";
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.2;
+        ctx.globalAlpha = 0.15;
+        ctx.beginPath();
+        ctx.moveTo(parentPos.x, parentPos.y);
+        ctx.lineTo(childPos.x, childPos.y);
+        ctx.stroke();
       }
-
-      ctx.beginPath();
-      ctx.moveTo(parentPos.x, parentPos.y);
-      ctx.lineTo(childPos.x, childPos.y);
-      ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
-    ctx.strokeStyle = "#1a1a2a";
+    // Depth rings
+    ctx.globalAlpha = 0.08;
+    ctx.strokeStyle = "#334466";
     ctx.lineWidth = 0.5;
-    ctx.globalAlpha = 0.3;
     for (let d = 1; d <= 3; d++) {
       ctx.beginPath();
       ctx.arc(this.CX, this.CY, d * this.DEPTH_SPACING, 0, Math.PI * 2);
@@ -251,6 +306,7 @@ export class UpgradeScreen {
   }
 
   renderBranchLabels(renderer: Renderer) {
+    const ctx = renderer.ctx;
     const branches: UpgradeBranch[] = [
       "dmg",
       "guns",
@@ -261,21 +317,36 @@ export class UpgradeScreen {
     ];
     for (const branch of branches) {
       const angle = BRANCH_ANGLES[branch];
-      const dist = 3.2 * this.DEPTH_SPACING;
+      const dist = 3.3 * this.DEPTH_SPACING;
       let lx = this.CX + Math.cos(angle) * dist;
       let ly = this.CY + Math.sin(angle) * dist;
-      if (ly < 58) ly = 58;
-      if (ly > GAME_HEIGHT - 40) ly = GAME_HEIGHT - 40;
+      if (ly < 62) ly = 62;
+      if (ly > GAME_HEIGHT - 48) ly = GAME_HEIGHT - 48;
 
-      renderer.drawText(
-        BRANCH_LABELS[branch],
-        lx,
-        ly,
-        BRANCH_COLORS[branch],
-        9,
-        "center",
-        "middle",
+      // Label with subtle bg pill
+      const label = BRANCH_LABELS[branch];
+      ctx.save();
+      ctx.font = `bold 8px 'Orbitron', monospace`;
+      const textW = ctx.measureText(label).width;
+      const pillW = textW + 10;
+      const pillH = 14;
+
+      ctx.globalAlpha = 0.5;
+      renderer.drawRoundedRect(
+        lx - pillW / 2,
+        ly - pillH / 2,
+        pillW,
+        pillH,
+        3,
+        "rgba(0, 0, 0, 0.5)",
       );
+      ctx.globalAlpha = 1;
+
+      ctx.fillStyle = BRANCH_COLORS[branch];
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(label, lx, ly);
+      ctx.restore();
     }
   }
 
@@ -291,119 +362,160 @@ export class UpgradeScreen {
       const canBuy = unlocked && !maxed && this.upgrades.canAfford(cost);
       const isRoot = node.id === "root";
 
-      const r = isRoot ? this.NODE_RADIUS + 4 : this.NODE_RADIUS;
+      const r = isRoot ? this.NODE_RADIUS + 5 : this.NODE_RADIUS;
+
+      // Shake animation offset
+      let shakeX = 0;
+      let shakeY = 0;
+      if (this.cantAffordShake && this.cantAffordShake.nodeId === node.id) {
+        const intensity = this.cantAffordShake.timer * 20;
+        shakeX = (Math.random() - 0.5) * intensity;
+        shakeY = (Math.random() - 0.5) * intensity;
+      }
+
+      const nx = pos.x + shakeX;
+      const ny = pos.y + shakeY;
 
       if (isRoot) {
-        ctx.fillStyle = "#222244";
+        // Root node — glowing central hub
+        ctx.save();
+        ctx.shadowColor = COLORS.player;
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = "#111133";
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = COLORS.player;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-      } else if (maxed) {
-        ctx.fillStyle = BRANCH_COLORS[node.branch];
-        ctx.globalAlpha = 0.3;
+        ctx.lineWidth = 2.5;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      } else if (maxed) {
+        // Maxed node — filled with glow
+        ctx.save();
+        ctx.shadowColor = BRANCH_COLORS[node.branch];
+        ctx.shadowBlur = 10;
+
+        const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
+        grad.addColorStop(0, BRANCH_COLORS[node.branch]);
+        grad.addColorStop(
+          0.6,
+          renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.4),
+        );
+        grad.addColorStop(
+          1,
+          renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15),
+        );
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.globalAlpha = 1;
+
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
         ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.restore();
       } else if (level > 0) {
-        ctx.fillStyle = "#111122";
+        // Partially upgraded — progress arc
+        ctx.fillStyle = "#0d0d20";
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
 
-        ctx.fillStyle = BRANCH_COLORS[node.branch];
-        ctx.globalAlpha = 0.3;
-        ctx.beginPath();
-        ctx.moveTo(pos.x, pos.y);
+        // Progress arc fill
         const progressAngle = (level / node.maxLevel) * Math.PI * 2;
-        ctx.arc(pos.x, pos.y, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
+        ctx.save();
+        ctx.fillStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.25);
+        ctx.beginPath();
+        ctx.moveTo(nx, ny);
+        ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
         ctx.closePath();
         ctx.fill();
-        ctx.globalAlpha = 1;
+        ctx.restore();
 
+        ctx.strokeStyle = BRANCH_COLORS[node.branch];
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (canBuy) {
+        // Affordable — pulsing subtle outline
+        ctx.fillStyle = "#0d0d1a";
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.save();
+        ctx.shadowColor = BRANCH_COLORS[node.branch];
+        ctx.shadowBlur = 6;
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
         ctx.lineWidth = 1.5;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (canBuy) {
-        ctx.fillStyle = "#111122";
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.restore();
       } else if (unlocked) {
+        // Unlocked but can't afford
         ctx.fillStyle = "#0a0a15";
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#333";
+        ctx.strokeStyle = "rgba(80, 80, 100, 0.5)";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
       } else {
+        // Locked
+        ctx.globalAlpha = 0.35;
         ctx.fillStyle = "#0a0a10";
-        ctx.globalAlpha = 0.4;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = "#222";
         ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(pos.x, pos.y, r, 0, Math.PI * 2);
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
 
-      const iconAlpha = unlocked ? 1 : 0.3;
+      // Icon
+      const iconAlpha = unlocked ? 1 : 0.25;
       ctx.globalAlpha = iconAlpha;
-      renderer.drawText(
-        node.icon,
-        pos.x,
-        pos.y - 1,
-        "#fff",
-        isRoot ? 14 : 11,
-        "center",
-        "middle",
-      );
+      ctx.save();
+      ctx.font = `${isRoot ? 16 : 13}px monospace`;
+      ctx.fillStyle = "#fff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(node.icon, nx, ny);
+      ctx.restore();
       ctx.globalAlpha = 1;
 
+      // Level text below node
       if (level > 0 && !isRoot) {
-        const lvlText = maxed ? "MAX" : `${level}`;
-        renderer.drawText(
-          lvlText,
-          pos.x,
-          pos.y + r + 6,
-          maxed ? "#44ff44" : BRANCH_COLORS[node.branch],
-          7,
-          "center",
-          "top",
-        );
+        const lvlText = maxed ? "MAX" : `${level}/${node.maxLevel}`;
+        ctx.save();
+        ctx.font = `bold 7px 'Orbitron', monospace`;
+        ctx.fillStyle = maxed ? "#44ff44" : BRANCH_COLORS[node.branch];
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(lvlText, nx, ny + r + 4);
+        ctx.restore();
       }
 
+      // Name label for depth-1 nodes
       if (node.depth <= 1) {
-        renderer.drawText(
-          node.name,
-          pos.x,
-          pos.y + r + (level > 0 ? 14 : 6),
-          unlocked ? "#aaa" : "#444",
-          8,
-          "center",
-          "top",
-        );
+        ctx.save();
+        ctx.font = `7px monospace`;
+        ctx.fillStyle = unlocked ? "#999" : "#444";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "top";
+        ctx.fillText(node.name, nx, ny + r + (level > 0 ? 13 : 5));
+        ctx.restore();
       }
     }
   }
@@ -422,7 +534,7 @@ export class UpgradeScreen {
       const dx = mousePos.x - pos.x;
       const dy = mousePos.y - pos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < this.NODE_RADIUS * 2 && dist < closestDist) {
+      if (dist < this.NODE_RADIUS * 2.5 && dist < closestDist) {
         closestDist = dist;
         closest = node;
       }
@@ -435,142 +547,129 @@ export class UpgradeScreen {
     const maxed = level >= closest.maxLevel;
     const cost = maxed ? 0 : getUpgradeCost(closest, level);
 
-    const panelY = GAME_HEIGHT - 80;
-    const panelH = 50;
-    ctx.fillStyle = "rgba(5, 5, 20, 0.95)";
-    ctx.fillRect(100, panelY, GAME_WIDTH - 200, panelH);
-    ctx.strokeStyle = BRANCH_COLORS[closest.branch];
-    ctx.lineWidth = 1;
-    ctx.strokeRect(100, panelY, GAME_WIDTH - 200, panelH);
+    // Tooltip panel at bottom
+    const panelW = GAME_WIDTH - 60;
+    const panelH = 56;
+    const panelX = 30;
+    const panelY = GAME_HEIGHT - 90;
 
-    renderer.drawText(
-      `${closest.icon} ${closest.name}`,
-      GAME_WIDTH / 2 - 150,
-      panelY + 6,
-      BRANCH_COLORS[closest.branch],
-      12,
-      "left",
-      "top",
-    );
+    renderer.drawPanel(panelX, panelY, panelW, panelH, {
+      bg: "rgba(5, 5, 20, 0.92)",
+      border: renderer.hexToRgba(BRANCH_COLORS[closest.branch], 0.4),
+      radius: 8,
+      glow: renderer.hexToRgba(BRANCH_COLORS[closest.branch], 0.15),
+      glowBlur: 10,
+    });
 
-    renderer.drawText(
+    // Name + icon
+    ctx.save();
+    ctx.font = `bold 12px 'Orbitron', monospace`;
+    ctx.fillStyle = BRANCH_COLORS[closest.branch];
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(`${closest.icon} ${closest.name}`, panelX + 10, panelY + 7);
+    ctx.restore();
+
+    // Level badge
+    ctx.save();
+    ctx.font = `bold 10px 'Orbitron', monospace`;
+    ctx.fillStyle = maxed ? "#44ff44" : "#aaa";
+    ctx.textAlign = "right";
+    ctx.textBaseline = "top";
+    ctx.fillText(
       `Lv ${level}/${closest.maxLevel}`,
-      GAME_WIDTH / 2 + 150,
-      panelY + 6,
-      maxed ? "#44ff44" : "#aaa",
-      11,
-      "right",
-      "top",
+      panelX + panelW - 10,
+      panelY + 8,
     );
+    ctx.restore();
 
-    renderer.drawText(
-      closest.description,
-      GAME_WIDTH / 2 - 150,
-      panelY + 22,
-      COLORS.textSecondary,
-      10,
-      "left",
-      "top",
-    );
+    // Description
+    ctx.save();
+    ctx.font = `10px monospace`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+    ctx.fillText(closest.description, panelX + 10, panelY + 24);
+    ctx.restore();
 
+    // Status line
+    ctx.save();
+    ctx.font = `bold 9px 'Orbitron', monospace`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
     if (!unlocked) {
       const reqText = this.getRequirementText(closest);
-      renderer.drawText(
-        `🔒 ${reqText}`,
-        GAME_WIDTH / 2 - 150,
-        panelY + 36,
-        "#664444",
-        9,
-        "left",
-        "top",
-      );
+      ctx.fillStyle = "#664444";
+      ctx.fillText(`🔒 ${reqText}`, panelX + 10, panelY + 40);
     } else if (maxed) {
-      renderer.drawText(
-        "✓ MAXED",
-        GAME_WIDTH / 2 - 150,
-        panelY + 36,
-        "#44ff44",
-        10,
-        "left",
-        "top",
-      );
+      ctx.fillStyle = "#44ff44";
+      ctx.fillText("✓ MAXED", panelX + 10, panelY + 40);
     } else {
       const canBuy = this.upgrades.canAfford(cost);
-      renderer.drawText(
-        `Cost: ${cost} coins — Click node to buy`,
-        GAME_WIDTH / 2 - 150,
-        panelY + 36,
-        canBuy ? COLORS.textGold : "#664444",
-        10,
-        "left",
-        "top",
+      ctx.fillStyle = canBuy ? COLORS.textGold : "#664444";
+      ctx.fillText(
+        `Cost: ${cost} coins — Tap node to buy`,
+        panelX + 10,
+        panelY + 40,
       );
     }
+    ctx.restore();
 
+    // Highlight ring on hovered node
     const npos = this.nodePositions.get(closest.id);
     if (npos) {
+      ctx.save();
       ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.5;
+      ctx.lineWidth = 1.5;
+      ctx.globalAlpha = 0.4;
       ctx.beginPath();
-      ctx.arc(npos.x, npos.y, this.NODE_RADIUS + 3, 0, Math.PI * 2);
+      ctx.arc(npos.x, npos.y, this.NODE_RADIUS + 5, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 1;
+      ctx.restore();
     }
   }
 
   renderBottomBar(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    // START RUN button
-    const playBtnX = GAME_WIDTH / 2 - 80;
-    const playBtnY = GAME_HEIGHT - 28;
-    const playBtnW = 160;
-    const playBtnH = 24;
+    // Bottom button bar
+    const barY = GAME_HEIGHT - 34;
+    const btnH = 30;
+    const btnGap = 8;
 
-    ctx.fillStyle = "#114422";
-    ctx.fillRect(playBtnX, playBtnY, playBtnW, playBtnH);
-    ctx.strokeStyle = "#44ff44";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(playBtnX, playBtnY, playBtnW, playBtnH);
+    // START RUN button — prominent center
+    const playBtnW = 180;
+    const playBtnX = GAME_WIDTH / 2 - playBtnW / 2;
 
-    renderer.drawText(
-      "▶ START RUN",
-      GAME_WIDTH / 2,
-      playBtnY + 6,
-      "#44ff44",
-      14,
-      "center",
-      "top",
-    );
+    renderer.drawButton(playBtnX, barY, playBtnW, btnH, "▶  START RUN", {
+      bg: "rgba(10, 50, 25, 0.9)",
+      border: "rgba(68, 255, 68, 0.5)",
+      textColor: "#44ff44",
+      fontSize: 13,
+      radius: 8,
+      glow: "rgba(68, 255, 68, 0.15)",
+    });
 
     this.clickables.push({
       x: playBtnX,
-      y: playBtnY,
+      y: barY,
       w: playBtnW,
-      h: playBtnH,
+      h: btnH,
       action: () => this.game.startRun(),
     });
 
-    // RESET SAVE button
-    const resetBtnX = GAME_WIDTH - 90;
-    const resetBtnY = 8;
-    const resetBtnW = 82;
-    const resetBtnH = 20;
+    // RESET button (top right)
+    const resetBtnW = 80;
+    const resetBtnH = 22;
+    const resetBtnX = GAME_WIDTH - resetBtnW - 8;
+    const resetBtnY = 6;
 
-    ctx.fillStyle = "#220808";
-    ctx.fillRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-    ctx.strokeStyle = "#ff4444";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(resetBtnX, resetBtnY, resetBtnW, resetBtnH);
-
-    renderer.drawText(
-      "⟲ RESET",
-      resetBtnX + resetBtnW / 2,
-      resetBtnY + 4,
-      "#ff4444",
-      10,
-      "center",
-      "top",
-    );
+    renderer.drawButton(resetBtnX, resetBtnY, resetBtnW, resetBtnH, "⟲ RESET", {
+      bg: "rgba(35, 8, 8, 0.85)",
+      border: "rgba(255, 68, 68, 0.4)",
+      textColor: "#ff4444",
+      fontSize: 8,
+      radius: 5,
+    });
 
     this.clickables.push({
       x: resetBtnX,
@@ -587,68 +686,49 @@ export class UpgradeScreen {
       },
     });
 
-    // MAIN MENU button
-    const menuBtnX = GAME_WIDTH - 90;
-    const menuBtnY = GAME_HEIGHT - 28;
-    const menuBtnW = 82;
-    const menuBtnH = 24;
+    // MENU button (bottom right)
+    const menuBtnW = 80;
+    const menuBtnX = GAME_WIDTH - menuBtnW - 8;
 
-    ctx.fillStyle = "#0a0a22";
-    ctx.fillRect(menuBtnX, menuBtnY, menuBtnW, menuBtnH);
-    ctx.strokeStyle = "#4488ff";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(menuBtnX, menuBtnY, menuBtnW, menuBtnH);
-
-    renderer.drawText(
-      "⌂ MENU",
-      menuBtnX + menuBtnW / 2,
-      menuBtnY + 6,
-      "#4488ff",
-      10,
-      "center",
-      "top",
-    );
+    renderer.drawButton(menuBtnX, barY, menuBtnW, btnH, "⌂ MENU", {
+      bg: "rgba(10, 10, 40, 0.9)",
+      border: "rgba(68, 136, 255, 0.4)",
+      textColor: "#4488ff",
+      fontSize: 10,
+      radius: 8,
+    });
 
     this.clickables.push({
       x: menuBtnX,
-      y: menuBtnY,
+      y: barY,
       w: menuBtnW,
-      h: menuBtnH,
+      h: btnH,
       action: () => {
         this.game.state = "menu";
       },
     });
 
-    // PRESTIGE button
-    const pBtnX = 10;
-    const pBtnY = GAME_HEIGHT - 28;
+    // PRESTIGE button (bottom left)
     const pBtnW = 120;
-    const pBtnH = 24;
+    const pBtnX = 8;
 
     const canPrestige = this.upgrades.save.highestLevel >= 10;
 
     if (canPrestige) {
-      ctx.fillStyle = "#1a0a1a";
-      ctx.fillRect(pBtnX, pBtnY, pBtnW, pBtnH);
-      ctx.strokeStyle = "#aa44aa";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(pBtnX, pBtnY, pBtnW, pBtnH);
-
-      renderer.drawText(
-        "⭐ PRESTIGE",
-        pBtnX + pBtnW / 2,
-        pBtnY + 6,
-        "#aa44aa",
-        10,
-        "center",
-        "top",
-      );
+      renderer.drawButton(pBtnX, barY, pBtnW, btnH, "⭐ PRESTIGE", {
+        bg: "rgba(30, 10, 30, 0.9)",
+        border: "rgba(170, 68, 170, 0.5)",
+        textColor: "#aa44aa",
+        fontSize: 10,
+        radius: 8,
+        glow: "rgba(170, 68, 170, 0.15)",
+      });
 
       this.clickables.push({
         x: pBtnX,
-        y: pBtnY,
+        y: barY,
         w: pBtnW,
-        h: pBtnH,
+        h: btnH,
         action: () => {
           this.upgrades.prestige();
           saveGame(this.upgrades.save);
@@ -656,33 +736,30 @@ export class UpgradeScreen {
         },
       });
     } else {
+      ctx.save();
       ctx.globalAlpha = 0.35;
-      ctx.fillStyle = "#0a0a0a";
-      ctx.fillRect(pBtnX, pBtnY, pBtnW, pBtnH);
-      ctx.strokeStyle = "#444";
-      ctx.lineWidth = 1;
-      ctx.strokeRect(pBtnX, pBtnY, pBtnW, pBtnH);
-
-      renderer.drawText(
-        "⭐ PRESTIGE",
-        pBtnX + pBtnW / 2,
-        pBtnY + 6,
-        "#555",
-        10,
-        "center",
-        "top",
-      );
+      renderer.drawButton(pBtnX, barY, pBtnW, btnH, "⭐ PRESTIGE", {
+        bg: "rgba(10, 10, 10, 0.7)",
+        border: "rgba(80, 80, 80, 0.3)",
+        textColor: "#555",
+        fontSize: 10,
+        radius: 8,
+      });
       ctx.globalAlpha = 1;
+      ctx.restore();
 
-      renderer.drawText(
-        `Reach Lv10 to unlock (current: ${this.upgrades.save.highestLevel})`,
+      // Hint text
+      ctx.save();
+      ctx.font = `7px monospace`;
+      ctx.fillStyle = "#555";
+      ctx.textAlign = "left";
+      ctx.textBaseline = "bottom";
+      ctx.fillText(
+        `Reach Lv10 (current: ${this.upgrades.save.highestLevel})`,
         pBtnX,
-        pBtnY - 12,
-        "#666",
-        8,
-        "left",
-        "bottom",
+        barY - 4,
       );
+      ctx.restore();
     }
   }
 

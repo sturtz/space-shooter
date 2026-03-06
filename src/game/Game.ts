@@ -114,16 +114,16 @@ export class Game implements IGame {
   // Circle weapon state (default weapon — synced to music beat)
   coneFlashTimer: number = 0;
   coneBeatCount: number = 0;
-  readonly CONE_RANGE = 45;         // pixels — circle radius around player
-  readonly CONE_FIRE_EVERY = 1;     // fire every beat
+  readonly CONE_RANGE = 45; // pixels — circle radius around player
+  readonly CONE_FIRE_EVERY = 1; // fire every beat
   coneTimeSinceLastFire: number = 0; // tracks loader progress
   coneMeasuredInterval: number = 60 / 140; // measured actual beat interval (starts at 140 BPM estimate)
   coneLastFireTime: number = 0; // timestamp of last fire for measuring interval
 
   // Missile weapon state (dmg branch 2 — fires every 2 beats)
   missileBeatCount: number = 0;
-  readonly MISSILE_FIRE_EVERY = 2;  // fire every 2nd beat
-  readonly MISSILE_SPEED = 180;     // slower than bullets, tracks target
+  readonly MISSILE_FIRE_EVERY = 2; // fire every 2nd beat
+  readonly MISSILE_SPEED = 180; // slower than bullets, tracks target
 
   // Starfield
   stars: Star[] = [];
@@ -355,7 +355,8 @@ export class Game implements IGame {
     const now = performance.now() / 1000;
     if (this.coneLastFireTime > 0) {
       const measured = now - this.coneLastFireTime;
-      if (measured > 0.1 && measured < 2) { // sanity check
+      if (measured > 0.1 && measured < 2) {
+        // sanity check
         this.coneMeasuredInterval = measured;
       }
     }
@@ -635,7 +636,7 @@ export class Game implements IGame {
     const baseValue = enemy.coinValue;
     const dropMult = this.stats.coinDropMultiplier;
     const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.10;
+      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
     let value = Math.max(1, Math.round(baseValue * dropMult * streakBonus));
 
     // Lucky drop check
@@ -712,98 +713,162 @@ export class Game implements IGame {
   renderMenu() {
     const cx = GAME_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
+    const ctx = this.renderer.ctx;
 
-    const titleScale = 1 + Math.sin(this.menuPulse * 2) * 0.03;
-    this.renderer.drawTextOutline(
+    // Decorative mothership glow (behind everything)
+    const pulse = 1 + Math.sin(this.menuPulse * 1.5) * 0.1;
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    const motherGlow = ctx.createRadialGradient(
+      cx,
+      cy + 180,
+      0,
+      cx,
+      cy + 180,
+      80 * pulse,
+    );
+    motherGlow.addColorStop(0, COLORS.mothership);
+    motherGlow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = motherGlow;
+    ctx.beginPath();
+    ctx.arc(cx, cy + 180, 80 * pulse, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.3;
+    this.renderer.drawCircle(vec2(cx, cy + 180), 20, COLORS.mothership);
+    ctx.globalAlpha = 1;
+    ctx.restore();
+
+    // Title with glow
+    const titleScale = 1 + Math.sin(this.menuPulse * 2) * 0.02;
+    ctx.save();
+    ctx.shadowColor = COLORS.player;
+    ctx.shadowBlur = 20;
+    this.renderer.drawTitleTextOutline(
       "SPACE SHOOTER",
       cx,
       cy - 120,
       COLORS.player,
       "#000",
-      36 * titleScale,
+      30 * titleScale,
       "center",
       "middle",
     );
+    ctx.restore();
 
-    this.renderer.drawText(
+    // Subtitle
+    this.renderer.drawTitleText(
       "Defend the Mothership",
       cx,
-      cy - 75,
+      cy - 78,
       COLORS.textSecondary,
-      16,
+      12,
       "center",
       "middle",
     );
 
-    this.renderer.drawText(
-      `Level: ${this.save.currentLevel}  |  ⭐ ${this.save.starCoins}  |  Coins: ${this.save.coins}`,
+    // Stats panel
+    const statsPanelW = 300;
+    this.renderer.drawPanel(cx - statsPanelW / 2, cy - 50, statsPanelW, 30, {
+      bg: "rgba(6, 6, 20, 0.8)",
+      border: "rgba(255, 221, 0, 0.2)",
+      radius: 6,
+    });
+
+    ctx.save();
+    ctx.font = `bold 10px 'Orbitron', monospace`;
+    ctx.fillStyle = COLORS.textGold;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      `Level: ${this.save.currentLevel}   ⭐ ${this.save.starCoins}   💰 ${this.save.coins}`,
       cx,
-      cy - 30,
-      COLORS.textGold,
-      14,
-      "center",
-      "middle",
+      cy - 35,
     );
+    ctx.restore();
 
+    // Start button (blinking glow)
     const blink = Math.sin(this.menuPulse * 3) > 0;
-    if (blink) {
-      this.renderer.drawTextOutline(
-        "[ TAP / CLICK TO START ]",
-        cx,
-        cy + 30,
-        "#fff",
-        "#000",
-        20,
-        "center",
-        "middle",
-      );
-    }
+    const startBtnW = 260;
+    const startBtnH = 40;
+    const startBtnX = cx - startBtnW / 2;
+    const startBtnY = cy + 10;
 
-    // Controls info — adapt for mobile
-    if (this.input.isTouchDevice) {
-      this.renderer.drawText(
-        "Left side: Move joystick  •  Right side: Dash  •  Auto-shoot",
-        cx,
-        cy + 100,
-        COLORS.textSecondary,
-        11,
-        "center",
-        "middle",
+    if (blink) {
+      this.renderer.drawButton(
+        startBtnX,
+        startBtnY,
+        startBtnW,
+        startBtnH,
+        "TAP TO START",
+        {
+          bg: "rgba(0, 40, 30, 0.9)",
+          border: "rgba(0, 255, 204, 0.5)",
+          textColor: "#fff",
+          fontSize: 16,
+          radius: 10,
+          glow: "rgba(0, 255, 204, 0.2)",
+        },
       );
     } else {
-      this.renderer.drawText(
-        "WASD to move  •  Mouse to aim  •  Cone auto-fires to beat  •  Shift to dash",
-        cx,
-        cy + 100,
-        COLORS.textSecondary,
-        12,
-        "center",
-        "middle",
+      this.renderer.drawButton(
+        startBtnX,
+        startBtnY,
+        startBtnW,
+        startBtnH,
+        "TAP TO START",
+        {
+          bg: "rgba(0, 30, 20, 0.8)",
+          border: "rgba(0, 255, 204, 0.25)",
+          textColor: "rgba(255,255,255,0.6)",
+          fontSize: 16,
+          radius: 10,
+        },
       );
     }
 
-    this.renderer.drawText(
-      "Destroy enemies → Collect coins → Upgrade → Repeat",
-      cx,
-      cy + 125,
-      COLORS.textSecondary,
-      11,
-      "center",
-      "middle",
-    );
+    // Controls info — hi-fi panel
+    const controlsY = cy + 75;
+    this.renderer.drawPanel(cx - 200, controlsY - 8, 400, 45, {
+      bg: "rgba(6, 6, 20, 0.6)",
+      border: "rgba(100, 120, 160, 0.15)",
+      radius: 6,
+    });
 
-    // Decorative mothership
-    this.renderer.ctx.save();
-    this.renderer.ctx.globalAlpha = 0.4;
-    const pulse = 1 + Math.sin(this.menuPulse * 1.5) * 0.1;
-    this.renderer.drawCircle(
-      vec2(cx, cy + 200),
-      30 * pulse,
-      COLORS.mothershipGlow,
-    );
-    this.renderer.drawCircle(vec2(cx, cy + 200), 20, COLORS.mothership);
-    this.renderer.ctx.globalAlpha = 1;
-    this.renderer.ctx.restore();
+    if (this.input.isTouchDevice) {
+      ctx.save();
+      ctx.font = `9px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "Left side: Move joystick  •  Right side: Dash",
+        cx,
+        controlsY + 4,
+      );
+      ctx.fillText(
+        "Auto-shoot  •  Destroy enemies → Coins → Upgrade",
+        cx,
+        controlsY + 18,
+      );
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.font = `9px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(
+        "WASD to move  •  Mouse to aim  •  Shift to dash",
+        cx,
+        controlsY + 4,
+      );
+      ctx.fillText(
+        "Auto-fires to beat  •  Destroy enemies → Coins → Upgrade",
+        cx,
+        controlsY + 18,
+      );
+      ctx.restore();
+    }
   }
 
   renderPlaying() {
@@ -840,12 +905,15 @@ export class Game implements IGame {
       const py = this.player.pos.y;
       const range = this.CONE_RANGE;
       const isFiring = this.coneFlashTimer > 0;
-      const flashPower = isFiring ? (this.coneFlashTimer / 0.12) : 0;
+      const flashPower = isFiring ? this.coneFlashTimer / 0.12 : 0;
 
       ctx.save();
 
       // === Loader arc (fills up between beats, white, like a cooldown spinner) ===
-      const loaderProgress = Math.min(1, this.coneTimeSinceLastFire / this.coneMeasuredInterval);
+      const loaderProgress = Math.min(
+        1,
+        this.coneTimeSinceLastFire / this.coneMeasuredInterval,
+      );
       const loaderArc = loaderProgress * Math.PI * 2;
       const loaderRadius = 18; // small, tight around the player
 
@@ -911,8 +979,12 @@ export class Game implements IGame {
 
       // Inner glow fill
       const gradient = ctx.createRadialGradient(
-        ring.x, ring.y, ring.currentRadius * 0.7,
-        ring.x, ring.y, ring.currentRadius,
+        ring.x,
+        ring.y,
+        ring.currentRadius * 0.7,
+        ring.x,
+        ring.y,
+        ring.currentRadius,
       );
       gradient.addColorStop(0, "rgba(100, 220, 255, 0)");
       gradient.addColorStop(1, `rgba(100, 220, 255, ${alpha * 0.3})`);
@@ -949,7 +1021,7 @@ export class Game implements IGame {
 
     // Compute actual streak coin bonus for HUD (Issue #19 fix)
     const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.10;
+      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
 
     // HUD
     this.hud.render(this.renderer, {
@@ -981,166 +1053,291 @@ export class Game implements IGame {
   /** Render virtual joystick and dash zone indicators for mobile */
   renderMobileControls() {
     const ctx = this.renderer.ctx;
+    const joystickRadius = 40;
+    const thumbRadius = 14;
 
-    // Virtual joystick
+    // Virtual joystick — hi-fi with gradient fills
     if (this.input.joystickActive) {
       const center = this.input.joystickCenter;
       const thumb = this.input.joystickThumb;
 
-      // Outer ring
+      // Outer ring with subtle fill
       ctx.save();
-      ctx.globalAlpha = 0.2;
-      ctx.strokeStyle = "#ffffff";
+      ctx.globalAlpha = 0.12;
+      const ringGrad = ctx.createRadialGradient(
+        center.x,
+        center.y,
+        0,
+        center.x,
+        center.y,
+        joystickRadius,
+      );
+      ringGrad.addColorStop(0, "rgba(0, 255, 204, 0.15)");
+      ringGrad.addColorStop(1, "rgba(0, 255, 204, 0)");
+      ctx.fillStyle = ringGrad;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, joystickRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = COLORS.player;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(center.x, center.y, 35, 0, Math.PI * 2);
+      ctx.arc(center.x, center.y, joystickRadius, 0, Math.PI * 2);
       ctx.stroke();
 
-      // Thumb
-      ctx.globalAlpha = 0.4;
-      ctx.fillStyle = "#ffffff";
+      // Thumb — glowing circle
+      ctx.globalAlpha = 0.5;
+      ctx.fillStyle = COLORS.player;
       ctx.beginPath();
-      ctx.arc(thumb.x, thumb.y, 12, 0, Math.PI * 2);
+      ctx.arc(thumb.x, thumb.y, thumbRadius, 0, Math.PI * 2);
       ctx.fill();
+
+      ctx.globalAlpha = 0.3;
+      ctx.strokeStyle = "#fff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(thumb.x, thumb.y, thumbRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
       ctx.restore();
     }
 
-    // Dash button hint (right side)
-    const dashX = GAME_WIDTH - 60;
+    // Dash button (right side) — larger, more visible
+    const dashX = GAME_WIDTH - 55;
     const dashY = GAME_HEIGHT / 2;
+    const dashR = 30;
     ctx.save();
-    ctx.globalAlpha = this.player.dashReady ? 0.25 : 0.1;
-    ctx.strokeStyle = this.player.dashReady ? COLORS.dashReady : COLORS.dashCooldown;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.arc(dashX, dashY, 25, 0, Math.PI * 2);
-    ctx.stroke();
 
     if (this.player.dashReady) {
-      ctx.globalAlpha = 0.3;
-      this.renderer.drawText(
-        "DASH",
+      // Ready — glowing circle
+      ctx.globalAlpha = 0.1;
+      const dashGlow = ctx.createRadialGradient(
         dashX,
         dashY,
-        COLORS.dashReady,
-        10,
-        "center",
-        "middle",
+        0,
+        dashX,
+        dashY,
+        dashR * 1.5,
       );
+      dashGlow.addColorStop(0, COLORS.dashReady);
+      dashGlow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = dashGlow;
+      ctx.beginPath();
+      ctx.arc(dashX, dashY, dashR * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.globalAlpha = 0.25;
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(dashX, dashY, dashR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.globalAlpha = 0.35;
+      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.fillStyle = COLORS.dashReady;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("DASH", dashX, dashY);
     } else {
-      // Show cooldown arc
-      ctx.globalAlpha = 0.2;
+      // Cooldown — progress arc
+      ctx.globalAlpha = 0.1;
+      ctx.strokeStyle = "#445";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(dashX, dashY, dashR, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Cooldown fill arc
+      ctx.globalAlpha = 0.25;
       ctx.strokeStyle = COLORS.dashReady;
       ctx.lineWidth = 3;
       const arc = this.player.dashCooldownRatio * Math.PI * 2;
       ctx.beginPath();
-      ctx.arc(dashX, dashY, 25, -Math.PI / 2, -Math.PI / 2 + arc);
+      ctx.arc(dashX, dashY, dashR, -Math.PI / 2, -Math.PI / 2 + arc);
       ctx.stroke();
+
+      const pct = Math.floor(this.player.dashCooldownRatio * 100);
+      ctx.globalAlpha = 0.2;
+      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.fillStyle = COLORS.dashCooldown;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${pct}%`, dashX, dashY);
     }
     ctx.restore();
   }
 
   renderPauseOverlay() {
     const ctx = this.renderer.ctx;
-    ctx.fillStyle = "rgba(0, 0, 0, 0.5)";
+    const cx = GAME_WIDTH / 2;
+    const cy = GAME_HEIGHT / 2;
+
+    // Frosted backdrop
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    this.renderer.drawTextOutline(
+
+    // Pause panel
+    const panelW = 240;
+    const panelH = 80;
+    this.renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
+      bg: "rgba(8, 8, 24, 0.92)",
+      border: "rgba(100, 120, 180, 0.4)",
+      radius: 12,
+      glow: "rgba(100, 150, 255, 0.1)",
+      glowBlur: 15,
+    });
+
+    ctx.save();
+    ctx.shadowColor = "#fff";
+    ctx.shadowBlur = 10;
+    this.renderer.drawTitleTextOutline(
       "PAUSED",
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2 - 20,
+      cx,
+      cy - 12,
       "#fff",
       "#000",
-      32,
+      24,
       "center",
       "middle",
     );
-    this.renderer.drawText(
-      "Press P or ESC to resume",
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2 + 20,
-      COLORS.textSecondary,
-      14,
-      "center",
-      "middle",
-    );
+    ctx.restore();
+
+    ctx.save();
+    ctx.font = `9px monospace`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Press P or ESC to resume", cx, cy + 18);
+    ctx.restore();
   }
 
   renderGameOver() {
     const cx = GAME_WIDTH / 2;
     const cy = GAME_HEIGHT / 2;
+    const ctx = this.renderer.ctx;
 
     this.particles.render(this.renderer);
 
-    this.renderer.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-    this.renderer.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    // Darkened backdrop
+    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     // Check if player died
     const playerDied = this.player && this.player.isDead;
-    const title = playerDied ? "SHIP DESTROYED" : "ROUND OVER";
-    const titleColor = playerDied ? "#ff4444" : COLORS.mothershipDamaged;
+    const title = playerDied ? "SHIP DESTROYED" : "ROUND COMPLETE";
+    const titleColor = playerDied ? "#ff4444" : "#44ff88";
+    const glowColor = playerDied
+      ? "rgba(255, 50, 50, 0.15)"
+      : "rgba(68, 255, 136, 0.15)";
 
-    this.renderer.drawTextOutline(
+    // Results panel
+    const panelW = 320;
+    const panelH = 200;
+    this.renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
+      bg: "rgba(6, 6, 20, 0.92)",
+      border: playerDied ? "rgba(255, 68, 68, 0.3)" : "rgba(68, 255, 136, 0.3)",
+      radius: 12,
+      glow: glowColor,
+      glowBlur: 20,
+    });
+
+    // Title
+    ctx.save();
+    ctx.shadowColor = titleColor;
+    ctx.shadowBlur = 15;
+    this.renderer.drawTitleTextOutline(
       title,
       cx,
-      cy - 100,
+      cy - 72,
       titleColor,
       "#000",
-      32,
-      "center",
-      "middle",
-    );
-
-    this.renderer.drawText(
-      `Level ${this.save.currentLevel}`,
-      cx,
-      cy - 60,
-      COLORS.textPrimary,
       18,
       "center",
       "middle",
     );
+    ctx.restore();
 
-    this.renderer.drawText(
-      `Coins Earned: ${this.roundCoins}`,
+    // Level
+    this.renderer.drawTitleText(
+      `Level ${this.save.currentLevel}`,
       cx,
-      cy - 25,
-      COLORS.textGold,
-      16,
-      "center",
-      "middle",
-    );
-
-    this.renderer.drawText(
-      `Enemies Defeated: ${this.roundKills}`,
-      cx,
-      cy + 0,
-      COLORS.textSecondary,
+      cy - 42,
+      COLORS.textPrimary,
       14,
       "center",
       "middle",
     );
 
-    this.renderer.drawText(
-      `Total Coins: ${this.save.coins}`,
-      cx,
-      cy + 30,
-      COLORS.coin,
-      14,
-      "center",
-      "middle",
-    );
+    // Divider line
+    ctx.save();
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(cx - 100, cy - 28);
+    ctx.lineTo(cx + 100, cy - 28);
+    ctx.stroke();
+    ctx.restore();
 
+    // Stats rows
+    const statY = cy - 10;
+    const lineH = 22;
+
+    ctx.save();
+    ctx.font = `bold 11px 'Orbitron', monospace`;
+    ctx.textBaseline = "middle";
+
+    // Coins earned
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Coins Earned", cx - 100, statY);
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLORS.textGold;
+    ctx.fillText(`+${this.roundCoins}`, cx + 100, statY);
+
+    // Enemies
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Enemies Defeated", cx - 100, statY + lineH);
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#ff8866";
+    ctx.fillText(`${this.roundKills}`, cx + 100, statY + lineH);
+
+    // Total coins
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Total Coins", cx - 100, statY + lineH * 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLORS.coin;
+    ctx.fillText(`${this.save.coins}`, cx + 100, statY + lineH * 2);
+
+    ctx.restore();
+
+    // Continue button
     const blink = Math.sin(this.gameTime * 3) > 0;
+    const btnW = 220;
+    const btnH = 32;
+    const btnX = cx - btnW / 2;
+    const btnY = cy + 62;
+
     if (blink) {
-      this.renderer.drawText(
-        "[ TAP / CLICK TO CONTINUE ]",
-        cx,
-        cy + 80,
-        "#fff",
-        18,
-        "center",
-        "middle",
-      );
+      this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
+        bg: "rgba(10, 30, 20, 0.9)",
+        border: "rgba(100, 200, 150, 0.4)",
+        textColor: "#fff",
+        fontSize: 12,
+        radius: 8,
+        glow: "rgba(100, 200, 150, 0.15)",
+      });
+    } else {
+      this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
+        bg: "rgba(10, 20, 15, 0.8)",
+        border: "rgba(100, 200, 150, 0.2)",
+        textColor: "rgba(255,255,255,0.5)",
+        fontSize: 12,
+        radius: 8,
+      });
     }
   }
 }
