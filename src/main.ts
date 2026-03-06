@@ -1,5 +1,23 @@
 import { Game } from "./game/Game";
 
+// Try to lock orientation to landscape on supported devices
+try {
+  const orientation = screen.orientation as any;
+  const lockOrientation =
+    orientation?.lock?.bind(orientation) ??
+    (screen as any).lockOrientation?.bind(screen) ??
+    (screen as any).mozLockOrientation?.bind(screen) ??
+    (screen as any).msLockOrientation?.bind(screen);
+
+  if (lockOrientation) {
+    lockOrientation("landscape").catch(() => {
+      /* not supported or not in fullscreen – overlay handles it */
+    });
+  }
+} catch {
+  /* orientation lock not available */
+}
+
 const canvas = document.getElementById("game") as HTMLCanvasElement;
 if (!canvas) throw new Error("Canvas element not found!");
 
