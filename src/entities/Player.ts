@@ -20,20 +20,31 @@ import {
   COLORS,
 } from "../utils/Constants";
 
+export interface DashResult {
+  dashed: boolean;
+  flashbangRadius: number;
+}
+
 export class Player extends Entity {
   stats!: PlayerStats;
   fireCooldown: number = 0;
   invincibleTimer: number = 0;
+
+  // HP system (base 1 HP)
+  hp: number = 1;
+  maxHp: number = 1;
 
   // Shield system (from health_core upgrade)
   shields: number = 0;
   maxShields: number = 0;
   shieldRegenTimer: number = 0;
 
-  // Dash ability (from move_dash upgrade)
+  // Dash ability (always available, upgrades enhance it)
   dashCooldown: number = 0;
-  readonly DASH_COOLDOWN_TIME = 3; // seconds between dashes
-  readonly DASH_BASE_DISTANCE = 80; // pixels
+  readonly DASH_COOLDOWN_TIME = 2.5; // seconds between dashes
+  readonly DASH_BASE_DISTANCE = 40; // pixels (short dash)
+  readonly DASH_BASE_INVINCIBILITY = 0.15; // base i-frame duration
+  readonly DASH_BASE_RING_RADIUS = 60; // base explosion ring radius
 
   constructor() {
     super(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 80, PLAYER_COLLISION_RADIUS);
@@ -41,6 +52,8 @@ export class Player extends Entity {
 
   updateStats(stats: PlayerStats) {
     this.stats = stats;
+    this.maxHp = stats.playerHp;
+    this.hp = this.maxHp;
     this.maxShields = stats.playerShields;
     this.shields = this.maxShields;
   }
@@ -75,14 +88,17 @@ export class Player extends Entity {
     this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
     this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
 
-    // Face mouse
-    const toMouse = vecSub(input.mousePos, this.pos);
-    this.angle = vecAngle(toMouse);
+    // Face mouse (on desktop) — on mobile, Game.ts handles auto-aim
+    if (!input.isTouchDevice) {
+      const toMouse = vecSub(input.mousePos, this.pos);
+      this.angle = vecAngle(toMouse);
+    }
   }
 
-  /** Attempt to dash in current facing direction. Returns true if dash happened. */
-  tryDash(): boolean {
-    if (this.dashCooldown > 0 || this.stats.dashDistMult <= 1) return false;
+  /** Attempt to dash in current facing direction. Returns dash result with flashbang info. */
+  tryDash(): DashResult {
+    if (this.dashCooldown > 0) return { dashed: false, flashbangRadius: 0 };
+
     this.dashCooldown = this.DASH_COOLDOWN_TIME;
     const dist = this.DASH_BASE_DISTANCE * this.stats.dashDistMult;
     const dashDir = vecFromAngle(this.angle);
@@ -93,30 +109,34 @@ export class Player extends Entity {
     this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
     this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
 
-    // Phase shift invincibility
-    if (this.stats.dashInvincibility > 0) {
-      this.invincibleTimer = Math.max(
-        this.invincibleTimer,
-        this.stats.dashInvincibility,
-      );
-    }
+    // Base i-frames + Phase Shift bonus
+    const totalInvincibility =
+      this.DASH_BASE_INVINCIBILITY + this.stats.dashInvincibility;
+    this.invincibleTimer = Math.max(this.invincibleTimer, totalInvincibility);
 
-    return true;
+    // Ring radius = base + EMP Burst upgrade bonus
+    const ringRadius = this.DASH_BASE_RING_RADIUS + this.stats.flashbangRadius;
+    return { dashed: true, flashbangRadius: ringRadius };
   }
 
   /**
    * Take damage from enemy bullet/collision.
    * Returns actual damage dealt after armor, shields, and evasion.
+   * Also returns whether the player died.
    */
-  takeDamage(amount: number): { actualDamage: number; evaded: boolean } {
+  takeDamage(amount: number): {
+    actualDamage: number;
+    evaded: boolean;
+    playerDied: boolean;
+  } {
     // Invincibility check
     if (this.invincibleTimer > 0) {
-      return { actualDamage: 0, evaded: true };
+      return { actualDamage: 0, evaded: true, playerDied: false };
     }
 
     // Evasion check
     if (Math.random() < this.stats.evasionChance) {
-      return { actualDamage: 0, evaded: true };
+      return { actualDamage: 0, evaded: true, playerDied: false };
     }
 
     // Armor reduction
@@ -126,16 +146,30 @@ export class Player extends Entity {
     if (this.shields > 0) {
       this.shields--;
       this.invincibleTimer = 0.5; // brief invincibility after shield hit
-      return { actualDamage: 0, evaded: false };
+      return { actualDamage: 0, evaded: false, playerDied: false };
     }
 
-    // No shields left — take the hit
-    this.invincibleTimer = 1.0;
-    return { actualDamage: dmg, evaded: false };
+    // No shields left — take HP damage
+    this.hp = Math.max(0, this.hp - 1);
+    this.invincibleTimer = 1.5; // longer invincibility on HP damage
+    return { actualDamage: dmg, evaded: false, playerDied: this.hp <= 0 };
   }
 
   healShield(amount: number = 1) {
     this.shields = Math.min(this.maxShields, this.shields + amount);
+  }
+
+  get isDead(): boolean {
+    return this.hp <= 0;
+  }
+
+  get dashReady(): boolean {
+    return this.dashCooldown <= 0;
+  }
+
+  get dashCooldownRatio(): number {
+    if (this.dashCooldown <= 0) return 1;
+    return 1 - this.dashCooldown / this.DASH_COOLDOWN_TIME;
   }
 
   canFire(): boolean {
@@ -177,63 +211,56 @@ export class Player extends Entity {
     ctx.translate(this.pos.x, this.pos.y);
     ctx.rotate(this.angle);
 
-    // Galaga-style outlined ship
-    ctx.lineWidth = 1.5;
-    ctx.lineJoin = "miter";
+    // Sleek minimal black/red ship — small, angular, no cartoon outlines
+    const s = 0.55; // scale factor (much smaller)
 
-    // Engine exhaust flicker
-    const flickerLen = 4 + Math.random() * 4;
-    ctx.strokeStyle = COLORS.playerEngine;
+    // Engine glow (dim red thruster)
+    const flickerLen = 2 + Math.random() * 3;
+    ctx.fillStyle = "#880000";
+    ctx.globalAlpha = 0.6;
     ctx.beginPath();
-    ctx.moveTo(-9, -3);
-    ctx.lineTo(-9 - flickerLen, 0);
-    ctx.lineTo(-9, 3);
-    ctx.stroke();
-
-    // Main hull outline (pointed fighter shape)
-    ctx.strokeStyle = COLORS.player;
-    ctx.beginPath();
-    ctx.moveTo(14, 0); // nose
-    ctx.lineTo(4, -4); // upper nose taper
-    ctx.lineTo(-2, -4); // upper body
-    ctx.lineTo(-4, -9); // upper wing tip
-    ctx.lineTo(-8, -9); // wing back
-    ctx.lineTo(-6, -4); // wing join
-    ctx.lineTo(-9, -3); // rear upper
-    ctx.lineTo(-9, 3); // rear lower
-    ctx.lineTo(-6, 4); // wing join
-    ctx.lineTo(-8, 9); // wing back
-    ctx.lineTo(-4, 9); // lower wing tip
-    ctx.lineTo(-2, 4); // lower body
-    ctx.lineTo(4, 4); // lower nose taper
+    ctx.moveTo(-6 * s, -2 * s);
+    ctx.lineTo(-6 * s - flickerLen * s, 0);
+    ctx.lineTo(-6 * s, 2 * s);
     ctx.closePath();
-    ctx.stroke();
+    ctx.fill();
+    ctx.globalAlpha = 1;
 
-    // Inner detail lines (cockpit canopy)
-    ctx.strokeStyle = "#ffffff";
-    ctx.lineWidth = 1;
+    // Main hull (filled dark shape)
+    ctx.fillStyle = "#111111";
     ctx.beginPath();
-    ctx.moveTo(10, 0);
-    ctx.lineTo(4, -2);
-    ctx.lineTo(4, 2);
+    ctx.moveTo(10 * s, 0);           // nose tip
+    ctx.lineTo(2 * s, -3 * s);       // upper nose
+    ctx.lineTo(-3 * s, -5 * s);      // upper wing root
+    ctx.lineTo(-6 * s, -6 * s);      // wing tip
+    ctx.lineTo(-5 * s, -2.5 * s);    // wing inner
+    ctx.lineTo(-6 * s, -1.5 * s);    // rear notch
+    ctx.lineTo(-6 * s, 1.5 * s);     // rear notch
+    ctx.lineTo(-5 * s, 2.5 * s);     // wing inner
+    ctx.lineTo(-6 * s, 6 * s);       // wing tip
+    ctx.lineTo(-3 * s, 5 * s);       // lower wing root
+    ctx.lineTo(2 * s, 3 * s);        // lower nose
     ctx.closePath();
+    ctx.fill();
+
+    // Red edge trim (thin lines for detail)
+    ctx.strokeStyle = "#cc2222";
+    ctx.lineWidth = 0.8;
+    ctx.stroke(); // outlines the hull path above
+
+    // Red center stripe (cockpit line)
+    ctx.strokeStyle = "#ff3333";
+    ctx.lineWidth = 0.6;
+    ctx.beginPath();
+    ctx.moveTo(8 * s, 0);
+    ctx.lineTo(-2 * s, 0);
     ctx.stroke();
 
-    // Wing stripe accents
-    ctx.strokeStyle = COLORS.playerEngine;
-    ctx.lineWidth = 1;
+    // Nose tip glow dot
+    ctx.fillStyle = "#ff2222";
     ctx.beginPath();
-    ctx.moveTo(-3, -5);
-    ctx.lineTo(-6, -8);
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(-3, 5);
-    ctx.lineTo(-6, 8);
-    ctx.stroke();
-
-    // Center dot
-    ctx.fillStyle = COLORS.player;
-    ctx.fillRect(1, -1, 2, 2);
+    ctx.arc(9 * s, 0, 0.8 * s, 0, Math.PI * 2);
+    ctx.fill();
 
     ctx.restore();
 
@@ -251,6 +278,26 @@ export class Player extends Entity {
         PLAYER_COLLISION_RADIUS + 6,
         -Math.PI / 2,
         -Math.PI / 2 + shieldArc,
+      );
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.restore();
+    }
+
+    // Dash cooldown indicator (small arc under player)
+    if (this.dashCooldown > 0) {
+      ctx.save();
+      ctx.strokeStyle = COLORS.dashCooldown;
+      ctx.lineWidth = 2;
+      ctx.globalAlpha = 0.4;
+      const dashArc = this.dashCooldownRatio * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(
+        this.pos.x,
+        this.pos.y,
+        PLAYER_COLLISION_RADIUS + 10,
+        -Math.PI / 2,
+        -Math.PI / 2 + dashArc,
       );
       ctx.stroke();
       ctx.globalAlpha = 1;

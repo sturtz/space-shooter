@@ -1,5 +1,6 @@
 import { Renderer } from "../rendering/Renderer";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
+import { vec2 } from "../utils/Math";
 
 export interface HUDData {
   roundTimer: number;
@@ -11,9 +12,14 @@ export interface HUDData {
   level: number;
   mothershipHp: number;
   mothershipMaxHp: number;
+  playerHp: number;
+  playerMaxHp: number;
   playerShields: number;
   playerMaxShields: number;
-  streakCoinBonus: number; // actual multiplier from econ_combo
+  streakCoinBonus: number;
+  dashReady: boolean;
+  dashCooldownRatio: number;
+  isMobile: boolean;
 }
 
 export class HUD {
@@ -78,8 +84,33 @@ export class HUD {
       "top",
     );
 
-    // Player shields (below level, left side)
+    // === PLAYER HP (prominent display, left side) ===
+    const hpY = 42;
+    const heartSize = 14;
+    const heartSpacing = 18;
+
+    // HP label
+    renderer.drawTextOutline(
+      "HP",
+      10,
+      hpY,
+      COLORS.playerHp,
+      "#000",
+      11,
+      "left",
+      "top",
+    );
+
+    // Draw hearts for HP
+    for (let i = 0; i < data.playerMaxHp; i++) {
+      const hx = 30 + i * heartSpacing;
+      const filled = i < data.playerHp;
+      this.drawHeart(ctx, hx, hpY + heartSize / 2 + 1, heartSize / 2, filled);
+    }
+
+    // Player shields (below HP)
     if (data.playerMaxShields > 0) {
+      const shieldY = hpY + 18;
       let shieldStr = "🛡";
       for (let i = 0; i < data.playerMaxShields; i++) {
         shieldStr += i < data.playerShields ? " ●" : " ○";
@@ -87,8 +118,35 @@ export class HUD {
       renderer.drawTextOutline(
         shieldStr,
         10,
-        40,
+        shieldY,
         COLORS.shield,
+        "#000",
+        10,
+        "left",
+        "top",
+      );
+    }
+
+    // Dash indicator (below shields/HP)
+    const dashY = data.playerMaxShields > 0 ? hpY + 36 : hpY + 18;
+    if (data.dashReady) {
+      renderer.drawTextOutline(
+        "⟿ DASH READY",
+        10,
+        dashY,
+        COLORS.dashReady,
+        "#000",
+        10,
+        "left",
+        "top",
+      );
+    } else {
+      const pct = Math.floor(data.dashCooldownRatio * 100);
+      renderer.drawTextOutline(
+        `⟿ DASH ${pct}%`,
+        10,
+        dashY,
+        COLORS.dashCooldown,
         "#000",
         10,
         "left",
@@ -129,5 +187,57 @@ export class HUD {
       "right",
       "bottom",
     );
+
+    // Mobile controls hint
+    if (data.isMobile) {
+      renderer.drawTextOutline(
+        "TAP RIGHT → DASH",
+        GAME_WIDTH - 10,
+        GAME_HEIGHT - 40,
+        COLORS.mobileControl,
+        "#000",
+        9,
+        "right",
+        "bottom",
+      );
+    }
+  }
+
+  /** Draw a heart shape at the given position */
+  private drawHeart(
+    ctx: CanvasRenderingContext2D,
+    cx: number,
+    cy: number,
+    size: number,
+    filled: boolean,
+  ) {
+    ctx.save();
+    ctx.translate(cx, cy);
+
+    ctx.beginPath();
+    // Heart shape using bezier curves
+    const s = size;
+    ctx.moveTo(0, s * 0.4);
+    ctx.bezierCurveTo(-s * 0.1, s * 0.1, -s, s * 0.1, -s, -s * 0.3);
+    ctx.bezierCurveTo(-s, -s * 0.8, -s * 0.2, -s * 0.9, 0, -s * 0.4);
+    ctx.bezierCurveTo(s * 0.2, -s * 0.9, s, -s * 0.8, s, -s * 0.3);
+    ctx.bezierCurveTo(s, s * 0.1, s * 0.1, s * 0.1, 0, s * 0.4);
+    ctx.closePath();
+
+    if (filled) {
+      ctx.fillStyle = COLORS.playerHp;
+      ctx.fill();
+      ctx.strokeStyle = "#ff6666";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    } else {
+      ctx.fillStyle = COLORS.playerHpBg;
+      ctx.fill();
+      ctx.strokeStyle = "#662222";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+
+    ctx.restore();
   }
 }

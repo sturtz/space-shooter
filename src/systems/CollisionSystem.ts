@@ -275,16 +275,17 @@ export class CollisionSystem {
             }
           }
         } else if (result.actualDamage > 0) {
-          // Player took damage — visual feedback
-          game.renderer.shake(3);
+          // Player took HP damage — heavy visual feedback
+          game.renderer.shake(6);
           game.particles.emit(
             game.player.pos,
-            6,
+            10,
             COLORS.mothershipDamaged,
-            60,
-            0.3,
-            2,
+            80,
+            0.4,
+            3,
           );
+          game.audio.playPlayerHit();
 
           // Reflect damage back — find nearest enemy
           if (game.stats.reflectFraction > 0) {
@@ -304,6 +305,34 @@ export class CollisionSystem {
                 game.onEnemyKilled(nearestEnemy);
               }
             }
+          }
+
+          // Screen flash on HP damage
+          game.screenFlashTimer = 0.15;
+          game.screenFlashColor = "rgba(255, 0, 0, 0.3)";
+
+          // Check if player died
+          if (result.playerDied) {
+            // Big death explosion
+            game.particles.emit(
+              game.player.pos,
+              20,
+              COLORS.mothershipDamaged,
+              120,
+              0.6,
+              4,
+            );
+            game.particles.emit(
+              game.player.pos,
+              15,
+              COLORS.explosion,
+              80,
+              0.5,
+              3,
+            );
+            game.renderer.shake(10);
+            game.endRound(true);
+            return;
           }
 
           // Time penalty for player getting hit (minor)

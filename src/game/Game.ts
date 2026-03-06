@@ -10,9 +10,10 @@ import {
   saveGame,
   getDefaultSave,
 } from "../utils/SaveManager";
-import { Player } from "../entities/Player";
+import { Player, DashResult } from "../entities/Player";
 import { Mothership } from "../entities/Mothership";
 import { Bullet } from "../entities/Bullet";
+import { Missile } from "../entities/Missile";
 import { Rock } from "../entities/Rock";
 import { EnemyShip } from "../entities/EnemyShip";
 import { Enemy } from "../entities/Enemy";
@@ -25,6 +26,7 @@ import {
   vecNormalize,
   vecScale,
   vecFromAngle,
+  vecAngle,
   randomAngle,
   randomRange,
   circleCollision,
@@ -59,6 +61,15 @@ interface DamageNumber {
   vy: number;
 }
 
+interface DashRing {
+  x: number;
+  y: number;
+  currentRadius: number;
+  maxRadius: number;
+  life: number;
+  maxLife: number;
+}
+
 export class Game implements IGame {
   renderer: Renderer;
   input: InputManager;
@@ -90,13 +101,29 @@ export class Game implements IGame {
   streakTimer: number = 0;
   bossSpawned: boolean = false;
   bossDefeated: boolean = false;
+  bossEnemy: Rock | null = null;
   gameTime: number = 0;
   menuPulse: number = 0;
   paused: boolean = false;
   screenFlashTimer: number = 0;
   screenFlashColor: string = "";
   damageNumbers: DamageNumber[] = [];
+  dashRings: DashRing[] = [];
   private lastDt: number = 1 / 60;
+
+  // Circle weapon state (default weapon — synced to music beat)
+  coneFlashTimer: number = 0;
+  coneBeatCount: number = 0;
+  readonly CONE_RANGE = 45;         // pixels — circle radius around player
+  readonly CONE_FIRE_EVERY = 1;     // fire every beat
+  coneTimeSinceLastFire: number = 0; // tracks loader progress
+  coneMeasuredInterval: number = 60 / 140; // measured actual beat interval (starts at 140 BPM estimate)
+  coneLastFireTime: number = 0; // timestamp of last fire for measuring interval
+
+  // Missile weapon state (dmg branch 2 — fires every 2 beats)
+  missileBeatCount: number = 0;
+  readonly MISSILE_FIRE_EVERY = 2;  // fire every 2nd beat
+  readonly MISSILE_SPEED = 180;     // slower than bullets, tracks target
 
   // Starfield
   stars: Star[] = [];
@@ -155,9 +182,80 @@ export class Game implements IGame {
       }
       // Dash on Shift key
       if (e.key === "Shift" && this.state === "playing" && !this.paused) {
-        this.player.tryDash();
+        this.handleDash();
       }
     });
+  }
+
+  /** Handle dash attempt — short dash with expanding explosion ring */
+  handleDash() {
+    const result = this.player.tryDash();
+    if (!result.dashed) return;
+
+    const ringRadius = result.flashbangRadius; // base 60 + EMP upgrade bonus
+    const ringOrigin = { x: this.player.pos.x, y: this.player.pos.y };
+
+    // Dash sound + small trail particles
+    this.audio.playDash();
+    this.particles.emit(this.player.pos, 4, COLORS.dashReady, 30, 0.15, 1.5);
+
+    // Screen flash
+    this.screenFlashTimer = 0.08;
+    this.screenFlashColor = "rgba(100, 200, 255, 0.15)";
+    this.renderer.shake(2);
+
+    // Create expanding ring animation
+    const ringLife = 0.3; // seconds to expand
+    this.dashRings.push({
+      x: ringOrigin.x,
+      y: ringOrigin.y,
+      currentRadius: 0,
+      maxRadius: ringRadius,
+      life: ringLife,
+      maxLife: ringLife,
+    });
+
+    // Clear enemy bullets in radius (instant)
+    for (const bullet of this.enemyBullets) {
+      if (!bullet.alive) continue;
+      if (vecDist(ringOrigin, bullet.pos) <= ringRadius) {
+        this.particles.emit(bullet.pos, 2, "#ffffff", 20, 0.1, 1);
+        bullet.destroy();
+      }
+    }
+
+    // Damage enemies in radius (ring explosion deals damage)
+    const ringDamage = this.stats.damage * 0.5; // half player's damage
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      if (vecDist(ringOrigin, enemy.pos) <= ringRadius) {
+        const wasAlive = enemy.alive;
+        enemy.takeDamage(ringDamage);
+        this.spawnDamageNumber(enemy.pos.x, enemy.pos.y, ringDamage, false);
+        this.particles.emit(enemy.pos, 3, COLORS.flashbang, 20, 0.15, 1);
+        if (wasAlive && !enemy.alive) {
+          this.onEnemyKilled(enemy);
+        }
+      }
+    }
+
+    // Play flashbang sound for the ring
+    this.audio.playFlashbang();
+  }
+
+  /** Find the nearest alive enemy to the player */
+  findNearestEnemy(): Enemy | null {
+    let nearest: Enemy | null = null;
+    let nearestDist = Infinity;
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const d = vecDist(this.player.pos, enemy.pos);
+      if (d < nearestDist) {
+        nearestDist = d;
+        nearest = enemy;
+      }
+    }
+    return nearest;
   }
 
   startRun() {
@@ -179,9 +277,132 @@ export class Game implements IGame {
     this.streakTimer = 0;
     this.bossSpawned = false;
     this.bossDefeated = false;
+    this.bossEnemy = null;
+    this.dashRings = [];
+    this.coneFlashTimer = 0;
     this.particles.clear();
     this.spawner.reset(this);
     this.state = "playing";
+
+    // Start the cone weapon music track — cone fires every beat
+    this.coneBeatCount = 0;
+    this.missileBeatCount = 0;
+    this.audio.startConeTrack(() => {
+      this.coneBeatCount++;
+      if (this.coneBeatCount % this.CONE_FIRE_EVERY === 0) {
+        this.fireConeWeapon();
+      }
+      // Missile fires every 2nd beat (if upgrade unlocked)
+      this.missileBeatCount++;
+      if (this.missileBeatCount % this.MISSILE_FIRE_EVERY === 0) {
+        this.fireMissile();
+      }
+    });
+  }
+
+  /** Missile weapon — fires a homing missile every 2 beats toward nearest enemy.
+   *  Unlocked via dmg_missile upgrade. Deals half base damage. */
+  fireMissile() {
+    if (this.state !== "playing" || this.paused) return;
+    if (this.stats.missileLevel <= 0) return;
+
+    const target = this.findNearestEnemy();
+    if (!target) return;
+
+    const missileDmg = this.stats.damage * 0.5; // half base damage
+    const dir = vecNormalize(vecSub(target.pos, this.player.pos));
+    const spawnX = this.player.pos.x + dir.x * 12;
+    const spawnY = this.player.pos.y + dir.y * 12;
+
+    // Fire 1 missile per level (up to missileLevel missiles)
+    const count = Math.min(this.stats.missileLevel, 3); // cap at 3 simultaneous
+    for (let i = 0; i < count; i++) {
+      // Slight angle spread for multiple missiles
+      const spread = count > 1 ? (i - (count - 1) / 2) * 0.3 : 0;
+      const angle = vecAngle(dir) + spread;
+      const missileDir = vecFromAngle(angle);
+
+      const missile = new Missile(
+        spawnX,
+        spawnY,
+        missileDir,
+        this.MISSILE_SPEED,
+        missileDmg,
+        target,
+      );
+      this.bullets.push(missile); // missiles go in bullets array for collision handling
+    }
+
+    // Launch sound / visual
+    this.particles.emitDirectional(
+      vec2(spawnX, spawnY),
+      vecAngle(dir),
+      0.4,
+      2,
+      "#ff4466",
+      50,
+      0.1,
+      1.5,
+    );
+  }
+
+  /** Circle weapon — fires automatically on every music beat (140 BPM).
+   *  Damages all enemies within a circle around the player. */
+  fireConeWeapon() {
+    if (this.state !== "playing" || this.paused) return;
+
+    // Measure actual interval between beats for loader sync
+    const now = performance.now() / 1000;
+    if (this.coneLastFireTime > 0) {
+      const measured = now - this.coneLastFireTime;
+      if (measured > 0.1 && measured < 2) { // sanity check
+        this.coneMeasuredInterval = measured;
+      }
+    }
+    this.coneLastFireTime = now;
+
+    // Reset loader timer and trigger flash
+    this.coneTimeSinceLastFire = 0;
+    this.coneFlashTimer = 0.12;
+
+    const coneDmg = this.stats.damage;
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+      const dist = vecDist(this.player.pos, enemy.pos);
+      if (dist > this.CONE_RANGE) continue;
+
+      // Full circle AoE — no angle check needed
+      const isCrit = Math.random() < this.stats.critChance;
+      const dmg = isCrit ? coneDmg * this.stats.critMultiplier : coneDmg;
+      const wasAlive = enemy.alive;
+      enemy.takeDamage(dmg);
+      this.spawnDamageNumber(enemy.pos.x, enemy.pos.y, dmg, isCrit);
+
+      // Hit particles — white burst toward enemy
+      this.particles.emit(enemy.pos, 3, "#ffffff", 40, 0.15, 1.5);
+
+      if (wasAlive && !enemy.alive) {
+        this.onEnemyKilled(enemy);
+      }
+    }
+
+    // Ring burst particles (always, even if no enemies hit)
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const px = this.player.pos.x + Math.cos(a) * this.CONE_RANGE * 0.7;
+      const py = this.player.pos.y + Math.sin(a) * this.CONE_RANGE * 0.7;
+      this.particles.emitDirectional(
+        vec2(px, py),
+        a,
+        0.3,
+        1,
+        "#ccccdd",
+        30,
+        0.08,
+        1,
+      );
+    }
   }
 
   update(dt: number) {
@@ -221,12 +442,9 @@ export class Game implements IGame {
   }
 
   updatePlaying(dt: number) {
-    // Timer
+    // Timer — counts down but doesn't end the round; must kill boss to advance
     this.roundTimer -= dt;
-    if (this.roundTimer <= 0) {
-      this.endRound(false);
-      return;
-    }
+    if (this.roundTimer < 0) this.roundTimer = 0;
 
     // Streak decay
     if (this.streakTimer > 0) {
@@ -240,54 +458,30 @@ export class Game implements IGame {
     this.player.move(this.input, dt);
     this.player.update(dt);
 
-    // Firing
-    if (this.input.isFiring) {
-      const directions = this.player.fire();
-      if (directions.length > 0) {
-        this.audio.playShoot();
-      }
-      for (const dir of directions) {
-        const isCrit = Math.random() < this.stats.critChance;
-        const dmg = isCrit
-          ? this.stats.damage * this.stats.critMultiplier
-          : this.stats.damage;
-        const bullet = new Bullet(
-          this.player.pos.x + dir.x * 10,
-          this.player.pos.y + dir.y * 10,
-          dir,
-          this.stats.bulletSpeed,
-          dmg,
-          isCrit,
-          this.stats.pierceCount,
-        );
-        this.bullets.push(bullet);
-      }
-      // Muzzle flash
-      if (directions.length > 0) {
-        const noseX = this.player.pos.x + Math.cos(this.player.angle) * 14;
-        const noseY = this.player.pos.y + Math.sin(this.player.angle) * 14;
-        this.particles.emitDirectional(
-          vec2(noseX, noseY),
-          this.player.angle,
-          0.25,
-          3,
-          "#ffffff",
-          80,
-          0.1,
-          2,
-        );
-        this.particles.emitDirectional(
-          vec2(noseX, noseY),
-          this.player.angle,
-          0.4,
-          2,
-          COLORS.bullet,
-          60,
-          0.15,
-          1.5,
-        );
+    // Mobile auto-aim: point player toward nearest enemy
+    if (this.input.isTouchDevice) {
+      const nearest = this.findNearestEnemy();
+      if (nearest) {
+        const toEnemy = vecSub(nearest.pos, this.player.pos);
+        this.player.angle = vecAngle(toEnemy);
       }
     }
+
+    // Mobile dash (tap right side of screen)
+    if (this.input.consumeDash() && this.state === "playing") {
+      this.handleDash();
+    }
+
+    // Circle weapon fires automatically on beat (handled by audio callback).
+    // Track loader progress and decay flash timer
+    this.coneTimeSinceLastFire += dt;
+    if (this.coneFlashTimer > 0) {
+      this.coneFlashTimer -= dt;
+    }
+
+    // NOTE: Bullet firing disabled — cone is the default weapon.
+    // Bullet weapon kept for future upgrade unlock.
+    // if (this.input.isFiring) { ... }
 
     // Update entities
     this.mothership.update(dt);
@@ -309,8 +503,25 @@ export class Game implements IGame {
     });
     this.particles.update(dt);
 
-    // Spawn rate ramps within a round (Issue #18 fix)
+    // Update dash rings
+    for (let i = this.dashRings.length - 1; i >= 0; i--) {
+      const ring = this.dashRings[i];
+      ring.life -= dt;
+      const progress = 1 - ring.life / ring.maxLife; // 0→1
+      ring.currentRadius = ring.maxRadius * progress;
+      if (ring.life <= 0) {
+        this.dashRings.splice(i, 1);
+      }
+    }
+
+    // Boss spawn at 15 seconds elapsed
     const elapsed = this.roundDuration - this.roundTimer;
+    if (!this.bossSpawned && elapsed >= 15) {
+      this.spawnMegaRock();
+      this.bossSpawned = true;
+    }
+
+    // Spawn rate ramps within a round (Issue #18 fix)
     const rampFactor = 1 - (elapsed / this.roundDuration) * 0.4; // speeds up to 60% of base by end
     const currentSpawnRate = this.spawnRate * Math.max(0.4, rampFactor);
 
@@ -374,7 +585,41 @@ export class Game implements IGame {
     });
   }
 
+  /** Spawn a mega rock boss — huge, slow, high HP */
+  spawnMegaRock() {
+    const angle = randomAngle();
+    const dist = 350;
+    const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
+    const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
+    const bossHP = 15 + this.save.currentLevel * 5; // scales with level
+    const boss = new Rock(x, y, bossHP, 15, true); // slow speed, big rock
+    boss.radius = 30; // extra large
+    boss.coinValue = 10;
+    this.bossEnemy = boss;
+    this.enemies.push(boss);
+
+    // Announce boss
+    this.screenFlashTimer = 0.15;
+    this.screenFlashColor = "rgba(255, 50, 50, 0.2)";
+    this.renderer.shake(5);
+  }
+
   onEnemyKilled(enemy: Enemy) {
+    // Check if boss was killed
+    if (this.bossEnemy && enemy === this.bossEnemy) {
+      this.bossDefeated = true;
+      this.bossEnemy = null;
+      // Big boss explosion
+      this.particles.emit(enemy.pos, 30, "#ff4444", 150, 0.6, 4);
+      this.particles.emit(enemy.pos, 20, "#ffaa00", 120, 0.5, 3);
+      this.renderer.shake(8);
+      this.screenFlashTimer = 0.2;
+      this.screenFlashColor = "rgba(255, 255, 255, 0.3)";
+      // Boss killed = round won, level up
+      this.endRound(false);
+      return;
+    }
+
     // Explosion particles
     this.particles.emit(enemy.pos, 12, COLORS.explosion, 100, 0.4, 3);
     this.particles.emit(enemy.pos, 6, COLORS.particle, 60, 0.3, 2);
@@ -390,7 +635,7 @@ export class Game implements IGame {
     const baseValue = enemy.coinValue;
     const dropMult = this.stats.coinDropMultiplier;
     const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.05;
+      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.10;
     let value = Math.max(1, Math.round(baseValue * dropMult * streakBonus));
 
     // Lucky drop check
@@ -404,6 +649,9 @@ export class Game implements IGame {
   }
 
   endRound(mothershipDestroyed: boolean) {
+    // Stop cone attack music if playing
+    this.audio.stopConeTrack();
+
     if (!mothershipDestroyed) {
       // Timer ran out — survived! Level up
       this.save.currentLevel++;
@@ -500,7 +748,7 @@ export class Game implements IGame {
     const blink = Math.sin(this.menuPulse * 3) > 0;
     if (blink) {
       this.renderer.drawTextOutline(
-        "[ CLICK TO START ]",
+        "[ TAP / CLICK TO START ]",
         cx,
         cy + 30,
         "#fff",
@@ -511,15 +759,28 @@ export class Game implements IGame {
       );
     }
 
-    this.renderer.drawText(
-      "WASD to move  •  Mouse to aim  •  Click to fire  •  Shift to dash",
-      cx,
-      cy + 100,
-      COLORS.textSecondary,
-      12,
-      "center",
-      "middle",
-    );
+    // Controls info — adapt for mobile
+    if (this.input.isTouchDevice) {
+      this.renderer.drawText(
+        "Left side: Move joystick  •  Right side: Dash  •  Auto-shoot",
+        cx,
+        cy + 100,
+        COLORS.textSecondary,
+        11,
+        "center",
+        "middle",
+      );
+    } else {
+      this.renderer.drawText(
+        "WASD to move  •  Mouse to aim  •  Cone auto-fires to beat  •  Shift to dash",
+        cx,
+        cy + 100,
+        COLORS.textSecondary,
+        12,
+        "center",
+        "middle",
+      );
+    }
 
     this.renderer.drawText(
       "Destroy enemies → Collect coins → Upgrade → Repeat",
@@ -572,8 +833,96 @@ export class Game implements IGame {
     // Player
     this.player.render(this.renderer);
 
+    // Circle weapon visual — white ring around player with loader arc
+    {
+      const ctx = this.renderer.ctx;
+      const px = this.player.pos.x;
+      const py = this.player.pos.y;
+      const range = this.CONE_RANGE;
+      const isFiring = this.coneFlashTimer > 0;
+      const flashPower = isFiring ? (this.coneFlashTimer / 0.12) : 0;
+
+      ctx.save();
+
+      // === Loader arc (fills up between beats, white, like a cooldown spinner) ===
+      const loaderProgress = Math.min(1, this.coneTimeSinceLastFire / this.coneMeasuredInterval);
+      const loaderArc = loaderProgress * Math.PI * 2;
+      const loaderRadius = 18; // small, tight around the player
+
+      // Background ring (dim, shows full circle outline)
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.arc(px, py, loaderRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Progress arc (bright white, fills clockwise from top)
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(px, py, loaderRadius, -Math.PI / 2, -Math.PI / 2 + loaderArc);
+      ctx.stroke();
+
+      // === Fire flash — bright white circle burst on beat ===
+      if (isFiring) {
+        // Expanding flash ring
+        const flashRadius = range * (1 - flashPower * 0.3); // slight contraction
+        ctx.globalAlpha = flashPower * 0.4;
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(px, py, flashRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Inner glow fill
+        const gradient = ctx.createRadialGradient(px, py, 0, px, py, range);
+        gradient.addColorStop(0, `rgba(255, 255, 255, ${flashPower * 0.15})`);
+        gradient.addColorStop(0.5, `rgba(200, 200, 220, ${flashPower * 0.06})`);
+        gradient.addColorStop(1, "rgba(150, 150, 170, 0)");
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(px, py, range, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      ctx.restore();
+    }
+
     // Particles on top
     this.particles.render(this.renderer);
+
+    // Dash explosion rings
+    for (const ring of this.dashRings) {
+      const ctx = this.renderer.ctx;
+      const progress = 1 - ring.life / ring.maxLife; // 0→1
+      const alpha = (1 - progress) * 0.7; // fade out as it expands
+      ctx.save();
+      ctx.globalAlpha = alpha;
+
+      // Outer ring stroke (cyan/white)
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 3 * (1 - progress) + 1; // thicker at start, thinner as it expands
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, ring.currentRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner glow fill
+      const gradient = ctx.createRadialGradient(
+        ring.x, ring.y, ring.currentRadius * 0.7,
+        ring.x, ring.y, ring.currentRadius,
+      );
+      gradient.addColorStop(0, "rgba(100, 220, 255, 0)");
+      gradient.addColorStop(1, `rgba(100, 220, 255, ${alpha * 0.3})`);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(ring.x, ring.y, ring.currentRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.restore();
+    }
 
     // Damage numbers
     for (const dn of this.damageNumbers) {
@@ -600,7 +949,7 @@ export class Game implements IGame {
 
     // Compute actual streak coin bonus for HUD (Issue #19 fix)
     const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.05;
+      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.10;
 
     // HUD
     this.hud.render(this.renderer, {
@@ -613,10 +962,82 @@ export class Game implements IGame {
       level: this.save.currentLevel,
       mothershipHp: this.mothership.hp,
       mothershipMaxHp: this.mothership.maxHp,
+      playerHp: this.player.hp,
+      playerMaxHp: this.player.maxHp,
       playerShields: this.player.shields,
       playerMaxShields: this.player.maxShields,
       streakCoinBonus: streakBonus,
+      dashReady: this.player.dashReady,
+      dashCooldownRatio: this.player.dashCooldownRatio,
+      isMobile: this.input.isTouchDevice,
     });
+
+    // Mobile controls overlay
+    if (this.input.isTouchDevice) {
+      this.renderMobileControls();
+    }
+  }
+
+  /** Render virtual joystick and dash zone indicators for mobile */
+  renderMobileControls() {
+    const ctx = this.renderer.ctx;
+
+    // Virtual joystick
+    if (this.input.joystickActive) {
+      const center = this.input.joystickCenter;
+      const thumb = this.input.joystickThumb;
+
+      // Outer ring
+      ctx.save();
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(center.x, center.y, 35, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Thumb
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(thumb.x, thumb.y, 12, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Dash button hint (right side)
+    const dashX = GAME_WIDTH - 60;
+    const dashY = GAME_HEIGHT / 2;
+    ctx.save();
+    ctx.globalAlpha = this.player.dashReady ? 0.25 : 0.1;
+    ctx.strokeStyle = this.player.dashReady ? COLORS.dashReady : COLORS.dashCooldown;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(dashX, dashY, 25, 0, Math.PI * 2);
+    ctx.stroke();
+
+    if (this.player.dashReady) {
+      ctx.globalAlpha = 0.3;
+      this.renderer.drawText(
+        "DASH",
+        dashX,
+        dashY,
+        COLORS.dashReady,
+        10,
+        "center",
+        "middle",
+      );
+    } else {
+      // Show cooldown arc
+      ctx.globalAlpha = 0.2;
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 3;
+      const arc = this.player.dashCooldownRatio * Math.PI * 2;
+      ctx.beginPath();
+      ctx.arc(dashX, dashY, 25, -Math.PI / 2, -Math.PI / 2 + arc);
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   renderPauseOverlay() {
@@ -653,11 +1074,16 @@ export class Game implements IGame {
     this.renderer.ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     this.renderer.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
+    // Check if player died
+    const playerDied = this.player && this.player.isDead;
+    const title = playerDied ? "SHIP DESTROYED" : "ROUND OVER";
+    const titleColor = playerDied ? "#ff4444" : COLORS.mothershipDamaged;
+
     this.renderer.drawTextOutline(
-      "ROUND OVER",
+      title,
       cx,
       cy - 100,
-      COLORS.mothershipDamaged,
+      titleColor,
       "#000",
       32,
       "center",
@@ -707,7 +1133,7 @@ export class Game implements IGame {
     const blink = Math.sin(this.gameTime * 3) > 0;
     if (blink) {
       this.renderer.drawText(
-        "[ CLICK TO CONTINUE ]",
+        "[ TAP / CLICK TO CONTINUE ]",
         cx,
         cy + 80,
         "#fff",

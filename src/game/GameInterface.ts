@@ -44,6 +44,8 @@ export interface IGame {
   roundKills: number;
   killStreak: number;
   streakTimer: number;
+  screenFlashTimer: number;
+  screenFlashColor: string;
 
   startRun(): void;
   endRound(mothershipDestroyed: boolean): void;

@@ -48,11 +48,13 @@ export interface PlayerStats {
   slowAuraFactor: number;
   counterDmgMult: number;
   // Player health/shields
+  playerHp: number;
   playerShields: number;
   shieldRegenInterval: number; // seconds between regen ticks, 0 = no regen
   armorReduction: number; // fraction of damage reduced
   reflectFraction: number;
   lifestealChance: number;
+  flashbangRadius: number;
   // Mothership extras
   msRegenInterval: number;
   msBarrierHits: number;
@@ -61,6 +63,8 @@ export interface PlayerStats {
   turretDamageMult: number;
   // Economy extras
   overtimeBonus: number;
+  // Missile weapon (dmg branch 2)
+  missileLevel: number;
 }
 
 export class UpgradeManager {
@@ -133,13 +137,13 @@ export class UpgradeManager {
 
     // === DAMAGE ===
     let damage = PLAYER_BASE_DAMAGE;
-    damage *= 1 + this.getLevel("dmg_core") * 0.15;
+    damage *= 1 + this.getLevel("dmg_core") * 0.50;
     damage *= 1 + this.getLevel("guns_caliber") * 0.25;
     damage *= starPower;
 
     // === MOVEMENT ===
     let moveSpeed = PLAYER_BASE_SPEED;
-    moveSpeed *= 1 + this.getLevel("move_core") * 0.1;
+    moveSpeed *= 1 + this.getLevel("move_core") * 0.50;
     moveSpeed *= starSpeed;
 
     // === FIRE RATE ===
@@ -154,7 +158,7 @@ export class UpgradeManager {
 
     // === DURATION ===
     let roundDuration = BASE_ROUND_DURATION;
-    roundDuration += this.getLevel("econ_duration") * 1.5;
+    roundDuration += this.getLevel("econ_duration") * 3.0;
     roundDuration += starEndurance;
 
     // === MOTHERSHIP ===
@@ -174,7 +178,8 @@ export class UpgradeManager {
 
     const coinDropMult = coinValueMult;
 
-    const enemySpawnMult = 1;
+    // Enemy density scales 50% per game level
+    const enemySpawnMult = 1 + (this.save.currentLevel - 1) * 0.50;
 
     // === CRIT ===
     const critChance = this.getLevel("dmg_crit") * 0.05;
@@ -223,6 +228,12 @@ export class UpgradeManager {
     const armorReduction = this.getLevel("health_armor") * 0.1;
     const reflectFraction = this.getLevel("health_reflect") * 0.15;
 
+    // === PLAYER HP ===
+    const playerHp = 1; // base 1 HP, shields serve as extra health
+
+    // === FLASHBANG / EMP BURST ===
+    const flashbangRadius = this.getLevel("move_emp") * 40;
+
     // === LIFESTEAL ===
     const lifestealChance = this.getLevel("health_lifesteal") * 0.02;
 
@@ -242,6 +253,9 @@ export class UpgradeManager {
 
     // === OVERTIME ===
     const overtimeBonus = this.getLevel("econ_overtime") * 0.15;
+
+    // === MISSILE ===
+    const missileLevel = this.getLevel("dmg_missile");
 
     return {
       damage,
@@ -270,17 +284,20 @@ export class UpgradeManager {
       slowAuraRange,
       slowAuraFactor,
       counterDmgMult,
+      playerHp,
       playerShields,
       shieldRegenInterval,
       armorReduction,
       reflectFraction,
       lifestealChance,
+      flashbangRadius,
       msRegenInterval,
       msBarrierHits,
       msBarrierCooldown,
       turretLevel,
       turretDamageMult,
       overtimeBonus,
+      missileLevel,
     };
   }
 

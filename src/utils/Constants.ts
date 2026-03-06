@@ -5,10 +5,10 @@ export const GAME_WIDTH = 900;
 export const GAME_HEIGHT = 600;
 
 // Player
-export const PLAYER_BASE_SPEED = 150; // pixels/sec
+export const PLAYER_BASE_SPEED = 75; // pixels/sec (slow, deliberate)
 export const PLAYER_BASE_FIRE_RATE = 0.4; // seconds between shots
 export const PLAYER_BASE_DAMAGE = 1;
-export const PLAYER_COLLISION_RADIUS = 6;
+export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
 
 // Mothership
 export const MOTHERSHIP_COLLISION_RADIUS = 14;
@@ -82,4 +82,11 @@ export const COLORS = {
   particle: "#ffaa00",
   explosion: "#ff6600",
   shield: "#4488ff",
+  playerHp: "#ff4444",
+  playerHpBg: "#441111",
+  dashReady: "#00ffcc",
+  dashCooldown: "#334455",
+  flashbang: "#ffffff",
+  mobileControl: "rgba(255, 255, 255, 0.15)",
+  mobileControlActive: "rgba(255, 255, 255, 0.3)",
 };

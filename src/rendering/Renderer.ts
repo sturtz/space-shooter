@@ -15,18 +15,10 @@ export class Renderer {
   }
 
   resize() {
-    const aspect = GAME_WIDTH / GAME_HEIGHT;
-    let w = window.innerWidth;
-    let h = window.innerHeight;
-    if (w / h > aspect) {
-      w = h * aspect;
-    } else {
-      h = w / aspect;
-    }
     this.canvas.width = GAME_WIDTH;
     this.canvas.height = GAME_HEIGHT;
-    this.canvas.style.width = `${w}px`;
-    this.canvas.style.height = `${h}px`;
+    this.canvas.style.width = `${window.innerWidth}px`;
+    this.canvas.style.height = `${window.innerHeight}px`;
     this.ctx.imageSmoothingEnabled = false;
   }
 
