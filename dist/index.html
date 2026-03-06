@@ -9,7 +9,10 @@
     <title>Space Shooter</title>
     <style>
       * {
-        margin: 0;
+        max-width: 1024px;
+        max-height: 768px;
+        aspect-ratio: 4 / 3;
+        margin: auto;
         padding: 0;
         box-sizing: border-box;
       }
@@ -19,7 +22,7 @@
         height: 100%;
         overflow: hidden;
         background: #000;
-        font-family: monospace;
+        font-family: ArcadeClassic, monospace;
       }
       canvas {
         display: block;
@@ -27,11 +30,15 @@
         image-rendering: pixelated;
         image-rendering: crisp-edges;
         cursor: crosshair;
+        touch-action: none;
+        -webkit-touch-callout: none;
+        -webkit-user-select: none;
+        user-select: none;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-DiAvXcgC.js"></script>
+    <script type="module" crossorigin src="/assets/index-CAbrl3Ry.js"></script>
   </head>
   <body>
-    <canvas id="game"></canvas>
+    <canvas id="game"></canvas>
   </body>
 </html>
