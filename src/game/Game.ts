@@ -34,7 +34,13 @@ import { HUD } from "../ui/HUD";
 import { UpgradeScreen } from "../ui/UpgradeScreen";
 import { AudioManager } from "../audio/AudioManager";
 import { IGame } from "./GameInterface";
-export type GameState = "menu" | "playing" | "bossReward" | "upgradeScreen" | "gameover";
+export type GameState =
+  | "menu"
+  | "tutorial"
+  | "playing"
+  | "bossReward"
+  | "upgradeScreen"
+  | "gameover";
 
 interface Star {
   x: number;
@@ -177,6 +183,9 @@ export class Game implements IGame {
   laserBeams: LaserBeam[] = [];
   pendingBombs: PendingBomb[] = [];
 
+  // Tutorial
+  tutorialStep: 1 | 2 = 1;
+
   // Starfield
   stars: Star[] = [];
   private bgCache: HTMLCanvasElement | null = null;
@@ -193,6 +202,12 @@ export class Game implements IGame {
     this.hud = new HUD();
     this.upgradeScreen = new UpgradeScreen(this.upgrades, this);
     this.audio = new AudioManager();
+
+    // Show tutorial on first load; return to menu after completing it
+    if (!this.save.tutorialSeen) {
+      this.state = "tutorial";
+      this.tutorialStep = 1;
+    }
 
     // Generate starfield
     for (let i = 0; i < 150; i++) {
@@ -213,7 +228,9 @@ export class Game implements IGame {
       const mx = (e.clientX - rect.left) * scaleX;
       const my = (e.clientY - rect.top) * scaleY;
 
-      if (this.state === "menu") {
+      if (this.state === "tutorial") {
+        this.advanceTutorial();
+      } else if (this.state === "menu") {
         this.audio.init();
         this.startRun();
       } else if (this.state === "bossReward") {
@@ -224,8 +241,8 @@ export class Game implements IGame {
       } else if (this.state === "gameover") {
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
-        // Resume menu music on upgrade screen
-        this.audio.resumeMenuMusic();
+        // Silence music on upgrade screen
+        this.audio.stopMenuMusic();
       }
     });
 
@@ -233,19 +250,24 @@ export class Game implements IGame {
     window.addEventListener("keydown", (e) => {
       if ((e.key === "Escape" || e.key.toLowerCase() === "p") && this.state === "playing") {
         this.paused = !this.paused;
+        if (this.paused) {
+          this.audio.stopMenuMusic();
+        } else {
+          this.audio.resumeMenuMusic();
+        }
       }
       // Dash on Shift key
       if (e.key === "Shift" && this.state === "playing" && !this.paused) {
         this.handleDash();
       }
-      // D key — instant forfeit, skip gameover, go straight to upgrade screen
-      if (e.key.toLowerCase() === "d" && this.state === "playing") {
+      // K key — instant forfeit, skip gameover, go straight to upgrade screen
+      if (e.key.toLowerCase() === "k" && this.state === "playing") {
         this.audio.stopConeTrack();
         this.save.lifetimeKills += this.roundKills;
         saveGame(this.save);
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
-        this.audio.resumeMenuMusic();
+        this.audio.stopMenuMusic();
       }
     });
   }
@@ -375,8 +397,8 @@ export class Game implements IGame {
     this.coneFlashTimer = 0;
     this.particles.clear();
     this.spawner.reset(this);
-    // Stop menu music when run starts
-    this.audio.stopMenuMusic();
+    // Resume music when run starts (comes from upgrade screen where it is paused)
+    this.audio.resumeMenuMusic();
     this.state = "playing";
 
     // Spawn initial small asteroids spread around the arena
@@ -525,6 +547,8 @@ export class Game implements IGame {
     }
 
     switch (this.state) {
+      case "tutorial":
+        break; // tutorial is fully static — no physics needed
       case "menu":
         break;
       case "playing":
@@ -796,7 +820,7 @@ export class Game implements IGame {
   goToUpgradeScreen() {
     this.state = "upgradeScreen";
     this.upgradeScreen.refresh();
-    this.audio.resumeMenuMusic();
+    this.audio.stopMenuMusic();
   }
 
   render() {
@@ -806,6 +830,9 @@ export class Game implements IGame {
     this.renderStarfield();
 
     switch (this.state) {
+      case "tutorial":
+        this.renderTutorial();
+        break;
       case "menu":
         this.renderMenu();
         break;
@@ -1385,9 +1412,9 @@ export class Game implements IGame {
       ctx.restore();
     }
 
-    // Dash button (right side) — larger, more visible
-    const dashX = GAME_WIDTH - 55;
-    const dashY = GAME_HEIGHT / 2;
+    // Dash button — bottom right corner
+    const dashX = GAME_WIDTH - 60;
+    const dashY = GAME_HEIGHT - 80;
     const dashR = 30;
     ctx.save();
 
@@ -1485,7 +1512,7 @@ export class Game implements IGame {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("Press P or ESC to resume", cx, cy + 18);
-    ctx.fillText("Press D to Die", cx, cy + 34);
+    ctx.fillText("Press K to Die", cx, cy + 34);
     ctx.restore();
   }
 
@@ -1807,6 +1834,337 @@ export class Game implements IGame {
     }
 
     ctx.restore();
+  }
+
+  /** Advance to the next tutorial step, or complete it and go to menu */
+  private advanceTutorial() {
+    if (this.tutorialStep === 1) {
+      this.tutorialStep = 2;
+    } else {
+      // Tutorial complete — mark as seen, save, go to menu
+      this.save.tutorialSeen = true;
+      saveGame(this.save);
+      this.state = "menu";
+    }
+  }
+
+  /** Render the 2-step first-load tutorial overlay */
+  private renderTutorial() {
+    const ctx = this.renderer.ctx;
+    const cx = GAME_WIDTH / 2;
+    const t = this.gameTime;
+
+    // Semi-transparent backdrop
+    ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    // Step indicator dots at top
+    ctx.save();
+    for (let i = 0; i < 2; i++) {
+      const active = i + 1 === this.tutorialStep;
+      ctx.globalAlpha = active ? 1 : 0.3;
+      ctx.fillStyle = active ? COLORS.player : "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx - 8 + i * 16, 30, active ? 4 : 3, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    if (this.tutorialStep === 1) {
+      // ── STEP 1: Movement ────────────────────────────────────────────────
+
+      // Title
+      ctx.save();
+      ctx.shadowColor = COLORS.player;
+      ctx.shadowBlur = 14;
+      this.renderer.drawTitleTextOutline(
+        "HOW TO PLAY",
+        cx,
+        70,
+        COLORS.player,
+        "#000",
+        22,
+        "center",
+        "middle"
+      );
+      ctx.restore();
+
+      this.renderer.drawTitleText(
+        "1 / 2  —  MOVEMENT",
+        cx,
+        100,
+        COLORS.textSecondary,
+        10,
+        "center",
+        "middle"
+      );
+
+      // Instruction panel
+      this.renderer.drawPanel(cx - 180, 128, 360, 90, {
+        bg: "rgba(8, 8, 24, 0.88)",
+        border: "rgba(0, 255, 204, 0.25)",
+        radius: 10,
+      });
+
+      ctx.save();
+      ctx.font = `bold 13px 'Orbitron', monospace`;
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("TAP & DRAG anywhere", cx, 152);
+      ctx.font = `11px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.fillText("to move your ship", cx, 172);
+      ctx.font = `10px monospace`;
+      ctx.fillStyle = "rgba(0,255,204,0.6)";
+      ctx.fillText("Auto-shoots to the music beat", cx, 196);
+      ctx.restore();
+
+      // Animated drag illustration — finger trail
+      const dragCX = cx;
+      const dragCY = 330;
+      const dragLen = 80;
+      const dragPhase = (t * 0.7) % 1; // 0→1 loop
+      const fingerX = dragCX - dragLen / 2 + dragPhase * dragLen;
+      const fingerY = dragCY;
+
+      // Trail line
+      ctx.save();
+      ctx.globalAlpha = 0.18;
+      ctx.strokeStyle = COLORS.player;
+      ctx.lineWidth = 2;
+      ctx.setLineDash([5, 6]);
+      ctx.beginPath();
+      ctx.moveTo(dragCX - dragLen / 2, dragCY);
+      ctx.lineTo(dragCX + dragLen / 2, dragCY);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+
+      // Finger circle (animated)
+      const trailAlpha = dragPhase < 0.85 ? 0.75 : 0.75 * (1 - (dragPhase - 0.85) / 0.15);
+      ctx.save();
+      ctx.globalAlpha = trailAlpha;
+      // Outer ring
+      ctx.strokeStyle = COLORS.player;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(fingerX, fingerY, 16, 0, Math.PI * 2);
+      ctx.stroke();
+      // Inner fill
+      ctx.fillStyle = COLORS.player;
+      ctx.globalAlpha = trailAlpha * 0.25;
+      ctx.beginPath();
+      ctx.arc(fingerX, fingerY, 16, 0, Math.PI * 2);
+      ctx.fill();
+      // Center dot
+      ctx.globalAlpha = trailAlpha;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(fingerX, fingerY, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Arrow indicating direction
+      const arrowAlpha = 0.35 + 0.25 * Math.sin(t * 4);
+      ctx.save();
+      ctx.globalAlpha = arrowAlpha;
+      ctx.fillStyle = COLORS.player;
+      ctx.font = `20px monospace`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("→", dragCX + dragLen / 2 + 24, dragCY);
+      ctx.restore();
+
+      // Mock ship at cursor
+      ctx.save();
+      ctx.globalAlpha = 0.5;
+      ctx.strokeStyle = COLORS.player;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(fingerX, fingerY - 16);
+      ctx.lineTo(fingerX - 10, fingerY + 10);
+      ctx.lineTo(fingerX + 10, fingerY + 10);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+
+      // Bottom hint
+      this.renderer.drawPanel(cx - 170, GAME_HEIGHT - 140, 340, 50, {
+        bg: "rgba(4, 4, 14, 0.85)",
+        border: "rgba(0,255,204,0.2)",
+        radius: 8,
+      });
+      ctx.save();
+      ctx.font = `9px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Your ship follows your finger.", cx, GAME_HEIGHT - 122);
+      ctx.fillText(
+        "Enemies fly toward the Mothership — don't let them reach it!",
+        cx,
+        GAME_HEIGHT - 106
+      );
+      ctx.restore();
+    } else {
+      // ── STEP 2: Dash ────────────────────────────────────────────────────
+
+      // Title
+      ctx.save();
+      ctx.shadowColor = COLORS.dashReady;
+      ctx.shadowBlur = 14;
+      this.renderer.drawTitleTextOutline(
+        "DASH",
+        cx,
+        70,
+        COLORS.dashReady,
+        "#000",
+        22,
+        "center",
+        "middle"
+      );
+      ctx.restore();
+
+      this.renderer.drawTitleText(
+        "2 / 2  —  DASH",
+        cx,
+        100,
+        COLORS.textSecondary,
+        10,
+        "center",
+        "middle"
+      );
+
+      // Instruction panel
+      this.renderer.drawPanel(cx - 180, 128, 360, 90, {
+        bg: "rgba(8, 8, 24, 0.88)",
+        border: "rgba(100, 220, 255, 0.25)",
+        radius: 10,
+      });
+
+      ctx.save();
+      ctx.font = `bold 13px 'Orbitron', monospace`;
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("TAP the DASH button", cx, 152);
+      ctx.font = `11px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.fillText("bottom-right corner", cx, 172);
+      ctx.font = `10px monospace`;
+      ctx.fillStyle = "rgba(100,220,255,0.6)";
+      ctx.fillText("Teleport + clear nearby bullets", cx, 196);
+      ctx.restore();
+
+      // Dash button mock at bottom-right (same position as real button)
+      const dashBtnX = GAME_WIDTH - 60;
+      const dashBtnY = GAME_HEIGHT - 80;
+      const dashR = 30;
+
+      // Animated highlight ring
+      const ringScale = 1 + 0.2 * Math.sin(t * 4);
+      ctx.save();
+      ctx.globalAlpha = 0.25 + 0.15 * Math.sin(t * 4);
+      const glow = ctx.createRadialGradient(dashBtnX, dashBtnY, 0, dashBtnX, dashBtnY, dashR * 2);
+      glow.addColorStop(0, COLORS.dashReady);
+      glow.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(dashBtnX, dashBtnY, dashR * 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // Button circle
+      ctx.save();
+      ctx.globalAlpha = 0.7;
+      ctx.strokeStyle = COLORS.dashReady;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(dashBtnX, dashBtnY, dashR * ringScale, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.globalAlpha = 0.55;
+      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.fillStyle = COLORS.dashReady;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("DASH", dashBtnX, dashBtnY);
+      ctx.restore();
+
+      // Arrow pointing to dash button from center
+      const arrowT = (t * 0.6) % 1;
+      const arrowStartX = cx + 50;
+      const arrowStartY = GAME_HEIGHT / 2 + 60;
+      const arrowEndX = dashBtnX - 50;
+      const arrowEndY = dashBtnY - 30;
+      const arrowX = arrowStartX + (arrowEndX - arrowStartX) * arrowT;
+      const arrowY = arrowStartY + (arrowEndY - arrowStartY) * arrowT;
+      const arrowFade = arrowT < 0.8 ? 0.55 : 0.55 * (1 - (arrowT - 0.8) / 0.2);
+
+      ctx.save();
+      ctx.globalAlpha = arrowFade;
+      ctx.fillStyle = COLORS.dashReady;
+      ctx.beginPath();
+      ctx.arc(arrowX, arrowY, 5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+
+      // EMP ring visual preview (pulsing ring emanating from button)
+      const empProgress = (t * 0.7) % 1;
+      const empRadius = empProgress * 90;
+      const empAlpha = (1 - empProgress) * 0.35;
+      ctx.save();
+      ctx.globalAlpha = empAlpha;
+      ctx.strokeStyle = "#44ccff";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(dashBtnX, dashBtnY, empRadius, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Bottom hint
+      this.renderer.drawPanel(cx - 170, GAME_HEIGHT - 140, 340, 50, {
+        bg: "rgba(4, 4, 14, 0.85)",
+        border: "rgba(100,220,255,0.2)",
+        radius: 8,
+      });
+      ctx.save();
+      ctx.font = `9px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("Dash teleports you & fires an EMP ring.", cx, GAME_HEIGHT - 122);
+      ctx.fillText("Clears enemy bullets • damages nearby enemies.", cx, GAME_HEIGHT - 106);
+      ctx.restore();
+    }
+
+    // "TAP TO CONTINUE" button at very bottom
+    const blink = Math.sin(t * 3) > 0;
+    const btnLabel = this.tutorialStep === 2 ? "GOT IT — LET'S GO!" : "TAP TO CONTINUE";
+    const btnColor = this.tutorialStep === 2 ? "rgba(100, 220, 255," : "rgba(0, 255, 204,";
+    const btnW = 240;
+    const btnH = 36;
+    const btnX = cx - btnW / 2;
+    const btnY = GAME_HEIGHT - 52;
+
+    if (blink) {
+      this.renderer.drawButton(btnX, btnY, btnW, btnH, btnLabel, {
+        bg: "rgba(4, 20, 16, 0.9)",
+        border: `${btnColor}0.5)`,
+        textColor: "#fff",
+        fontSize: 13,
+        radius: 10,
+        glow: `${btnColor}0.18)`,
+      });
+    } else {
+      this.renderer.drawButton(btnX, btnY, btnW, btnH, btnLabel, {
+        bg: "rgba(4, 14, 10, 0.8)",
+        border: `${btnColor}0.22)`,
+        textColor: "rgba(255,255,255,0.55)",
+        fontSize: 13,
+        radius: 10,
+      });
+    }
   }
 
   renderGameOver() {

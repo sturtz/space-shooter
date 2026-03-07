@@ -5,7 +5,13 @@ export class AudioManager {
   private initialized = false;
   private masterGain: GainNode | null = null;
 
-  // Menu background music (HTML Audio element — easiest for looping a file)
+  // Dedicated sub-gain for procedural cone synth layers.
+  // Set to 0 so fire.mp3 is the sole audible music; the cone scheduler
+  // still runs for its beat-callback (weapon timing) without competing audio.
+  private coneTrackGain: GainNode | null = null;
+
+  // Background music — fire.mp3 loops continuously through ALL game states
+  // (menu, playing, paused, upgrade screen).  Never stopped.
   private menuMusic: HTMLAudioElement;
   private menuMusicStarted = false;
 
@@ -20,7 +26,7 @@ export class AudioManager {
     // Pre-create audio element — won't play until init() is called on first interaction
     this.menuMusic = new Audio("/assets/sounds/fire.mp3");
     this.menuMusic.loop = true;
-    this.menuMusic.volume = 0.3;
+    this.menuMusic.volume = 0.2;
   }
 
   init() {
@@ -30,6 +36,12 @@ export class AudioManager {
       this.masterGain = this.ctx.createGain();
       this.masterGain.gain.value = 0.5;
       this.masterGain.connect(this.ctx.destination);
+
+      // Cone synth sub-gain (silent — fire.mp3 provides the music)
+      this.coneTrackGain = this.ctx.createGain();
+      this.coneTrackGain.gain.value = 0;
+      this.coneTrackGain.connect(this.masterGain);
+
       this.initialized = true;
     } catch (e) {
       console.warn("Web Audio not available:", e);
@@ -41,19 +53,32 @@ export class AudioManager {
         /* silently ignore if still blocked */
       });
     }
+
+    // Wire up the volume slider if present in the DOM
+    const slider = document.getElementById("music-volume") as HTMLInputElement | null;
+    if (slider) {
+      slider.value = String(this.menuMusic.volume);
+      slider.addEventListener("input", () => {
+        this.setMusicVolume(parseFloat(slider.value));
+      });
+    }
   }
 
-  /** Stop and reset menu music — call when starting a game run */
+  /** Pause background music (pause state, upgrade screen). */
   stopMenuMusic() {
     this.menuMusic.pause();
-    this.menuMusic.currentTime = 0;
   }
 
-  /** Resume menu music — call when returning to menu/upgrade screen */
+  /** Resume background music (unpausing, starting run). */
   resumeMenuMusic() {
-    if (this.menuMusicStarted && this.menuMusic.paused) {
+    if (this.menuMusicStarted) {
       this.menuMusic.play().catch(() => {});
     }
+  }
+
+  /** Set music volume (0–1). */
+  setMusicVolume(v: number) {
+    this.menuMusic.volume = Math.max(0, Math.min(1, v));
   }
 
   private get ready(): boolean {
@@ -246,10 +271,11 @@ export class AudioManager {
 
   // =========================================================================
   //  CONE ATTACK MUSIC TRACK — Dark, dreary, spacey, spooky
-  //  75 BPM (0.8s per beat) — slow, ominous pulse.
+  //  100 BPM (0.6s per beat) — music layers pulse at full tempo.
+  //  Cone weapon fires every OTHER beat (every 1.2s / half-time feel).
   //  Primary layers: deep kick, sub drone, ghostly hat, dark pad, void sweep
   //  Secondary track: variety element every 2-3 beats (chimes, stingers, etc.)
-  //  onBeat callback fires every beat for cone weapon sync.
+  //  onBeat callback fires every 2nd beat for cone weapon sync.
   // =========================================================================
 
   get isConeTrackPlaying(): boolean {
@@ -275,8 +301,9 @@ export class AudioManager {
     for (const n of this.coneTrackNodes) {
       try {
         n.stop();
-      } catch (_) {
+      } catch (_e) {
         /* already stopped */
+        console.log(_e);
       }
     }
     this.coneTrackNodes = [];
@@ -288,19 +315,19 @@ export class AudioManager {
     if (!this.coneTrackPlaying || !this.ready) return;
     const ctx = this.ctx!;
     const now = ctx.currentTime;
-    const BEAT = 60 / 40; // 40 BPM = 1.5s per beat — very slow & ominous
+    const BEAT = 60 / 100; // 100 BPM = 0.6s per beat — matches song tempo
 
     // Node cleanup
     if (this.coneTrackNodes.length > 50) {
       this.coneTrackNodes = this.coneTrackNodes.slice(-30);
     }
 
-    // Fire beat callback (cone weapon sync)
-    if (this.coneBeatCallback) {
+    const bi = this.coneBeatIndex;
+
+    // Fire beat callback every OTHER beat (half-time cone attacks = every 1.2s)
+    if (this.coneBeatCallback && bi % 2 === 0) {
       this.coneBeatCallback();
     }
-
-    const bi = this.coneBeatIndex;
 
     // --- Primary Track ---
 
@@ -361,7 +388,7 @@ export class AudioManager {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.masterGain!);
+    gain.connect(this.coneTrackGain!);
     osc.start(time);
     osc.stop(time + 0.45);
     this.coneTrackNodes.push(osc);
@@ -388,7 +415,7 @@ export class AudioManager {
     gain.gain.exponentialRampToValueAtTime(0.02, time + beatLen * 0.98);
 
     osc.connect(gain);
-    gain.connect(this.masterGain!);
+    gain.connect(this.coneTrackGain!);
     osc.start(time);
     osc.stop(time + beatLen + 0.05);
     this.coneTrackNodes.push(osc);
@@ -413,7 +440,7 @@ export class AudioManager {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.masterGain!);
+    gain.connect(this.coneTrackGain!);
     osc.start(time);
     osc.stop(time + 0.18);
     this.coneTrackNodes.push(osc);
@@ -442,7 +469,7 @@ export class AudioManager {
         gain.gain.exponentialRampToValueAtTime(0.001, padStart + padDur);
 
         osc.connect(gain);
-        gain.connect(this.masterGain!);
+        gain.connect(this.coneTrackGain!);
         osc.start(padStart);
         osc.stop(padStart + padDur + 0.05);
         this.coneTrackNodes.push(osc);
@@ -473,7 +500,7 @@ export class AudioManager {
 
     osc.connect(filter);
     filter.connect(gain);
-    gain.connect(this.masterGain!);
+    gain.connect(this.coneTrackGain!);
     osc.start(time);
     osc.stop(time + duration);
     this.coneTrackNodes.push(osc);
@@ -501,7 +528,7 @@ export class AudioManager {
       gain.gain.linearRampToValueAtTime(0.04, time + 0.02);
       gain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
       osc.connect(gain);
-      gain.connect(this.masterGain!);
+      gain.connect(this.coneTrackGain!);
       osc.start(time);
       osc.stop(time + 0.65);
       this.coneTrackNodes.push(osc);
@@ -520,7 +547,7 @@ export class AudioManager {
         gain.gain.linearRampToValueAtTime(0.06, time + 0.01);
         gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
         osc.connect(gain);
-        gain.connect(this.masterGain!);
+        gain.connect(this.coneTrackGain!);
         osc.start(time);
         osc.stop(time + 0.28);
         this.coneTrackNodes.push(osc);
@@ -542,7 +569,7 @@ export class AudioManager {
       gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
       osc.connect(filter);
       filter.connect(gain);
-      gain.connect(this.masterGain!);
+      gain.connect(this.coneTrackGain!);
       osc.start(time);
       osc.stop(time + 0.55);
       this.coneTrackNodes.push(osc);

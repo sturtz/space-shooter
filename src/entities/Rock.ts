@@ -74,7 +74,14 @@ export class Rock extends Enemy {
           : isPoisoned
             ? "rgba(80,255,80,0.15)"
             : "rgba(200,140,80,0.18)";
-        const glowGrad = ctx.createRadialGradient(0, 0, this.radius * 0.3, 0, 0, this.radius * 1.35);
+        const glowGrad = ctx.createRadialGradient(
+          0,
+          0,
+          this.radius * 0.3,
+          0,
+          0,
+          this.radius * 1.35
+        );
         glowGrad.addColorStop(0, glowColor);
         glowGrad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = glowGrad;

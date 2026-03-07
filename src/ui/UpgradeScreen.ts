@@ -604,7 +604,6 @@ export class UpgradeScreen {
     // Bottom button bar
     const barY = GAME_HEIGHT - 34;
     const btnH = 30;
-    const btnGap = 8;
 
     // START RUN button — prominent center
     const playBtnW = 180;

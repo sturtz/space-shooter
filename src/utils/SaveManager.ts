@@ -12,6 +12,8 @@ export interface SaveData {
   highestLevel: number;
   /** Special ability earned by defeating the boss — persists between runs */
   specialAbility: string | null;
+  /** Whether the first-load tutorial has been completed */
+  tutorialSeen: boolean;
 }
 
 export function getDefaultSave(): SaveData {
@@ -26,6 +28,7 @@ export function getDefaultSave(): SaveData {
     prestigeCount: 0,
     highestLevel: 1,
     specialAbility: null,
+    tutorialSeen: false,
   };
 }
 

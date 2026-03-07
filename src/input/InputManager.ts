@@ -80,6 +80,8 @@ export class InputManager {
 
     this.onTouchStart = (e: TouchEvent) => {
       this.isTouchDevice = true;
+      // Prevent iOS scroll/bounce for all game touches
+      e.preventDefault();
 
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
@@ -89,10 +91,11 @@ export class InputManager {
         const gameX = (touch.clientX - rect.left) * scaleX;
         const gameY = (touch.clientY - rect.top) * scaleY;
 
-        const isDashArea = gameX > GAME_WIDTH * 0.88;
+        // Dash zone: right 12% of screen at the bottom half (bottom-right corner area)
+        const isDashArea = gameX > GAME_WIDTH * 0.75 && gameY > GAME_HEIGHT * 0.6;
 
         if (isDashArea) {
-          // Right-side tap = dash
+          // Bottom-right tap = dash
           if (this.touchDashId === null) {
             this.touchDashId = touch.identifier;
             this.dashRequested = true;
@@ -102,7 +105,6 @@ export class InputManager {
           this.touchMoveId = touch.identifier;
           this.mousePos = vec2(gameX, gameY);
           this.touchTargetActive = true;
-          e.preventDefault();
         }
       }
     };

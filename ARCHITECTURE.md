@@ -407,12 +407,12 @@ The renderer does **not** know about game entities — it only provides drawing 
 
 Handles three input modes transparently:
 
-| Input    | Desktop                                                          | Mobile                          |
-| -------- | ---------------------------------------------------------------- | ------------------------------- |
-| Movement | WASD / Arrow keys                                                | Touch drag (left 88% of screen) |
-| Aim      | Mouse position                                                   | Auto-aim toward nearest enemy   |
-| Fire     | `isFiring` (mouse held) — _currently unused, cone fires on beat_ | Same                            |
-| Dash     | Shift key                                                        | Tap right 12% of screen         |
+| Input    | Desktop                                                          | Mobile                                     |
+| -------- | ---------------------------------------------------------------- | ------------------------------------------ |
+| Movement | WASD / Arrow keys                                                | Touch drag anywhere (non-dash zone)        |
+| Aim      | Mouse position                                                   | Auto-aim toward nearest enemy              |
+| Fire     | `isFiring` (mouse held) — _currently unused, cone fires on beat_ | Same                                      |
+| Dash     | Shift key                                                        | Tap bottom-right corner (x>75%, y>60%)    |
 
 Key fields:
 
@@ -1081,3 +1081,57 @@ specialAbility: string | null; // "laser" | "bomb_dash" | "flashbang"
 - `src/utils/Assets.ts` — `PlayerImages.glider` now loads `spaceship.svg`
 - `src/entities/Player.ts` — `SPRITE_W = SPRITE_H = 28` (square viewBox)
 - `src/game/Game.ts` — `buildBgCache()` base fill + nebula palette shifted to pinks/roses
+
+---
+
+### March 2026 — Beat Track Retimed to 100 BPM, Cone Fires Every Other Beat; fire.mp3 is Now Global Music
+
+**Changes:**
+
+1. **Beat retiming to 100 BPM, half-time cone attacks**
+   - `BEAT = 60 / 40` → `BEAT = 60 / 100` — music scheduler now runs at 100 BPM (0.6s/beat)
+   - `coneBeatCallback` only fires when `bi % 2 === 0` — cone weapon attacks every other beat (every 1.2s / half-time) instead of every beat
+   - Hat and secondary-track elements remain gated on `bi % 2` / `bi % 4` so they adjust naturally
+
+2. **fire.mp3 as the continuous background music**
+   - `fire.mp3` (`menuMusic`) was previously paused/resumed when transitioning between menu ↔ gameplay. It now loops forever through all game states (menu, playing, paused, upgrade screen, gameover).
+   - `stopMenuMusic()` and `resumeMenuMusic()` are now no-ops — all Game.ts call-sites are unchanged, they simply have no effect.
+   - The procedural cone synth layers (kick, sub drone, hat, pad, void sweep, secondary elements) are completely silenced via a new `coneTrackGain: GainNode` sub-gain (value = 0) that all cone synth nodes route through instead of `masterGain`. This prevents them competing with fire.mp3.
+   - `scheduleConeLoop` still runs during gameplay for the beat-timing callback. `fireConeWeapon()` and `fireMissile()` already guard `state !== "playing" || paused` so no attacks fire during pause or upgrade screen.
+   - `playConeBlast()` (one-shot weapon SFX) still routes to `masterGain` — it's a gameplay SFX, not a music layer.
+
+**File changed:** `src/audio/AudioManager.ts`
+
+---
+
+### March 2026 — Mobile Touch Fix + Dash Bottom-Right + First-Load Tutorial
+
+**Changes:**
+
+1. **Mobile tap-and-drag verified & hardened** — `InputManager.ts` touch handling:
+   - `e.preventDefault()` now fires at the top of `onTouchStart` (before zone detection) to prevent iOS scroll/bounce across all touch zones
+   - Dash zone redefined from "right 12% of screen" to **bottom-right corner** (`x > 75% AND y > 60%`), giving a much larger, more ergonomic tap target that doesn't conflict with normal drag-to-move
+
+2. **Dash button moved to bottom-right** — `Game.ts` `renderMobileControls()`:
+   - Button position changed from `(GAME_WIDTH - 55, GAME_HEIGHT / 2)` (mid-screen right) to `(GAME_WIDTH - 60, GAME_HEIGHT - 80)` (bottom-right corner)
+   - Matches the new input zone so the visual button aligns with the actual tap area
+
+3. **First-load tutorial overlay** — 2-step canvas-drawn tutorial shown once on first game load:
+   - **Step 1 (Movement):** "TAP & DRAG anywhere to move your ship" — animated finger-circle dragging across the screen with a ship following it; bottom hint explains the mothership mechanic
+   - **Step 2 (Dash):** "TAP the DASH button — bottom-right corner" — highlighted animated dash button at bottom-right with a traveling dot guide-arrow, pulsing EMP ring preview emanating from the button
+   - Both steps use the starfield as a backdrop (same `renderStarfield()` call)
+   - Step indicator dots at top (2 dots, filled/dim for active/inactive)
+   - Blinking "TAP TO CONTINUE" / "GOT IT — LET'S GO!" button at the very bottom
+   - On completion: `save.tutorialSeen = true` saved to localStorage — never shows again
+
+**New `GameState` value:** `"tutorial"` — inserted before `"menu"` in the union. Constructor sets initial state to `"tutorial"` if `!save.tutorialSeen`, otherwise stays `"menu"`.
+
+**New `SaveData` field:** `tutorialSeen: boolean` (default `false`) — merged from defaults on load so existing saves skip the tutorial automatically.
+
+**HUD hint text** updated from `"TAP RIGHT → DASH"` to `"↘ DASH  (bottom-right)"` to match new button position.
+
+**Files changed:**
+- `src/utils/SaveManager.ts` — added `tutorialSeen: boolean` to `SaveData` + `getDefaultSave()`
+- `src/input/InputManager.ts` — `preventDefault` moved to top of `onTouchStart`; dash zone changed to bottom-right quadrant
+- `src/game/Game.ts` — `"tutorial"` added to `GameState`; `tutorialStep: 1 | 2` field; initial state set from `tutorialSeen`; `advanceTutorial()` + `renderTutorial()` private methods added; dash button position changed to bottom-right
+- `src/ui/HUD.ts` — mobile hint text updated to reflect new dash button corner

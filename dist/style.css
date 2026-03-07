@@ -145,3 +145,69 @@ canvas {
 ::selection {
   background: transparent;
 }
+
+/* ── Volume Control Overlay ── */
+#volume-control {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 10;
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+
+#volume-control:hover {
+  opacity: 1;
+}
+
+#volume-icon {
+  color: var(--primary);
+  font-size: 14px;
+  line-height: 1;
+  cursor: default;
+}
+
+#music-volume {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 80px;
+  height: 4px;
+  background: rgba(0, 255, 231, 0.2);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+#music-volume::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  box-shadow: 0 0 4px rgba(0, 255, 231, 0.6);
+}
+
+#music-volume::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--primary);
+  cursor: pointer;
+  border: none;
+  box-shadow: 0 0 4px rgba(0, 255, 231, 0.6);
+}
+
+#music-volume::-webkit-slider-runnable-track {
+  background: transparent;
+  border-radius: 2px;
+}
+
+#music-volume::-moz-range-track {
+  height: 4px;
+  background: rgba(0, 255, 231, 0.2);
+  border-radius: 2px;
+}

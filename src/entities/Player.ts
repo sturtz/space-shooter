@@ -161,7 +161,7 @@ export class Player extends Entity {
         const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
         ctx.save();
         ctx.translate(this.pos.x, this.pos.y);
-        ctx.rotate(this.angle + Math.PI / 2);
+        ctx.rotate(this.angle);
         if (sprite) {
           ctx.shadowColor = COLORS.player;
           ctx.shadowBlur = 22;
@@ -192,7 +192,7 @@ export class Player extends Entity {
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.angle + Math.PI / 2); // nose-up SVG → faces aim direction
+    ctx.rotate(this.angle); // nose-up SVG → faces aim direction
 
     if (sprite) {
       // Add a subtle engine-glow halo when moving

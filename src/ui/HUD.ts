@@ -204,7 +204,7 @@ export class HUD {
       ctx.fillStyle = "rgba(255,255,255,0.15)";
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";
-      ctx.fillText("TAP RIGHT → DASH", GAME_WIDTH - pad - 4, GAME_HEIGHT - 28);
+      ctx.fillText("↘ DASH  (bottom-right)", GAME_WIDTH - pad - 4, GAME_HEIGHT - 28);
       ctx.restore();
     }
   }
