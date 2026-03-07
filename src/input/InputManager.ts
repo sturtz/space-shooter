@@ -110,11 +110,11 @@ export class InputManager {
     };
 
     this.onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
 
         if (touch.identifier === this.touchMoveId) {
-          e.preventDefault();
           const rect = canvas.getBoundingClientRect();
           const scaleX = GAME_WIDTH / rect.width;
           const scaleY = GAME_HEIGHT / rect.height;

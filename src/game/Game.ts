@@ -220,14 +220,17 @@ export class Game implements IGame {
       });
     }
 
-    // Click handler for menu & upgrade screen
-    canvas.addEventListener("click", (e) => {
+    const getScaledCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = GAME_WIDTH / rect.width;
       const scaleY = GAME_HEIGHT / rect.height;
-      const mx = (e.clientX - rect.left) * scaleX;
-      const my = (e.clientY - rect.top) * scaleY;
+      return {
+        mx: (clientX - rect.left) * scaleX,
+        my: (clientY - rect.top) * scaleY,
+      };
+    };
 
+    const handleUIInteraction = (mx: number, my: number) => {
       if (this.state === "tutorial") {
         this.advanceTutorial();
       } else if (this.state === "menu") {
@@ -241,10 +244,27 @@ export class Game implements IGame {
       } else if (this.state === "gameover") {
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
-        // Silence music on upgrade screen
         this.audio.stopMenuMusic();
       }
+    };
+
+    // Mouse/desktop
+    canvas.addEventListener("click", (e) => {
+      const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+      handleUIInteraction(mx, my);
     });
+
+    // Mobile — touchend fires after touchstart's preventDefault suppresses click
+    canvas.addEventListener(
+      "touchend",
+      (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        handleUIInteraction(mx, my);
+      },
+      { passive: false }
+    );
 
     // Keyboard handlers for pause and dash
     window.addEventListener("keydown", (e) => {
@@ -570,14 +590,10 @@ export class Game implements IGame {
 
   updatePlaying(dt: number) {
     // Timer — counts down; when it hits 0 force-spawn the boss if not yet spawned.
-    // The round does NOT end on timer expiry — only killing the boss advances the level.
     this.roundTimer -= dt;
     if (this.roundTimer <= 0) {
+      this.endRound(false);
       this.roundTimer = 0;
-      if (!this.bossSpawned) {
-        this.spawnMegaRock();
-        this.bossSpawned = true;
-      }
     }
 
     // Streak decay
@@ -648,9 +664,9 @@ export class Game implements IGame {
       }
     }
 
-    // Boss spawn at 15 seconds elapsed (or on timer expiry above)
+    // Boss spawn at 14 seconds into the round if not already spawned by timer expiry
     const elapsed = this.roundDuration - this.roundTimer;
-    if (!this.bossSpawned && elapsed >= 15) {
+    if (!this.bossSpawned && elapsed >= 14) {
       this.spawnMegaRock();
       this.bossSpawned = true;
     }
@@ -808,7 +824,7 @@ export class Game implements IGame {
   endRound(mothershipDestroyed: boolean) {
     // Stop the beat track
     this.audio.stopConeTrack();
-    // endRound is now ONLY called when the mothership is destroyed (loss path).
+    // endRound is called when the timer expires or the mothership is destroyed (loss path).
     // Boss kill goes through onEnemyKilled → bossReward state instead.
     // mothershipDestroyed is kept for IGame interface compatibility.
     void mothershipDestroyed;
@@ -1056,7 +1072,7 @@ export class Game implements IGame {
     });
 
     ctx.save();
-    ctx.font = `bold 10px 'Orbitron', monospace`;
+    ctx.font = `bold 12px 'Orbitron', monospace`;
     ctx.fillStyle = COLORS.textGold;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1103,7 +1119,7 @@ export class Game implements IGame {
 
     if (this.input.isTouchDevice) {
       ctx.save();
-      ctx.font = `9px monospace`;
+      ctx.font = `10px monospace`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1112,12 +1128,12 @@ export class Game implements IGame {
       ctx.restore();
     } else {
       ctx.save();
-      ctx.font = `9px monospace`;
+      ctx.font = `10px monospace`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("Mouse to move  •  Shift to dash", cx, controlsY + 4);
-      ctx.fillText("Auto-fires to beat  •  Destroy enemies → Coins → Upgrade", cx, controlsY + 18);
+      ctx.fillText("Mouse to move  •  Shift to dash", cx, controlsY + 8);
+      ctx.fillText("Auto-fires to beat  •  Destroy enemies → Coins → Upgrade", cx, controlsY + 24);
       ctx.restore();
     }
   }
@@ -1686,7 +1702,7 @@ export class Game implements IGame {
 
       // Name
       ctx.save();
-      ctx.font = `bold 10px 'Orbitron', monospace`;
+      ctx.font = `bold 12px 'Orbitron', monospace`;
       ctx.fillStyle = choice.color;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";

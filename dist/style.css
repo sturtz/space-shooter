@@ -61,9 +61,8 @@ body {
 /* ── Canvas — sized by JS, displayed centered ── */
 canvas {
   display: block;
-  /* JS sets pixel dimensions; CSS controls display size via object-fit-style centering */
-  max-width: 100%;
-  max-height: 100%;
+  width: 100%;
+  height: 100%;
   /* Crisp pixel rendering (good for sprite games) */
   image-rendering: pixelated;
   image-rendering: crisp-edges;

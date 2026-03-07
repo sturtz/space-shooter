@@ -233,7 +233,7 @@ export class UpgradeScreen {
         radius: 6,
       });
 
-      ctx.font = `bold 10px 'Orbitron', monospace`;
+      ctx.font = `bold 12px 'Orbitron', monospace`;
       ctx.fillStyle = "#ff4444";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -541,7 +541,7 @@ export class UpgradeScreen {
 
     // Name + icon
     ctx.save();
-    ctx.font = `bold 12px 'Orbitron', monospace`;
+    ctx.font = `bold 14px 'Orbitron', monospace`;
     ctx.fillStyle = BRANCH_COLORS[closest.branch];
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -550,7 +550,7 @@ export class UpgradeScreen {
 
     // Level badge
     ctx.save();
-    ctx.font = `bold 10px 'Orbitron', monospace`;
+    ctx.font = `bold 12px 'Orbitron', monospace`;
     ctx.fillStyle = maxed ? "#44ff44" : "#aaa";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";

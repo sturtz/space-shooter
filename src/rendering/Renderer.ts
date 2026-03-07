@@ -23,8 +23,18 @@ export class Renderer {
 
     // Compute the largest size that fits the viewport while keeping 900×600 aspect ratio
     const container = this.canvas.parentElement;
-    const availW = container ? container.clientWidth : window.innerWidth;
-    const availH = container ? container.clientHeight : window.innerHeight;
+    let availW: number;
+    let availH: number;
+    if (container) {
+      const style = window.getComputedStyle(container);
+      availW =
+        container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      availH =
+        container.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
+    } else {
+      availW = window.innerWidth;
+      availH = window.innerHeight;
+    }
 
     const aspect = GAME_WIDTH / GAME_HEIGHT; // 900/600 = 1.5
     let displayW = availW;
