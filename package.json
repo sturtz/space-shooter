@@ -1,4 +1,5 @@
 {
+  "type": "module",
   "name": "space-shooter",
   "version": "0.0.1",
   "description": "Incremental space shooter - defend your mothership!",
