@@ -18,44 +18,44 @@ function img(src: string): HTMLImageElement {
 
 // ─── Background ──────────────────────────────────────────────────────────────
 export const BgImages = {
-  parallax: img("/assets/bg/pink-parallax-space-stars.png"),
-  stars: img("/assets/bg/stars.png"),
+  parallax: img("./assets/bg/pink-parallax-space-stars.png"),
+  stars: img("./assets/bg/stars.png"),
 };
 
 // ─── Player sprites ───────────────────────────────────────────────────────────
 export const PlayerImages = {
-  still: img("/assets/ships/player-still.png"),
-  moving: img("/assets/ships/player-moving.png"),
-  glider: img("/assets/ships/spaceship.svg"),
+  still: img("./assets/ships/player-still.png"),
+  moving: img("./assets/ships/player-moving.png"),
+  glider: img("./assets/ships/spaceship.svg"),
 };
 
 // ─── Ships / enemies ─────────────────────────────────────────────────────────
 export const ShipImages = {
-  enemy1: img("/assets/ships/enemy1.png"),
-  enemyMedium: img("/assets/ships/enemy-medium1.png"),
-  enemy03: img("/assets/ships/enemy-03.gif"),
-  enemyDeath: img("/assets/ships/enemy-ship-death.gif"),
-  mothershipDeath: img("/assets/ships/mothership-death.gif"),
+  enemy1: img("./assets/ships/enemy1.png"),
+  enemyMedium: img("./assets/ships/enemy-medium1.png"),
+  enemy03: img("./assets/ships/enemy-03.gif"),
+  enemyDeath: img("./assets/ships/enemy-ship-death.gif"),
+  mothershipDeath: img("./assets/ships/mothership-death.gif"),
 };
 
 // ─── Asteroids ───────────────────────────────────────────────────────────────
 export const AsteroidImages = {
-  tiny: [img("/assets/items/tiny-asteroid.png"), img("/assets/items/tiny-purple-asteroid.png")],
+  tiny: [img("./assets/items/tiny-asteroid.png"), img("./assets/items/tiny-purple-asteroid.png")],
   small: [
-    img("/assets/items/small-asteroid.png"),
-    img("/assets/items/sm-asteroid.png"),
-    img("/assets/items/purple-asteroid-small.png"),
+    img("./assets/items/small-asteroid.png"),
+    img("./assets/items/sm-asteroid.png"),
+    img("./assets/items/purple-asteroid-small.png"),
   ],
-  big: [img("/assets/items/md-asteroid.png"), img("/assets/items/large-asteroid.png")],
+  big: [img("./assets/items/md-asteroid.png"), img("./assets/items/large-asteroid.png")],
 };
 
 // ─── Items / pickups ─────────────────────────────────────────────────────────
 export const ItemImages = {
-  coin: img("/assets/items/coin1.png"),
-  orbBlue: img("/assets/items/orb-blue1.png"),
-  orbRed: img("/assets/items/orb-red1.png"),
-  bomb: img("/assets/items/bomb.gif"),
-  enemyProjectile: img("/assets/items/enemy-projectile.png"),
+  coin: img("./assets/items/coin1.png"),
+  orbBlue: img("./assets/items/orb-blue1.png"),
+  orbRed: img("./assets/items/orb-red1.png"),
+  bomb: img("./assets/items/bomb.gif"),
+  enemyProjectile: img("./assets/items/enemy-projectile.png"),
 };
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

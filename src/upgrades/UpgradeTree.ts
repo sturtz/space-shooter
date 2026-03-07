@@ -29,7 +29,7 @@ export function getUpgradeEffect(node: UpgradeNode, level: number): number {
 }
 
 // Base asset path for upgrade tree SVGs
-const A = "/assets/upgrade-tree/";
+const A = "./assets/upgrade-tree/";
 
 // =====================================================================
 // UPGRADE TREE
