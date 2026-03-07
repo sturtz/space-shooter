@@ -3,3 +3,4 @@ dist/
 .vite/
 *.lock
 pnpm-lock.yaml
+ARCHITECTURE.md

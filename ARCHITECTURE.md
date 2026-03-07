@@ -944,7 +944,7 @@ User clicks "Start Run"
 | DAMAGE | `dmg_range` | Expanded Rays | expanded-rays | +20px AoE/lvl, max 3 |
 | DAMAGE | `dmg_crit` | Sword Wound | sword-wound | +8% crit/lvl, max 3 |
 | DAMAGE | `dmg_overclock` | Scythe | scythe | 2× fire rate, max 1 |
-| WEAPONS | `guns_bolt` | Hypersonic Bolt | hypersonic-bolt | +1 pierce/lvl, max 3 |
+| WEAPONS | `round_time` | Round Time | speedometer | +5 sec/lvl, max 3 |
 | WEAPONS | `guns_missile` | Rocket Pods | rocket | +1 homing missile/lvl (1–3), max 3 |
 | WEAPONS | `guns_chain` | Ringed Beam | ringed-beam | +1 chain lightning/lvl, max 3 |
 | WEAPONS | `guns_barrage` | Bombing Run | bombing-run | Override → 4 missiles + 30px splash, max 1 |

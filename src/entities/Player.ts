@@ -17,9 +17,9 @@ export class Player extends Entity {
 
   // Dash ability
   dashCooldown: number = 0;
-  readonly DASH_COOLDOWN_TIME = 2.5; // seconds between dashes
-  readonly DASH_BASE_DISTANCE = 110; // pixels to cover per dash
-  readonly DASH_DURATION = 0.18; // seconds the dash motion takes
+  readonly DASH_COOLDOWN_TIME = 4; // seconds between dashes
+  readonly DASH_BASE_DISTANCE = 100; // pixels to cover per dash
+  readonly DASH_DURATION = 0.3; // seconds the dash motion takes
   readonly DASH_BASE_RING_RADIUS = 60; // base explosion ring radius
 
   // Smooth dash state
@@ -206,16 +206,16 @@ export class Player extends Entity {
       // Canvas fallback while SVG loads — Galaga red/white/black
       ctx.fillStyle = "#ffffff";
       ctx.beginPath();
-      ctx.moveTo(10 * s, 0);
-      ctx.lineTo(2 * s, -3 * s);
-      ctx.lineTo(-3 * s, -5 * s);
-      ctx.lineTo(-6 * s, -6 * s);
-      ctx.lineTo(-5 * s, -2.5 * s);
-      ctx.lineTo(-6 * s, 1.5 * s);
-      ctx.lineTo(-5 * s, 2.5 * s);
-      ctx.lineTo(-6 * s, 6 * s);
-      ctx.lineTo(-3 * s, 5 * s);
-      ctx.lineTo(2 * s, 3 * s);
+      ctx.moveTo(12 * s, 0);
+      ctx.lineTo(3 * s, -4 * s);
+      ctx.lineTo(-4 * s, -6 * s);
+      ctx.lineTo(-7 * s, -7 * s);
+      ctx.lineTo(-6 * s, -3.5 * s);
+      ctx.lineTo(-7 * s, 2.5 * s);
+      ctx.lineTo(-6 * s, 3.5 * s);
+      ctx.lineTo(-7 * s, 7 * s);
+      ctx.lineTo(-4 * s, 6 * s);
+      ctx.lineTo(3 * s, 4 * s);
       ctx.closePath();
       ctx.fill();
       ctx.strokeStyle = "#0f0f0f";

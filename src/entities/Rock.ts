@@ -86,7 +86,7 @@ export class Rock extends Enemy {
         glowGrad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = glowGrad;
         ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 1.35, 0, Math.PI * 2);
+        ctx.arc(0, 0, this.radius * 1.2, 0, Math.PI * 2);
         ctx.fill();
       }
 

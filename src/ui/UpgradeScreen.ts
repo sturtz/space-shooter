@@ -43,12 +43,22 @@ export class UpgradeScreen {
   /** Preloaded SVG images keyed by iconPath */
   iconImages: Map<string, HTMLImageElement> = new Map();
 
-  // Layout constants — larger for mobile
+  // Layout constants
   readonly CX = GAME_WIDTH / 2;
   readonly CY = GAME_HEIGHT / 2 - 20;
-  readonly DEPTH_SPACING = 72;
-  readonly NODE_RADIUS = 18;
-  readonly BRANCH_SPREAD = 0.35;
+  readonly DEPTH_SPACING = 165;
+  readonly NODE_RADIUS = 22;
+  readonly BRANCH_SPREAD = 0.48;
+
+  // Pan / drag state
+  panX = 0;
+  panY = 0;
+  private isPanning = false;
+  private panStartX = 0;
+  private panStartY = 0;
+  private panStartPanX = 0;
+  private panStartPanY = 0;
+  private panMoved = 0;
 
   constructor(upgrades: UpgradeManager, game: IGame) {
     this.upgrades = upgrades;
@@ -72,7 +82,43 @@ export class UpgradeScreen {
     this.clickables = [];
     this.hoveredNode = null;
     this.tooltip = null;
+    this.panX = 0;
+    this.panY = 0;
+    this.isPanning = false;
+    this.panMoved = 0;
     this.computeNodePositions();
+  }
+
+  beginPan(mx: number, my: number) {
+    this.isPanning = true;
+    this.panStartX = mx;
+    this.panStartY = my;
+    this.panStartPanX = this.panX;
+    this.panStartPanY = this.panY;
+    this.panMoved = 0;
+  }
+
+  updatePan(mx: number, my: number) {
+    if (!this.isPanning) return;
+    const dx = mx - this.panStartX;
+    const dy = my - this.panStartY;
+    this.panMoved = Math.sqrt(dx * dx + dy * dy);
+    // Keep root node (CX, CY) at least 50px inside the viewport at all times
+    const margin = 50;
+    const minX = -(this.CX - margin);
+    const maxX = GAME_WIDTH - this.CX - margin;
+    const minY = -(this.CY - margin);
+    const maxY = GAME_HEIGHT - this.CY - margin;
+    this.panX = Math.max(minX, Math.min(maxX, this.panStartPanX + dx));
+    this.panY = Math.max(minY, Math.min(maxY, this.panStartPanY + dy));
+  }
+
+  endPan() {
+    this.isPanning = false;
+  }
+
+  private hasDragged(): boolean {
+    return this.panMoved > 8;
   }
 
   computeNodePositions() {
@@ -92,7 +138,19 @@ export class UpgradeScreen {
     }
   }
 
+  /** A node is visible only when its parent is fully maxed (or the node is root/tier-1). */
+  private isParentMaxed(node: UpgradeNode): boolean {
+    const parent = getParentNode(node);
+    if (!parent) return true;
+    return this.upgrades.getLevel(parent.id) >= parent.maxLevel;
+  }
+
   handleClick(mx: number, my: number) {
+    // Suppress tap if the pointer has dragged (pan gesture)
+    const dragged = this.hasDragged();
+    this.panMoved = 0;
+    if (dragged) return;
+
     for (const area of this.clickables) {
       if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
         area.action();
@@ -101,13 +159,17 @@ export class UpgradeScreen {
       }
     }
 
+    // Node positions are in world space; convert screen coords by subtracting pan
+    const wmx = mx - this.panX;
+    const wmy = my - this.panY;
+
     for (const node of UPGRADE_TREE) {
       if (node.id === "root") continue;
+      if (!this.isParentMaxed(node)) continue;
       const pos = this.nodePositions.get(node.id);
       if (!pos) continue;
-      const dx = mx - pos.x;
-      const dy = my - pos.y;
-      // Larger hit area for mobile
+      const dx = wmx - pos.x;
+      const dy = wmy - pos.y;
       const hitRadius = this.NODE_RADIUS * 1.8;
       if (dx * dx + dy * dy <= hitRadius * hitRadius) {
         this.tryPurchaseNode(node);
@@ -210,9 +272,14 @@ export class UpgradeScreen {
       if (this.cantAffordMessage.timer <= 0) this.cantAffordMessage = null;
     }
 
+    // Apply pan offset for the world-space tree; UI panels are drawn after restore
+    ctx.save();
+    ctx.translate(this.panX, this.panY);
     this.renderConnections(ctx);
     this.renderBranchLabels(renderer);
     this.renderNodes(renderer, ctx);
+    ctx.restore();
+
     this.renderTooltip(renderer, ctx);
     this.renderBottomBar(renderer, ctx);
 
@@ -254,6 +321,7 @@ export class UpgradeScreen {
       if (!parent) continue;
       const parentPos = this.nodePositions.get(parent.id);
       if (!parentPos) continue;
+      if (!this.isParentMaxed(node)) continue;
 
       const level = this.upgrades.getLevel(node.id);
       const unlocked = this.upgrades.isUnlocked(node);
@@ -335,6 +403,7 @@ export class UpgradeScreen {
     for (const node of UPGRADE_TREE) {
       const pos = this.nodePositions.get(node.id);
       if (!pos) continue;
+      if (node.id !== "root" && !this.isParentMaxed(node)) continue;
 
       const level = this.upgrades.getLevel(node.id);
       const unlocked = this.upgrades.isUnlocked(node);
@@ -358,114 +427,83 @@ export class UpgradeScreen {
       const ny = pos.y + shakeY;
 
       if (isRoot) {
-        // Root node — central hub, no heavy glow
-        ctx.fillStyle = "#111133";
+        // Root node — solid white filled circle
+        ctx.fillStyle = "#ffffff";
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(80,200,180,0.7)";
+      } else if (maxed) {
+        // Maxed — hollow with alpha gradient border
+        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
+        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 1));
+        ctx.strokeStyle = grad;
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-      } else if (maxed) {
-        // Maxed — filled, subtle inner gradient, no heavy shadow
-        const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
-        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.75));
-        grad.addColorStop(0.65, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.1));
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.85);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
       } else if (level > 0) {
-        // Partially upgraded — dark bg + progress arc slice + colored border
-        ctx.fillStyle = "#0d0d20";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-
+        // Partially upgraded — progress arc with alpha gradient
         const progressAngle = (level / node.maxLevel) * Math.PI * 2;
-        ctx.save();
-        ctx.fillStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.22);
+        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
+        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.95));
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 2;
         ctx.beginPath();
-        ctx.moveTo(nx, ny);
         ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
-        ctx.closePath();
-        ctx.fill();
-        ctx.restore();
-
-        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.9);
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
       } else if (canBuy) {
-        // Affordable and unlocked — slightly brighter bg, clean colored border
-        ctx.fillStyle = "#10101e";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.85);
-        ctx.lineWidth = 1.5;
+        // Affordable and unlocked — hollow with alpha gradient
+        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
+        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 1));
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.8;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
       } else if (unlocked) {
-        // Unlocked but can't afford — grey tint of branch color, reduced opacity
-        ctx.globalAlpha = 0.65;
-        ctx.fillStyle = "#0c0c18";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.35);
-        ctx.lineWidth = 1;
+        // Unlocked but can't afford — muted gradient
+        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
+        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.5));
+        ctx.strokeStyle = grad;
+        ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.globalAlpha = 1;
       } else {
-        // Locked — clearly visible but greyed, so player can see what's coming
-        ctx.globalAlpha = 0.55;
-        ctx.fillStyle = "#0c0c16";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = "#445566";
+        // Locked — dim grey gradient
+        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
+        grad.addColorStop(0, "rgba(68, 85, 102, 0.15)");
+        grad.addColorStop(1, "rgba(68, 85, 102, 0.45)");
+        ctx.strokeStyle = grad;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.globalAlpha = 1;
       }
 
       // Icon alpha: locked = 0.45 (visible, greyed), unlocked-can't-afford = 0.6, else full
       const iconAlpha = !unlocked ? 0.45 : !canBuy && !maxed && level === 0 ? 0.6 : 1.0;
       ctx.save();
-      ctx.globalAlpha = iconAlpha;
+      ctx.globalAlpha = isRoot ? 1 : iconAlpha;
       if (node.iconPath) {
         const img = this.iconImages.get(node.iconPath);
         if (img && img.complete && img.naturalWidth > 0) {
-          // SVG loaded — draw centred inside the node circle
           const iconSize = isRoot ? 28 : 22;
           ctx.drawImage(img, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
         } else {
-          // Still loading — text fallback
           ctx.font = `${isRoot ? 16 : 13}px monospace`;
-          ctx.fillStyle = "#fff";
+          ctx.fillStyle = isRoot ? "#111" : "#fff";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(node.icon, nx, ny);
         }
       } else {
-        // No SVG — pure emoji/text icon
         ctx.font = `${isRoot ? 16 : 13}px monospace`;
-        ctx.fillStyle = "#fff";
+        ctx.fillStyle = isRoot ? "#111" : "#fff";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(node.icon, nx, ny);
@@ -484,33 +522,31 @@ export class UpgradeScreen {
         ctx.fillText(lvlText, nx, ny + r + 4);
         ctx.restore();
       }
-
-      // Name label for depth-1 nodes
-      if (node.depth <= 1) {
-        ctx.save();
-        ctx.font = `7px monospace`;
-        ctx.fillStyle = unlocked ? "#999" : "#444";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(node.name, nx, ny + r + (level > 0 ? 13 : 5));
-        ctx.restore();
-      }
     }
   }
 
   renderTooltip(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    const mousePos = this.game.input?.mousePos;
+    const input = this.game.input;
+    if (!input) return;
+    // On touch devices, only show tooltip while a finger is actively on the screen
+    if (input.isTouchDevice && !input.touchTargetActive) return;
+    const mousePos = input.mousePos;
     if (!mousePos) return;
+
+    // Convert screen coords to world space (undo pan offset)
+    const wx = mousePos.x - this.panX;
+    const wy = mousePos.y - this.panY;
 
     let closest: UpgradeNode | null = null;
     let closestDist = Infinity;
 
     for (const node of UPGRADE_TREE) {
       if (node.id === "root") continue;
+      if (!this.isParentMaxed(node)) continue;
       const pos = this.nodePositions.get(node.id);
       if (!pos) continue;
-      const dx = mousePos.x - pos.x;
-      const dy = mousePos.y - pos.y;
+      const dx = wx - pos.x;
+      const dy = wy - pos.y;
       const dist = Math.sqrt(dx * dx + dy * dy);
       if (dist < this.NODE_RADIUS * 2.5 && dist < closestDist) {
         closestDist = dist;
@@ -584,20 +620,6 @@ export class UpgradeScreen {
       ctx.fillText(`Cost: ${cost} coins — Tap node to buy`, panelX + 10, panelY + 40);
     }
     ctx.restore();
-
-    // Highlight ring on hovered node
-    const npos = this.nodePositions.get(closest.id);
-    if (npos) {
-      ctx.save();
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 1.5;
-      ctx.globalAlpha = 0.4;
-      ctx.beginPath();
-      ctx.arc(npos.x, npos.y, this.NODE_RADIUS + 5, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
   }
 
   renderBottomBar(renderer: Renderer, ctx: CanvasRenderingContext2D) {

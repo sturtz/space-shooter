@@ -26,7 +26,7 @@ export class AudioManager {
     // Pre-create audio element — won't play until init() is called on first interaction
     this.menuMusic = new Audio("./assets/sounds/fire.mp3");
     this.menuMusic.loop = true;
-    this.menuMusic.volume = 0.2;
+    this.menuMusic.volume = 0.1;
   }
 
   init() {

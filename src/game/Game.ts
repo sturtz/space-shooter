@@ -167,7 +167,7 @@ export class Game implements IGame {
   // Circle weapon state (default weapon — synced to music beat)
   coneFlashTimer: number = 0;
   coneBeatCount: number = 0;
-  readonly CONE_RANGE = 45; // pixels — circle radius around player
+  readonly CONE_RANGE = 30; // pixels — circle radius around player
   readonly CONE_FIRE_EVERY = 1; // fire every beat
   coneTimeSinceLastFire: number = 0; // tracks loader progress
   coneMeasuredInterval: number = 60 / 140; // measured actual beat interval (starts at 140 BPM estimate)
@@ -220,6 +220,19 @@ export class Game implements IGame {
       });
     }
 
+    // Select the custom cursor element
+    const customCursor = document.querySelector(".custom-cursor") || null;
+
+    // Add an event listener for mouse movement on the entire document
+    document.addEventListener("mousemove", (e) => {
+      // Update the position of the custom cursor using CSS variables or inline styles
+      // clientX and clientY provide the horizontal and vertical coordinates of the mouse
+      if (customCursor && customCursor instanceof HTMLElement) {
+        customCursor.style.top = e.clientY + "px";
+        customCursor.style.left = e.clientX + "px";
+      }
+    });
+
     const getScaledCoords = (clientX: number, clientY: number) => {
       const rect = canvas.getBoundingClientRect();
       const scaleX = GAME_WIDTH / rect.width;
@@ -244,7 +257,7 @@ export class Game implements IGame {
       } else if (this.state === "gameover") {
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
-        this.audio.stopMenuMusic();
+        this.audio.stopConeTrack();
       }
     };
 
@@ -261,19 +274,69 @@ export class Game implements IGame {
         e.preventDefault();
         const touch = e.changedTouches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        if (this.state === "upgradeScreen") {
+          this.upgradeScreen.endPan();
+        }
         handleUIInteraction(mx, my);
+      },
+      { passive: false }
+    );
+
+    // Upgrade screen pan — mouse (desktop)
+    canvas.addEventListener("mousedown", (e) => {
+      if (this.state === "upgradeScreen") {
+        const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+        this.upgradeScreen.beginPan(mx, my);
+      }
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      if (this.state === "upgradeScreen") {
+        const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+        this.upgradeScreen.updatePan(mx, my);
+      }
+    });
+    canvas.addEventListener("mouseup", () => {
+      if (this.state === "upgradeScreen") {
+        this.upgradeScreen.endPan();
+      }
+    });
+
+    // Upgrade screen pan — touch (mobile)
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        if (this.state === "upgradeScreen") {
+          const touch = e.touches[0];
+          const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+          this.upgradeScreen.beginPan(mx, my);
+        }
+      },
+      { passive: true }
+    );
+    canvas.addEventListener(
+      "touchmove",
+      (e) => {
+        if (this.state === "upgradeScreen") {
+          e.preventDefault();
+          const touch = e.touches[0];
+          const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+          this.upgradeScreen.updatePan(mx, my);
+        }
       },
       { passive: false }
     );
 
     // Keyboard handlers for pause and dash
     window.addEventListener("keydown", (e) => {
-      if ((e.key === "Escape" || e.key.toLowerCase() === "p") && this.state === "playing") {
+      if (
+        (e.key === "Escape" || e.key.toLowerCase() === "p" || e.key === " ") &&
+        this.state === "playing"
+      ) {
         this.paused = !this.paused;
         if (this.paused) {
-          this.audio.stopMenuMusic();
+          this.audio.stopConeTrack();
         } else {
-          this.audio.resumeMenuMusic();
+          this.audio.startConeTrack();
         }
       }
       // Dash on Shift key
@@ -287,7 +350,7 @@ export class Game implements IGame {
         saveGame(this.save);
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
-        this.audio.stopMenuMusic();
+        this.audio.stopConeTrack();
       }
     });
   }
@@ -418,7 +481,6 @@ export class Game implements IGame {
     this.particles.clear();
     this.spawner.reset(this);
     // Resume music when run starts (comes from upgrade screen where it is paused)
-    this.audio.resumeMenuMusic();
     this.state = "playing";
 
     // Spawn initial small asteroids spread around the arena
@@ -540,8 +602,8 @@ export class Game implements IGame {
     // Ring burst particles (always, even if no enemies hit)
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2;
-      const px = this.player.pos.x + Math.cos(a) * this.CONE_RANGE * 0.7;
-      const py = this.player.pos.y + Math.sin(a) * this.CONE_RANGE * 0.7;
+      const px = this.player.pos.x + Math.cos(a) * this.CONE_RANGE * 0.5;
+      const py = this.player.pos.y + Math.sin(a) * this.CONE_RANGE * 0.5;
       this.particles.emitDirectional(vec2(px, py), a, 0.3, 1, "#ccccdd", 30, 0.08, 1);
     }
   }
@@ -836,7 +898,7 @@ export class Game implements IGame {
   goToUpgradeScreen() {
     this.state = "upgradeScreen";
     this.upgradeScreen.refresh();
-    this.audio.stopMenuMusic();
+    this.audio.stopConeTrack();
   }
 
   render() {
@@ -1182,17 +1244,17 @@ export class Game implements IGame {
       const loaderRadius = 18; // small, tight around the player
 
       // Background ring (dim, shows full circle outline)
-      ctx.globalAlpha = 0.12;
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(px, py, loaderRadius, 0, Math.PI * 2);
-      ctx.stroke();
+      // ctx.globalAlpha = 0.12;
+      // ctx.strokeStyle = "#ffffff";
+      // ctx.lineWidth = 1.5;
+      // ctx.beginPath();
+      // ctx.arc(px, py, loaderRadius, 0, Math.PI * 2);
+      // ctx.stroke();
 
       // Progress arc (bright white, fills clockwise from top)
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1;
       ctx.beginPath();
       ctx.arc(px, py, loaderRadius, -Math.PI / 2, -Math.PI / 2 + loaderArc);
       ctx.stroke();

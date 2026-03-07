@@ -164,7 +164,7 @@ canvas {
 
 #volume-icon {
   color: var(--primary);
-  font-size: 14px;
+  font-size: 18px;
   line-height: 1;
   cursor: default;
 }
@@ -172,9 +172,9 @@ canvas {
 #music-volume {
   -webkit-appearance: none;
   appearance: none;
-  width: 80px;
-  height: 4px;
-  background: rgba(0, 255, 231, 0.2);
+  width: 120px;
+  height: 6px;
+  background: rgba(15, 162, 147, 0.5);
   border-radius: 2px;
   outline: none;
   cursor: pointer;
@@ -182,8 +182,8 @@ canvas {
 
 #music-volume::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 12px;
-  height: 12px;
+  width: 14px;
+  height: 14px;
   border-radius: 50%;
   background: var(--primary);
   cursor: pointer;
@@ -191,8 +191,8 @@ canvas {
 }
 
 #music-volume::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
+  width: 16px;
+  height: 16px;
   border-radius: 50%;
   background: var(--primary);
   cursor: pointer;
@@ -207,6 +207,6 @@ canvas {
 
 #music-volume::-moz-range-track {
   height: 4px;
-  background: rgba(0, 255, 231, 0.2);
+  background: rgba(15, 162, 147, 0.5);
   border-radius: 2px;
 }

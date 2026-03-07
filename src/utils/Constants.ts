@@ -5,7 +5,7 @@ export const GAME_WIDTH = 900;
 export const GAME_HEIGHT = 600;
 
 // Player
-export const PLAYER_BASE_SPEED = 60; // pixels/sec (slow, deliberate)
+export const PLAYER_BASE_SPEED = 50; // pixels/sec (slow, deliberate)
 export const PLAYER_BASE_FIRE_RATE = 0.4; // seconds between shots
 export const PLAYER_BASE_DAMAGE = 1;
 export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
@@ -27,19 +27,19 @@ export const ROCK_BASE_SPEED = 15;
 export const ROCK_SIZE = 10;
 export const ROCK_BIG_SIZE = 16;
 export const ENEMY_SHIP_BASE_HP = 4;
-export const ENEMY_SHIP_BASE_SPEED = 30;
+export const ENEMY_SHIP_BASE_SPEED = 25;
 export const ENEMY_SHIP_SIZE = 12;
 
 // Coins
 export const COIN_SIZE = 6;
-export const COIN_MAGNET_RANGE = 30; // base pickup range
-export const COIN_LIFETIME = 8; // seconds before despawn
-export const COIN_SPEED = 120; // speed when flying to player
+export const COIN_MAGNET_RANGE = 10; // base pickup range
+export const COIN_LIFETIME = 4; // seconds before despawn
+export const COIN_SPEED = 60; // speed when flying to player
 
 // Waves
 export const BASE_ROUND_DURATION = 15; // seconds
-export const SPAWN_RATE_BASE = 2.0; // seconds between spawns (fewer enemies at start)
-export const SPAWN_DISTANCE = 350; // distance from center to spawn
+export const SPAWN_RATE_BASE = 4.0; // seconds between spawns (fewer enemies at start)
+export const SPAWN_DISTANCE = 500; // distance from center to spawn
 
 // Upgrades
 export const UPGRADE_BASE_COST = 10;
@@ -49,8 +49,8 @@ export const UPGRADE_COST_GROWTH = 1.18;
 export const COLORS = {
   bg: "#0a0a1a",
   stars: "#334",
-  player: "#00ffcc",
-  playerEngine: "#00aa88",
+  player: "#00d4ff",
+  playerEngine: "#0088bb",
   mothership: "#4488ff",
   mothershipGlow: "#2244aa",
   mothershipDamaged: "#ff4444",
