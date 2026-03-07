@@ -1,21 +1,7 @@
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
-import {
-  Vec2,
-  vec2,
-  vecSub,
-  vecNormalize,
-  vecAdd,
-  vecScale,
-  randomRange,
-} from "../utils/Math";
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  ROCK_SIZE,
-  ROCK_BIG_SIZE,
-  COLORS,
-} from "../utils/Constants";
+import { Vec2, vec2, vecSub, vecNormalize, vecAdd, vecScale, randomRange } from "../utils/Math";
+import { ROCK_SIZE, ROCK_BIG_SIZE, COLORS } from "../utils/Constants";
 import { AsteroidImages, pickRandom, imageReady } from "../utils/Assets";
 
 export class Rock extends Enemy {
@@ -31,7 +17,7 @@ export class Rock extends Enemy {
     hp: number,
     speed: number,
     isBig: boolean = false,
-    sizeScale: number = 1.0,
+    sizeScale: number = 1.0
   ) {
     super(x, y, (isBig ? ROCK_BIG_SIZE : ROCK_SIZE) * sizeScale, hp, speed, isBig ? 3 : 1);
     this.isBig = isBig;
@@ -106,12 +92,19 @@ export class Rock extends Enemy {
       }
     } else {
       // ── CANVAS FALLBACK (while image loads) ──────────────────────
-      ctx.strokeStyle = isFlashing ? "#fff" : this.isElite ? "#ffdd00" : isPoisoned ? "#44ff44" : "#9999bb";
+      ctx.strokeStyle = isFlashing
+        ? "#fff"
+        : this.isElite
+          ? "#ffdd00"
+          : isPoisoned
+            ? "#44ff44"
+            : "#9999bb";
       ctx.lineWidth = isFlashing ? 2 : 1.5;
       ctx.fillStyle = isFlashing ? "#445" : this.isElite ? "#554422" : "#2a2a3a";
       ctx.beginPath();
       ctx.moveTo(this.vertices[0].x, this.vertices[0].y);
-      for (let i = 1; i < this.vertices.length; i++) ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
+      for (let i = 1; i < this.vertices.length; i++)
+        ctx.lineTo(this.vertices[i].x, this.vertices[i].y);
       ctx.closePath();
       ctx.fill();
       ctx.stroke();

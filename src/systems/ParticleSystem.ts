@@ -54,7 +54,7 @@ export class ParticleSystem {
     color: string,
     speed: number = 80,
     life: number = 0.5,
-    size: number = 2,
+    size: number = 2
   ) {
     for (let i = 0; i < count; i++) {
       const angle = randomAngle();
@@ -79,7 +79,7 @@ export class ParticleSystem {
     color: string,
     speed: number = 80,
     life: number = 0.4,
-    size: number = 1.5,
+    size: number = 1.5
   ) {
     for (let i = 0; i < count; i++) {
       const a = angle + randomRange(-spread, spread);

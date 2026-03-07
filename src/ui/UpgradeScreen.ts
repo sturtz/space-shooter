@@ -2,7 +2,6 @@ import { Renderer } from "../rendering/Renderer";
 import { UpgradeManager } from "../upgrades/UpgradeManager";
 import {
   UPGRADE_TREE,
-  STAR_UPGRADES,
   UpgradeNode,
   UpgradeBranch,
   getUpgradeCost,
@@ -11,12 +10,7 @@ import {
   BRANCH_COLORS,
   BRANCH_LABELS,
 } from "../upgrades/UpgradeTree";
-import {
-  saveGame,
-  clearSave,
-  getDefaultSave,
-  loadGame,
-} from "../utils/SaveManager";
+import { saveGame, clearSave, getDefaultSave } from "../utils/SaveManager";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
 import { IGame } from "../game/GameInterface";
 
@@ -87,12 +81,7 @@ export class UpgradeScreen {
 
   handleClick(mx: number, my: number) {
     for (const area of this.clickables) {
-      if (
-        mx >= area.x &&
-        mx <= area.x + area.w &&
-        my >= area.y &&
-        my <= area.y + area.h
-      ) {
+      if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
         area.action();
         saveGame(this.upgrades.save);
         return;
@@ -155,7 +144,7 @@ export class UpgradeScreen {
       GAME_WIDTH * 0.2,
       GAME_WIDTH / 2,
       GAME_HEIGHT / 2,
-      GAME_WIDTH * 0.7,
+      GAME_WIDTH * 0.7
     );
     vignetteGrad.addColorStop(0, "rgba(0,0,0,0)");
     vignetteGrad.addColorStop(1, "rgba(0,0,0,0.4)");
@@ -179,7 +168,7 @@ export class UpgradeScreen {
       "#000",
       14,
       "center",
-      "middle",
+      "middle"
     );
 
     // Coins display panel
@@ -235,11 +224,7 @@ export class UpgradeScreen {
       ctx.fillStyle = "#ff4444";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(
-        this.cantAffordMessage.text,
-        GAME_WIDTH / 2,
-        msgY + msgH / 2,
-      );
+      ctx.fillText(this.cantAffordMessage.text, GAME_WIDTH / 2, msgY + msgH / 2);
 
       ctx.globalAlpha = 1;
       ctx.restore();
@@ -338,7 +323,7 @@ export class UpgradeScreen {
         pillW,
         pillH,
         3,
-        "rgba(0, 0, 0, 0.5)",
+        "rgba(0, 0, 0, 0.5)"
       );
       ctx.globalAlpha = 1;
 
@@ -399,14 +384,8 @@ export class UpgradeScreen {
 
         const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
         grad.addColorStop(0, BRANCH_COLORS[node.branch]);
-        grad.addColorStop(
-          0.6,
-          renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.4),
-        );
-        grad.addColorStop(
-          1,
-          renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15),
-        );
+        grad.addColorStop(0.6, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.4));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15));
         ctx.fillStyle = grad;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
@@ -576,11 +555,7 @@ export class UpgradeScreen {
     ctx.fillStyle = maxed ? "#44ff44" : "#aaa";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
-    ctx.fillText(
-      `Lv ${level}/${closest.maxLevel}`,
-      panelX + panelW - 10,
-      panelY + 8,
-    );
+    ctx.fillText(`Lv ${level}/${closest.maxLevel}`, panelX + panelW - 10, panelY + 8);
     ctx.restore();
 
     // Description
@@ -607,11 +582,7 @@ export class UpgradeScreen {
     } else {
       const canBuy = this.upgrades.canAfford(cost);
       ctx.fillStyle = canBuy ? COLORS.textGold : "#664444";
-      ctx.fillText(
-        `Cost: ${cost} coins — Tap node to buy`,
-        panelX + 10,
-        panelY + 40,
-      );
+      ctx.fillText(`Cost: ${cost} coins — Tap node to buy`, panelX + 10, panelY + 40);
     }
     ctx.restore();
 
@@ -754,11 +725,7 @@ export class UpgradeScreen {
       ctx.fillStyle = "#555";
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
-      ctx.fillText(
-        `Reach Lv10 (current: ${this.upgrades.save.highestLevel})`,
-        pBtnX,
-        barY - 4,
-      );
+      ctx.fillText(`Reach Lv10 (current: ${this.upgrades.save.highestLevel})`, pBtnX, barY - 4);
       ctx.restore();
     }
   }

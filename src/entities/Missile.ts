@@ -1,15 +1,7 @@
 import { Bullet } from "./Bullet";
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
-import {
-  Vec2,
-  vecSub,
-  vecAngle,
-  vecDist,
-  vecAdd,
-  vecScale,
-  vecFromAngle,
-} from "../utils/Math";
+import { Vec2, vecSub, vecAngle, vecAdd, vecScale, vecFromAngle } from "../utils/Math";
 import { GAME_WIDTH, GAME_HEIGHT } from "../utils/Constants";
 
 /**
@@ -27,7 +19,7 @@ export class Missile extends Bullet {
     direction: Vec2,
     speed: number,
     damage: number,
-    target: Enemy | null,
+    target: Enemy | null
   ) {
     super(x, y, direction, speed, damage, false, 0, false);
     this.target = target;

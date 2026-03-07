@@ -61,10 +61,7 @@ export class InputManager {
       const rect = canvas.getBoundingClientRect();
       const scaleX = GAME_WIDTH / rect.width;
       const scaleY = GAME_HEIGHT / rect.height;
-      this.mousePos = vec2(
-        (e.clientX - rect.left) * scaleX,
-        (e.clientY - rect.top) * scaleY,
-      );
+      this.mousePos = vec2((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
     };
 
     this.onMouseDown = (e: MouseEvent) => {
@@ -121,7 +118,7 @@ export class InputManager {
           const scaleY = GAME_HEIGHT / rect.height;
           this.mousePos = vec2(
             (touch.clientX - rect.left) * scaleX,
-            (touch.clientY - rect.top) * scaleY,
+            (touch.clientY - rect.top) * scaleY
           );
         }
       }

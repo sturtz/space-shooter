@@ -1,12 +1,4 @@
-import { UPGRADE_BASE_COST, UPGRADE_COST_GROWTH } from "../utils/Constants";
-
-export type UpgradeBranch =
-  | "dmg"
-  | "guns"
-  | "movement"
-  | "health"
-  | "mothership"
-  | "economy";
+export type UpgradeBranch = "dmg" | "guns" | "movement" | "health" | "mothership" | "economy";
 
 export interface UpgradeNode {
   id: string;
@@ -64,8 +56,8 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     description: "+25% damage per level",
     branch: "dmg",
     maxLevel: 4,
-    baseCost: 50,
-    costGrowth: 1.3,
+    baseCost: 10,
+    costGrowth: 2,
     effectPerLevel: 0.25,
     requires: [{ id: "root", level: 1 }],
     icon: "⚔",
@@ -80,7 +72,7 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 4,
     baseCost: 50,
     costGrowth: 1.3,
-    effectPerLevel: 0.20,
+    effectPerLevel: 0.2,
     requires: [{ id: "root", level: 1 }],
     icon: "🚀",
     depth: 1,
@@ -142,7 +134,7 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 4,
     baseCost: 200,
     costGrowth: 1.35,
-    effectPerLevel: 0.20,
+    effectPerLevel: 0.2,
     requires: [{ id: "t1_speed", level: 4 }],
     icon: "🚀",
     depth: 2,
@@ -200,7 +192,7 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 2,
     baseCost: 350,
     costGrowth: 1.4,
-    effectPerLevel: 0.50,
+    effectPerLevel: 0.5,
     requires: [{ id: "t1_dmg", level: 2 }],
     icon: "💀",
     depth: 2,
@@ -331,7 +323,7 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 800,
     costGrowth: 1,
-    effectPerLevel: 0.50,
+    effectPerLevel: 0.5,
     requires: [{ id: "t2_enemies", level: 2 }],
     icon: "👾",
     depth: 3,

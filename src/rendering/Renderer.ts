@@ -35,11 +35,11 @@ export class Renderer {
     }
 
     // Physical pixel buffer = display size × dpr (for sharpness on Retina / hi-DPI)
-    this.canvas.width  = Math.round(displayW * dpr);
+    this.canvas.width = Math.round(displayW * dpr);
     this.canvas.height = Math.round(displayH * dpr);
 
     // CSS display size — exact fit, centered by flex parent
-    this.canvas.style.width  = `${Math.round(displayW)}px`;
+    this.canvas.style.width = `${Math.round(displayW)}px`;
     this.canvas.style.height = `${Math.round(displayH)}px`;
 
     // Scale context so all game-coordinate drawing (0..GAME_WIDTH, 0..GAME_HEIGHT)
@@ -80,12 +80,7 @@ export class Renderer {
     this.ctx.fill();
   }
 
-  drawCircleStroke(
-    pos: Vec2,
-    radius: number,
-    color: string,
-    lineWidth: number = 1,
-  ) {
+  drawCircleStroke(pos: Vec2, radius: number, color: string, lineWidth: number = 1) {
     this.ctx.beginPath();
     this.ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
     this.ctx.strokeStyle = color;
@@ -98,14 +93,7 @@ export class Renderer {
     this.ctx.fillRect(x, y, w, h);
   }
 
-  drawRectStroke(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    color: string,
-    lineWidth: number = 1,
-  ) {
+  drawRectStroke(x: number, y: number, w: number, h: number, color: string, lineWidth: number = 1) {
     this.ctx.strokeStyle = color;
     this.ctx.lineWidth = lineWidth;
     this.ctx.strokeRect(x, y, w, h);
@@ -127,7 +115,7 @@ export class Renderer {
     color: string = COLORS.textPrimary,
     size: number = 14,
     align: CanvasTextAlign = "left",
-    baseline: CanvasTextBaseline = "top",
+    baseline: CanvasTextBaseline = "top"
   ) {
     this.ctx.font = `${size}px monospace`;
     this.ctx.fillStyle = color;
@@ -144,7 +132,7 @@ export class Renderer {
     outlineColor: string = "#000",
     size: number = 14,
     align: CanvasTextAlign = "left",
-    baseline: CanvasTextBaseline = "top",
+    baseline: CanvasTextBaseline = "top"
   ) {
     this.ctx.font = `${size}px monospace`;
     this.ctx.textAlign = align;
@@ -171,7 +159,7 @@ export class Renderer {
     color: string,
     size: number,
     align: CanvasTextAlign = "center",
-    baseline: CanvasTextBaseline = "middle",
+    baseline: CanvasTextBaseline = "middle"
   ) {
     this.ctx.font = `bold ${size}px 'Orbitron', monospace`;
     this.ctx.fillStyle = color;
@@ -189,7 +177,7 @@ export class Renderer {
     outlineColor: string,
     size: number,
     align: CanvasTextAlign = "center",
-    baseline: CanvasTextBaseline = "middle",
+    baseline: CanvasTextBaseline = "middle"
   ) {
     this.ctx.font = `bold ${size}px 'Orbitron', monospace`;
     this.ctx.textAlign = align;
@@ -218,14 +206,7 @@ export class Renderer {
   }
 
   /** Draw a filled rounded rectangle */
-  drawRoundedRect(
-    x: number,
-    y: number,
-    w: number,
-    h: number,
-    r: number,
-    color: string,
-  ) {
+  drawRoundedRect(x: number, y: number, w: number, h: number, r: number, color: string) {
     this.roundedRectPath(x, y, w, h, r);
     this.ctx.fillStyle = color;
     this.ctx.fill();
@@ -239,7 +220,7 @@ export class Renderer {
     h: number,
     r: number,
     color: string,
-    lineWidth: number = 1,
+    lineWidth: number = 1
   ) {
     this.roundedRectPath(x, y, w, h, r);
     this.ctx.strokeStyle = color;
@@ -258,7 +239,7 @@ export class Renderer {
     colorEnd: string,
     bgColor: string = "rgba(0,0,0,0.5)",
     borderColor: string = "rgba(255,255,255,0.1)",
-    radius: number = -1,
+    radius: number = -1
   ) {
     if (radius < 0) radius = h / 2;
     const fillW = Math.max(0, w * Math.max(0, Math.min(1, ratio)));
@@ -297,7 +278,7 @@ export class Renderer {
     radius: number,
     color: string,
     glowRadius: number = 0,
-    alpha: number = 0.3,
+    alpha: number = 0.3
   ) {
     if (glowRadius <= 0) glowRadius = radius * 2;
     const grad = this.ctx.createRadialGradient(
@@ -306,14 +287,14 @@ export class Renderer {
       radius * 0.3,
       pos.x,
       pos.y,
-      glowRadius,
+      glowRadius
     );
     grad.addColorStop(0, color);
     grad.addColorStop(
       0.4,
       color.replace(/[\d.]+\)$/, `${alpha * 0.5})`).includes("rgba")
         ? color
-        : this.hexToRgba(color, alpha * 0.5),
+        : this.hexToRgba(color, alpha * 0.5)
     );
     grad.addColorStop(1, "rgba(0,0,0,0)");
     this.ctx.fillStyle = grad;
@@ -335,7 +316,7 @@ export class Renderer {
       radius?: number;
       glow?: string;
       glowBlur?: number;
-    },
+    }
   ) {
     const {
       bg = "rgba(8, 8, 24, 0.88)",
@@ -392,7 +373,7 @@ export class Renderer {
       radius?: number;
       glow?: string;
       icon?: string;
-    },
+    }
   ) {
     const {
       bg = "rgba(20, 25, 50, 0.9)",
@@ -456,15 +437,12 @@ export class Renderer {
   /** Utility: darken a color */
   private darkenColor(color: string, amount: number): string {
     if (color.startsWith("rgba")) {
-      return color.replace(
-        /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/,
-        (_, r, g, b, a) => {
-          const nr = Math.max(0, Math.round(parseInt(r) * (1 - amount)));
-          const ng = Math.max(0, Math.round(parseInt(g) * (1 - amount)));
-          const nb = Math.max(0, Math.round(parseInt(b) * (1 - amount)));
-          return `rgba(${nr},${ng},${nb},${a})`;
-        },
-      );
+      return color.replace(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/, (_, r, g, b, a) => {
+        const nr = Math.max(0, Math.round(parseInt(r) * (1 - amount)));
+        const ng = Math.max(0, Math.round(parseInt(g) * (1 - amount)));
+        const nb = Math.max(0, Math.round(parseInt(b) * (1 - amount)));
+        return `rgba(${nr},${ng},${nb},${a})`;
+      });
     }
     return color;
   }

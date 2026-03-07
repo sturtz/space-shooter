@@ -1,11 +1,6 @@
 import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  MOTHERSHIP_COLLISION_RADIUS,
-  COLORS,
-} from "../utils/Constants";
+import { GAME_WIDTH, GAME_HEIGHT, MOTHERSHIP_COLLISION_RADIUS, COLORS } from "../utils/Constants";
 import { ShipImages, imageReady } from "../utils/Assets";
 
 export class Mothership extends Entity {
@@ -55,10 +50,8 @@ export class Mothership extends Entity {
     const cx = this.pos.x;
     const cy = this.pos.y;
 
-    const bodyColor =
-      this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
-    const glowColor =
-      this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothershipGlow;
+    const bodyColor = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
+    const glowColor = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothershipGlow;
     const pulseScale = 1 + Math.sin(this.pulseTimer * 2) * 0.08;
 
     ctx.save();
@@ -152,12 +145,7 @@ export class Mothership extends Entity {
     ctx.lineWidth = 1;
     ctx.strokeRect(barX, barY, barWidth, barHeight);
 
-    const hpColor =
-      hpRatio > 0.5
-        ? COLORS.hpBar
-        : hpRatio > 0.25
-          ? "#ffaa00"
-          : COLORS.hpBarDamage;
+    const hpColor = hpRatio > 0.5 ? COLORS.hpBar : hpRatio > 0.25 ? "#ffaa00" : COLORS.hpBarDamage;
     ctx.fillStyle = hpColor;
     ctx.fillRect(barX, barY, barWidth * hpRatio, barHeight);
 

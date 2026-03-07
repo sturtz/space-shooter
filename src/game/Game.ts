@@ -4,13 +4,8 @@ import { ParticleSystem } from "../systems/ParticleSystem";
 import { CollisionSystem } from "../systems/CollisionSystem";
 import { SpawnSystem } from "../systems/SpawnSystem";
 import { UpgradeManager, PlayerStats } from "../upgrades/UpgradeManager";
-import {
-  SaveData,
-  loadGame,
-  saveGame,
-  getDefaultSave,
-} from "../utils/SaveManager";
-import { Player, DashResult } from "../entities/Player";
+import { SaveData, loadGame, saveGame } from "../utils/SaveManager";
+import { Player } from "../entities/Player";
 import { Mothership } from "../entities/Mothership";
 import { Bullet } from "../entities/Bullet";
 import { Missile } from "../entities/Missile";
@@ -19,23 +14,19 @@ import { EnemyShip } from "../entities/EnemyShip";
 import { Enemy } from "../entities/Enemy";
 import { Coin } from "../entities/Coin";
 import {
-  Vec2,
   vec2,
   vecDist,
   vecSub,
   vecNormalize,
-  vecScale,
   vecFromAngle,
   vecAngle,
   randomAngle,
   randomRange,
-  circleCollision,
 } from "../utils/Math";
 import {
   GAME_WIDTH,
   GAME_HEIGHT,
   SPAWN_RATE_BASE,
-  ROCK_BASE_HP,
   ROCK_BASE_SPEED,
   COLORS,
 } from "../utils/Constants";
@@ -43,8 +34,6 @@ import { HUD } from "../ui/HUD";
 import { UpgradeScreen } from "../ui/UpgradeScreen";
 import { AudioManager } from "../audio/AudioManager";
 import { IGame } from "./GameInterface";
-import { BgImages, imageReady } from "../utils/Assets";
-
 export type GameState = "menu" | "playing" | "upgradeScreen" | "gameover";
 
 interface Star {
@@ -130,6 +119,7 @@ export class Game implements IGame {
 
   // Starfield
   stars: Star[] = [];
+  private bgCache: HTMLCanvasElement | null = null;
 
   constructor(canvas: HTMLCanvasElement) {
     this.renderer = new Renderer(canvas);
@@ -177,10 +167,7 @@ export class Game implements IGame {
 
     // Keyboard handlers for pause and dash
     window.addEventListener("keydown", (e) => {
-      if (
-        (e.key === "Escape" || e.key.toLowerCase() === "p") &&
-        this.state === "playing"
-      ) {
+      if ((e.key === "Escape" || e.key.toLowerCase() === "p") && this.state === "playing") {
         this.paused = !this.paused;
       }
       // Dash on Shift key
@@ -290,7 +277,7 @@ export class Game implements IGame {
     // Spawn initial small asteroids spread around the arena
     const initialRockCount = 8;
     for (let i = 0; i < initialRockCount; i++) {
-      const angle = ((Math.PI * 2 * i) / initialRockCount) + randomRange(-0.2, 0.2);
+      const angle = (Math.PI * 2 * i) / initialRockCount + randomRange(-0.2, 0.2);
       const dist = 180 + Math.random() * 100; // 180–280px from center
       const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
       const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
@@ -343,7 +330,7 @@ export class Game implements IGame {
         missileDir,
         this.MISSILE_SPEED,
         missileDmg,
-        target,
+        target
       );
       this.bullets.push(missile); // missiles go in bullets array for collision handling
     }
@@ -357,7 +344,7 @@ export class Game implements IGame {
       "#ff4466",
       50,
       0.1,
-      1.5,
+      1.5
     );
   }
 
@@ -408,16 +395,7 @@ export class Game implements IGame {
       const a = (i / 8) * Math.PI * 2;
       const px = this.player.pos.x + Math.cos(a) * this.CONE_RANGE * 0.7;
       const py = this.player.pos.y + Math.sin(a) * this.CONE_RANGE * 0.7;
-      this.particles.emitDirectional(
-        vec2(px, py),
-        a,
-        0.3,
-        1,
-        "#ccccdd",
-        30,
-        0.08,
-        1,
-      );
+      this.particles.emitDirectional(vec2(px, py), a, 0.3, 1, "#ccccdd", 30, 0.08, 1);
     }
   }
 
@@ -458,9 +436,13 @@ export class Game implements IGame {
   }
 
   updatePlaying(dt: number) {
-    // Timer — counts down but doesn't end the round; must kill boss to advance
+    // Timer — counts down; when it hits 0 the round ends (win)
     this.roundTimer -= dt;
-    if (this.roundTimer < 0) this.roundTimer = 0;
+    if (this.roundTimer <= 0) {
+      this.roundTimer = 0;
+      this.endRound(false); // time's up → round over (survived)
+      return;
+    }
 
     // Streak decay
     if (this.streakTimer > 0) {
@@ -559,7 +541,6 @@ export class Game implements IGame {
     // Collisions (delegated to CollisionSystem)
     this.collisions.checkBulletEnemyCollisions(this);
     if (this.collisions.checkEnemyMothershipCollisions(this)) return;
-    this.collisions.checkEnemyBulletPlayerCollisions(this);
     this.collisions.checkCoinCollections(this);
 
     // Enemy ships shooting (targets player now)
@@ -572,12 +553,7 @@ export class Game implements IGame {
     this.coins = this.coins.filter((c) => c.alive);
   }
 
-  spawnDamageNumber(
-    x: number,
-    y: number,
-    damage: number,
-    isCrit: boolean = false,
-  ) {
+  spawnDamageNumber(x: number, y: number, damage: number, isCrit: boolean = false) {
     if (damage === 0) {
       // Evade text
       this.damageNumbers.push({
@@ -650,8 +626,7 @@ export class Game implements IGame {
     // Drop coins
     const baseValue = enemy.coinValue;
     const dropMult = this.stats.coinDropMultiplier;
-    const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
+    const streakBonus = 1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
     let value = Math.max(1, Math.round(baseValue * dropMult * streakBonus));
 
     // Lucky drop check
@@ -714,30 +689,142 @@ export class Game implements IGame {
     this.renderer.endFrame();
   }
 
+  /** Build a hi-res procedural background cached on an offscreen canvas.
+   *  Renders nebula gradients + dense star field at native game resolution
+   *  so we never stretch a tiny image. Called once at init. */
+  private buildBgCache(): HTMLCanvasElement {
+    const w = GAME_WIDTH;
+    const h = GAME_HEIGHT;
+    const offscreen = document.createElement("canvas");
+    offscreen.width = w;
+    offscreen.height = h;
+    const ctx = offscreen.getContext("2d")!;
+
+    // ── Base fill — deep rose-purple (pinkish space feel) ────────────────
+    ctx.fillStyle = "#160a18";
+    ctx.fillRect(0, 0, w, h);
+
+    // ── Nebula clouds — shifted toward pink, rose, lavender palette ──────
+    const nebulae: {
+      x: number;
+      y: number;
+      r: number;
+      color: string;
+      alpha: number;
+    }[] = [
+      { x: w * 0.2, y: h * 0.25, r: 340, color: "200, 80, 140", alpha: 0.26 }, // rose
+      { x: w * 0.75, y: h * 0.65, r: 280, color: "155, 70, 175", alpha: 0.21 }, // lavender
+      { x: w * 0.5, y: h * 0.5, r: 420, color: "215, 90, 130", alpha: 0.18 }, // coral pink center
+      { x: w * 0.85, y: h * 0.15, r: 210, color: "170, 60, 155", alpha: 0.18 }, // purple-rose
+      { x: w * 0.15, y: h * 0.8, r: 260, color: "175, 50, 120", alpha: 0.2 }, // deep rose
+      { x: w * 0.6, y: h * 0.2, r: 230, color: "225, 100, 145", alpha: 0.17 }, // bright pastel pink
+      { x: w * 0.4, y: h * 0.75, r: 190, color: "185, 95, 165", alpha: 0.15 }, // soft mauve
+    ];
+
+    for (const neb of nebulae) {
+      const grad = ctx.createRadialGradient(neb.x, neb.y, 0, neb.x, neb.y, neb.r);
+      grad.addColorStop(0, `rgba(${neb.color}, ${neb.alpha})`);
+      grad.addColorStop(0.5, `rgba(${neb.color}, ${neb.alpha * 0.4})`);
+      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+    }
+
+    // ── Fine dust (very dim, adds texture) ──────────────────────────────
+    for (let i = 0; i < 600; i++) {
+      const dx = Math.random() * w;
+      const dy = Math.random() * h;
+      const dr = Math.random() * 1.2 + 0.3;
+      const da = Math.random() * 0.08 + 0.02;
+      ctx.globalAlpha = da;
+      ctx.fillStyle = `hsl(${220 + Math.random() * 60}, 30%, 60%)`;
+      ctx.beginPath();
+      ctx.arc(dx, dy, dr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    // ── Static stars (many layers, varied sizes & colors) ───────────────
+    // Tiny dim stars (background density)
+    for (let i = 0; i < 350; i++) {
+      const sx = Math.random() * w;
+      const sy = Math.random() * h;
+      const sr = Math.random() * 0.8 + 0.2;
+      const sa = Math.random() * 0.5 + 0.15;
+      ctx.globalAlpha = sa;
+      ctx.fillStyle = "#aabbdd";
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Medium stars (moderate brightness)
+    for (let i = 0; i < 80; i++) {
+      const sx = Math.random() * w;
+      const sy = Math.random() * h;
+      const sr = Math.random() * 1.2 + 0.5;
+      const sa = Math.random() * 0.6 + 0.3;
+      // Slight color variation: white, blue-white, warm-white
+      const hue = Math.random() < 0.3 ? 40 : 200 + Math.random() * 40;
+      ctx.globalAlpha = sa;
+      ctx.fillStyle = `hsl(${hue}, 30%, 90%)`;
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    // Bright stars with glow (a few focal points)
+    for (let i = 0; i < 20; i++) {
+      const sx = Math.random() * w;
+      const sy = Math.random() * h;
+      const sr = Math.random() * 1.5 + 1;
+      const glowR = sr * 4;
+      // Glow
+      const glow = ctx.createRadialGradient(sx, sy, 0, sx, sy, glowR);
+      glow.addColorStop(0, "rgba(200, 210, 255, 0.25)");
+      glow.addColorStop(0.3, "rgba(180, 190, 240, 0.08)");
+      glow.addColorStop(1, "rgba(0, 0, 0, 0)");
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = glow;
+      ctx.beginPath();
+      ctx.arc(sx, sy, glowR, 0, Math.PI * 2);
+      ctx.fill();
+      // Core
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = "#eef0ff";
+      ctx.beginPath();
+      ctx.arc(sx, sy, sr, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = 1;
+
+    // ── Subtle vignette (darken edges slightly) ─────────────────────────
+    const vignette = ctx.createRadialGradient(w / 2, h / 2, w * 0.25, w / 2, h / 2, w * 0.7);
+    vignette.addColorStop(0, "rgba(0, 0, 0, 0)");
+    vignette.addColorStop(1, "rgba(0, 0, 0, 0.25)");
+    ctx.fillStyle = vignette;
+    ctx.fillRect(0, 0, w, h);
+
+    return offscreen;
+  }
+
   renderStarfield() {
     const ctx = this.renderer.ctx;
 
-    // Layer 1 — parallax nebula background (full bleed)
-    if (imageReady(BgImages.parallax)) {
-      ctx.drawImage(BgImages.parallax, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-    } else {
-      // Solid fallback while image loads
-      ctx.fillStyle = COLORS.bg;
-      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    // Build & cache the procedural background on first call
+    if (!this.bgCache) {
+      this.bgCache = this.buildBgCache();
     }
 
-    // Layer 2 — stars overlay (subtle, semi-transparent)
-    if (imageReady(BgImages.stars)) {
-      ctx.globalAlpha = 0.55;
-      ctx.drawImage(BgImages.stars, 0, 0, GAME_WIDTH, GAME_HEIGHT);
-      ctx.globalAlpha = 1;
-    }
+    // Layer 1 — cached hi-res procedural background (full bleed, pixel-perfect)
+    ctx.drawImage(this.bgCache, 0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Layer 3 — procedural twinkle dots for animation (sparse, on top)
+    // Layer 2 — animated twinkle dots (sparse, on top of static bg)
     for (const star of this.stars) {
       const twinkle = 0.5 + 0.5 * Math.sin(this.gameTime * star.twinkleSpeed + star.x);
-      ctx.globalAlpha = star.brightness * twinkle * 0.4; // dimmer since bg already has stars
-      this.renderer.drawCircle(vec2(star.x, star.y), star.size * 0.7, "#ffffff");
+      ctx.globalAlpha = star.brightness * twinkle * 0.6;
+      this.renderer.drawCircle(vec2(star.x, star.y), star.size * 0.8, "#ddeeff");
     }
     ctx.globalAlpha = 1;
   }
@@ -751,14 +838,7 @@ export class Game implements IGame {
     const pulse = 1 + Math.sin(this.menuPulse * 1.5) * 0.1;
     ctx.save();
     ctx.globalAlpha = 0.15;
-    const motherGlow = ctx.createRadialGradient(
-      cx,
-      cy + 180,
-      0,
-      cx,
-      cy + 180,
-      80 * pulse,
-    );
+    const motherGlow = ctx.createRadialGradient(cx, cy + 180, 0, cx, cy + 180, 80 * pulse);
     motherGlow.addColorStop(0, COLORS.mothership);
     motherGlow.addColorStop(1, "rgba(0,0,0,0)");
     ctx.fillStyle = motherGlow;
@@ -783,7 +863,7 @@ export class Game implements IGame {
       "#000",
       30 * titleScale,
       "center",
-      "middle",
+      "middle"
     );
     ctx.restore();
 
@@ -795,7 +875,7 @@ export class Game implements IGame {
       COLORS.textSecondary,
       12,
       "center",
-      "middle",
+      "middle"
     );
 
     // Stats panel
@@ -814,7 +894,7 @@ export class Game implements IGame {
     ctx.fillText(
       `Level: ${this.save.currentLevel}   ⭐ ${this.save.starCoins}   💰 ${this.save.coins}`,
       cx,
-      cy - 35,
+      cy - 35
     );
     ctx.restore();
 
@@ -826,36 +906,22 @@ export class Game implements IGame {
     const startBtnY = cy + 10;
 
     if (blink) {
-      this.renderer.drawButton(
-        startBtnX,
-        startBtnY,
-        startBtnW,
-        startBtnH,
-        "TAP TO START",
-        {
-          bg: "rgba(0, 40, 30, 0.9)",
-          border: "rgba(0, 255, 204, 0.5)",
-          textColor: "#fff",
-          fontSize: 16,
-          radius: 10,
-          glow: "rgba(0, 255, 204, 0.2)",
-        },
-      );
+      this.renderer.drawButton(startBtnX, startBtnY, startBtnW, startBtnH, "TAP TO START", {
+        bg: "rgba(0, 40, 30, 0.9)",
+        border: "rgba(0, 255, 204, 0.5)",
+        textColor: "#fff",
+        fontSize: 16,
+        radius: 10,
+        glow: "rgba(0, 255, 204, 0.2)",
+      });
     } else {
-      this.renderer.drawButton(
-        startBtnX,
-        startBtnY,
-        startBtnW,
-        startBtnH,
-        "TAP TO START",
-        {
-          bg: "rgba(0, 30, 20, 0.8)",
-          border: "rgba(0, 255, 204, 0.25)",
-          textColor: "rgba(255,255,255,0.6)",
-          fontSize: 16,
-          radius: 10,
-        },
-      );
+      this.renderer.drawButton(startBtnX, startBtnY, startBtnW, startBtnH, "TAP TO START", {
+        bg: "rgba(0, 30, 20, 0.8)",
+        border: "rgba(0, 255, 204, 0.25)",
+        textColor: "rgba(255,255,255,0.6)",
+        fontSize: 16,
+        radius: 10,
+      });
     }
 
     // Controls info — hi-fi panel
@@ -872,16 +938,8 @@ export class Game implements IGame {
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(
-        "Touch & drag to move  •  Right edge: Dash",
-        cx,
-        controlsY + 4,
-      );
-      ctx.fillText(
-        "Auto-shoot  •  Destroy enemies → Coins → Upgrade",
-        cx,
-        controlsY + 18,
-      );
+      ctx.fillText("Touch & drag to move  •  Right edge: Dash", cx, controlsY + 4);
+      ctx.fillText("Auto-shoot  •  Destroy enemies → Coins → Upgrade", cx, controlsY + 18);
       ctx.restore();
     } else {
       ctx.save();
@@ -889,16 +947,8 @@ export class Game implements IGame {
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(
-        "Mouse to move  •  Shift to dash",
-        cx,
-        controlsY + 4,
-      );
-      ctx.fillText(
-        "Auto-fires to beat  •  Destroy enemies → Coins → Upgrade",
-        cx,
-        controlsY + 18,
-      );
+      ctx.fillText("Mouse to move  •  Shift to dash", cx, controlsY + 4);
+      ctx.fillText("Auto-fires to beat  •  Destroy enemies → Coins → Upgrade", cx, controlsY + 18);
       ctx.restore();
     }
   }
@@ -942,10 +992,7 @@ export class Game implements IGame {
       ctx.save();
 
       // === Loader arc (fills up between beats, white, like a cooldown spinner) ===
-      const loaderProgress = Math.min(
-        1,
-        this.coneTimeSinceLastFire / this.coneMeasuredInterval,
-      );
+      const loaderProgress = Math.min(1, this.coneTimeSinceLastFire / this.coneMeasuredInterval);
       const loaderArc = loaderProgress * Math.PI * 2;
       const loaderRadius = 18; // small, tight around the player
 
@@ -1016,7 +1063,7 @@ export class Game implements IGame {
         ring.currentRadius * 0.7,
         ring.x,
         ring.y,
-        ring.currentRadius,
+        ring.currentRadius
       );
       gradient.addColorStop(0, "rgba(100, 220, 255, 0)");
       gradient.addColorStop(1, `rgba(100, 220, 255, ${alpha * 0.3})`);
@@ -1040,7 +1087,7 @@ export class Game implements IGame {
         "#000",
         dn.text.endsWith("!") ? 12 : 10,
         "center",
-        "middle",
+        "middle"
       );
     }
     this.renderer.ctx.globalAlpha = 1;
@@ -1052,8 +1099,7 @@ export class Game implements IGame {
     }
 
     // Compute actual streak coin bonus for HUD (Issue #19 fix)
-    const streakBonus =
-      1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
+    const streakBonus = 1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
 
     // HUD
     this.hud.render(this.renderer, {
@@ -1066,8 +1112,6 @@ export class Game implements IGame {
       level: this.save.currentLevel,
       mothershipHp: this.mothership.hp,
       mothershipMaxHp: this.mothership.maxHp,
-      playerShields: this.player.shields,
-      playerMaxShields: this.player.maxShields,
       streakCoinBonus: streakBonus,
       dashReady: this.player.dashReady,
       dashCooldownRatio: this.player.dashCooldownRatio,
@@ -1124,14 +1168,7 @@ export class Game implements IGame {
     if (this.player.dashReady) {
       // Ready — glowing circle
       ctx.globalAlpha = 0.1;
-      const dashGlow = ctx.createRadialGradient(
-        dashX,
-        dashY,
-        0,
-        dashX,
-        dashY,
-        dashR * 1.5,
-      );
+      const dashGlow = ctx.createRadialGradient(dashX, dashY, 0, dashX, dashY, dashR * 1.5);
       dashGlow.addColorStop(0, COLORS.dashReady);
       dashGlow.addColorStop(1, "rgba(0,0,0,0)");
       ctx.fillStyle = dashGlow;
@@ -1212,7 +1249,7 @@ export class Game implements IGame {
       "#000",
       24,
       "center",
-      "middle",
+      "middle"
     );
     ctx.restore();
 
@@ -1236,22 +1273,17 @@ export class Game implements IGame {
     ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Check if player died
-    const playerDied = this.player && this.player.isDead;
-    const title = playerDied ? "SHIP DESTROYED" : "ROUND COMPLETE";
-    const titleColor = playerDied ? "#ff4444" : "#44ff88";
-    const glowColor = playerDied
-      ? "rgba(255, 50, 50, 0.15)"
-      : "rgba(68, 255, 136, 0.15)";
+    const title = "ROUND COMPLETE";
+    const titleColor = "#44ff88";
 
     // Results panel
     const panelW = 320;
     const panelH = 200;
     this.renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
       bg: "rgba(6, 6, 20, 0.92)",
-      border: playerDied ? "rgba(255, 68, 68, 0.3)" : "rgba(68, 255, 136, 0.3)",
+      border: "rgba(68, 255, 136, 0.3)",
       radius: 12,
-      glow: glowColor,
+      glow: "rgba(68, 255, 136, 0.15)",
       glowBlur: 20,
     });
 
@@ -1267,7 +1299,7 @@ export class Game implements IGame {
       "#000",
       18,
       "center",
-      "middle",
+      "middle"
     );
     ctx.restore();
 
@@ -1279,7 +1311,7 @@ export class Game implements IGame {
       COLORS.textPrimary,
       14,
       "center",
-      "middle",
+      "middle"
     );
 
     // Divider line

@@ -74,12 +74,7 @@ export function randomAngle(): number {
   return Math.random() * Math.PI * 2;
 }
 
-export function circleCollision(
-  pos1: Vec2,
-  radius1: number,
-  pos2: Vec2,
-  radius2: number,
-): boolean {
+export function circleCollision(pos1: Vec2, radius1: number, pos2: Vec2, radius2: number): boolean {
   const dist = vecDist(pos1, pos2);
   return dist < radius1 + radius2;
 }

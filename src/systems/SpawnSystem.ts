@@ -2,20 +2,11 @@ import { IGame } from "../game/GameInterface";
 import { Rock } from "../entities/Rock";
 import { EnemyShip } from "../entities/EnemyShip";
 import { Bullet } from "../entities/Bullet";
-import {
-  Vec2,
-  vec2,
-  vecSub,
-  vecNormalize,
-  randomAngle,
-  randomRange,
-  vecDist,
-} from "../utils/Math";
+import { vec2, vecSub, vecNormalize, randomAngle, vecDist } from "../utils/Math";
 import {
   GAME_WIDTH,
   GAME_HEIGHT,
   SPAWN_DISTANCE,
-  SPAWN_RATE_BASE,
   ROCK_BASE_HP,
   ROCK_BIG_HP,
   ROCK_BASE_SPEED,
@@ -37,8 +28,7 @@ export class SpawnSystem {
     this.turretCooldown = 0;
     this.msRegenTimer = 0;
     this.msBarrierTimer = 0;
-    this.msBarrierHitsRemaining =
-      game.stats.msBarrierHits > 0 ? game.stats.msBarrierHits : 0;
+    this.msBarrierHitsRemaining = game.stats.msBarrierHits > 0 ? game.stats.msBarrierHits : 0;
   }
 
   /** Spawn an enemy at the edge of the map */
@@ -52,17 +42,27 @@ export class SpawnSystem {
 
     // Determine enemy type based on level
     if (level <= 3 || Math.random() < 0.5 / level) {
-      // Rocks — big rock chance ramps up over the round
-      // Early: mostly small rocks (5% big). Late: up to 40% big.
+      // Rocks — three sizes: small / medium / large.
+      // Big + medium chances ramp up over the round.
       const elapsed = game.roundDuration - game.roundTimer;
-      const roundProgress =
-        game.roundDuration > 0 ? Math.min(1, elapsed / game.roundDuration) : 0;
-      const bigRockChance = 0.05 + roundProgress * 0.35; // 5% → 40%
-      const isBig = Math.random() < bigRockChance;
-      const baseHp = isBig ? ROCK_BIG_HP : ROCK_BASE_HP;
+      const roundProgress = game.roundDuration > 0 ? Math.min(1, elapsed / game.roundDuration) : 0;
+      const bigRockChance = 0.05 + roundProgress * 0.3; // 5% → 35%
+      const medRockChance = 0.1 + roundProgress * 0.2; // 10% → 30%
+
+      const roll = Math.random();
+      const isBig = roll < bigRockChance;
+      const isMed = !isBig && roll < bigRockChance + medRockChance;
+
+      // HP: lg=ROCK_BIG_HP, md≈3, sm=ROCK_BASE_HP
+      const baseHp = isBig ? ROCK_BIG_HP : isMed ? 3 : ROCK_BASE_HP;
       const hp = baseHp + Math.floor(level * 0.3);
       const speed = ROCK_BASE_SPEED + level * 2;
-      const rock = new Rock(x, y, hp, speed, isBig);
+      // Medium rocks use small sprite pool at 1.4× scale (radius ≈ 14px)
+      const sizeScale = isMed ? 1.4 : 1.0;
+      const rock = new Rock(x, y, hp, speed, isBig, sizeScale);
+
+      // Coin values: small=1, medium=2, large=3
+      rock.coinValue = isBig ? 3 : isMed ? 2 : 1;
 
       // Elite check
       if (level >= 5 && Math.random() < 0.05) {
@@ -101,16 +101,7 @@ export class SpawnSystem {
       if (enemy instanceof EnemyShip && enemy.shouldShoot()) {
         // Target the PLAYER, not the mothership
         const dir = vecNormalize(vecSub(game.player.pos, enemy.pos));
-        const bullet = new Bullet(
-          enemy.pos.x,
-          enemy.pos.y,
-          dir,
-          200,
-          1,
-          false,
-          0,
-          true,
-        );
+        const bullet = new Bullet(enemy.pos.x, enemy.pos.y, dir, 200, 1, false, 0, true);
         game.enemyBullets.push(bullet);
       }
     }
@@ -161,23 +152,20 @@ export class SpawnSystem {
       turretDmg,
       false,
       0,
-      false,
+      false
     );
     game.bullets.push(bullet);
 
     // Visual
     game.particles.emitDirectional(
-      vec2(
-        game.mothership.pos.x + dir.x * 20,
-        game.mothership.pos.y + dir.y * 20,
-      ),
+      vec2(game.mothership.pos.x + dir.x * 20, game.mothership.pos.y + dir.y * 20),
       Math.atan2(dir.y, dir.x),
       0.2,
       2,
       COLORS.mothership,
       60,
       0.1,
-      1,
+      1
     );
   }
 

@@ -50,10 +50,5 @@ export interface IGame {
   startRun(): void;
   endRound(mothershipDestroyed: boolean): void;
   onEnemyKilled(enemy: Enemy): void;
-  spawnDamageNumber(
-    x: number,
-    y: number,
-    damage: number,
-    isCrit?: boolean,
-  ): void;
+  spawnDamageNumber(x: number, y: number, damage: number, isCrit?: boolean): void;
 }

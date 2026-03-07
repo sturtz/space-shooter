@@ -641,9 +641,9 @@ Each frame, render order is:
 
 ```
 1. renderStarfield()
-   a. Parallax nebula background image (full-bleed)
-   b. Stars overlay image (55% opacity)
-   c. Procedural twinkle dots (animated)
+   a. Cached procedural background (offscreen canvas at native 900×600)
+      — nebula gradients, dust, multi-layer stars with glow
+   b. Animated twinkle dots (procedural, on top of static cache)
 
 2. State-specific render:
    "playing":
@@ -815,3 +815,133 @@ User clicks "Start Run"
   - `InputManager` coordinate conversion via `getBoundingClientRect()` continues to work correctly because it operates on CSS coordinates
 
 **Result:** Canvas is perfectly centered (letterboxed with dark bg bars when aspect doesn't match), crisp on Retina, and touch-safe on mobile. No game logic changes needed.
+
+### March 2026 — Procedural Hi-Res Background
+
+**Problem:** Background images (`pink-parallax-space-stars.png`, `stars.png`) were only 272×160 pixels, being stretched to fill the 900×600 game canvas. This caused severe blurriness and the dark source images made the overall scene too dark and muddy.
+
+**Files changed:**
+
+- **`Game.ts`**
+  - Added `buildBgCache()` — procedurally generates a rich space background on an offscreen `<canvas>` at native 900×600 resolution. Includes:
+    - Brighter base fill (`#0c0c22` vs old `#0a0a1a`)
+    - 6 nebula cloud gradients (purple, blue, magenta, teal, deep purple, pink) for color depth
+    - 600 fine dust particles for texture
+    - 350 tiny dim stars + 80 medium stars + 20 bright stars with radial glow halos
+    - Subtle edge vignette
+  - Added `bgCache: HTMLCanvasElement | null` field — built lazily on first render, reused every frame
+  - Replaced `renderStarfield()` — now draws the cached offscreen canvas (1 `drawImage` call) instead of stretching two tiny PNGs. Animated twinkle dots still drawn on top with higher opacity (0.6 vs old 0.4)
+  - Removed `BgImages` / `imageReady` imports (no longer needed)
+
+**Result:** Background is sharp at any display size (rendered at native game resolution, no upscaling), visibly brighter with colorful nebula depth, and zero additional asset loading. The offscreen cache means the complex generation runs once — runtime cost is a single `drawImage` per frame.
+
+### March 2026 — Player Ship → ship-glider.svg
+
+**Change:** Replaced the old `player-still.png` / `player-moving.png` raster sprites with `ship-glider.svg` (Spaceship Glider, public domain via openclipart.org). The SVG is a detailed yellow-and-red glider design with a natural nose-up orientation.
+
+**Files changed:**
+
+- **`src/utils/Assets.ts`**
+  - Added `glider: img("/assets/ships/ship-glider.svg")` to `PlayerImages`. The existing `still` and `moving` entries are retained for reference but no longer used by `Player.ts`.
+
+- **`src/entities/Player.ts`** — `render()` overhauled:
+  - `SPRITE_SIZE` bumped from 22 → 36 game-pixels to better showcase the SVG detail.
+  - All three render paths (normal, dash-flash, fallback) now reference `PlayerImages.glider`.
+  - The `glider` SVG has its nose pointing north (−Y) in SVG coordinate space; the existing `ctx.rotate(this.angle + Math.PI/2)` rotation is correct for this orientation — no change to rotation math needed.
+  - Added a subtle `shadowColor: "#ffcc00"` / `shadowBlur: 10` engine-glow effect when `isMoving` is true, giving visual feedback for movement.
+  - Canvas fallback (drawn if SVG hasn't loaded yet) uses matching gold `#FFDB78` fill and red `#ED1C24` stroke to echo the SVG color scheme.
+
+**Result:** Player ship now displays as the glider SVG at all times (still, moving, dashing). Dash cyan-tint overlay and invincibility blink work unchanged. Shield ring and dash cooldown arcs render on top as before.
+
+### March 2026 — Round Timer Now Ends the Round
+
+**Bug:** The round countdown reached zero but the round never ended — you had to kill the boss to advance. The `updatePlaying()` timer block only clamped `roundTimer` to `0` without calling `endRound()`.
+
+**File changed:**
+
+- **`src/game/Game.ts`** — `updatePlaying()` timer block:
+  - **Before:** `if (this.roundTimer < 0) this.roundTimer = 0;` (clamps only)
+  - **After:** `if (this.roundTimer <= 0) { this.roundTimer = 0; this.endRound(false); return; }` — calls `endRound(false)` (the "survived" path: levels up, awards a star coin) and returns immediately to stop further update work that frame.
+
+**Result:** When the round timer hits zero the round ends as a win (ROUND COMPLETE screen, level incremented, star coin awarded) whether or not the boss has been killed.
+
+### March 2026 — Galaga-Inspired Ship SVG Redesign
+
+**Change:** Replaced the repurposed `ship-glider.svg` (originally a generic open-source glider with red/white Galaga colors applied) with a purpose-built Galaga-style fighter drawn from scratch in SVG.
+
+**Design:**
+- ViewBox `0 0 100 110` (nose pointing up, −Y, matches existing `rotate(angle + Math.PI/2)` convention)
+- Navy blue fuselage (`#1e3db5`) with a lighter center highlight stripe (`#2a52d4`)
+- Swept-back wings (`#1a3aaa`) with subtle white outline
+- Red wing cannons (`#cc2222`) with bright tip highlights (`#ff4444`)
+- Yellow cockpit dome (`#ffcc00`) with a glint highlight
+- Dual orange engine nozzles at the tail
+- Yellow wing-tip accent dots (like classic Galaga's nav lights)
+- Drop shadow layer for depth
+- Dark navy outline (`#0a1a44`) throughout
+
+**Files changed:**
+
+- **`public/assets/ships/ship-glider.svg`** — fully rewritten with the new Galaga fighter design
+- **`src/entities/Player.ts`** — updated `render()`:
+  - Replaced single `SPRITE_SIZE = 24` (square) with `SPRITE_W = 26` / `SPRITE_H = 29` to preserve the 100:110 aspect ratio of the new viewBox
+  - All three `drawImage()` calls (normal, dash-flash, fallback paths) updated to use `SPRITE_W`/`SPRITE_H`
+  - Engine-glow `shadowColor: "#ffcc00"` now matches the yellow cockpit and nozzles
+
+### March 2026 — Removed Ship HP and Player Collision
+
+**Change:** The player ship no longer has HP, shields, or any collision with enemy bullets. The player is invincible — enemy fire passes through harmlessly.
+
+**Rationale:** The game design focuses on protecting the Mothership, not the player. Removing player HP/collision simplifies the core loop, removes frustration from enemy bullet spam, and keeps the focus on positioning and offense.
+
+**Files changed:**
+
+- **`src/entities/Player.ts`**
+  - Removed `shields`, `maxShields`, `shieldRegenTimer`, `invincibleTimer` fields
+  - Removed `DASH_BASE_INVINCIBILITY` constant
+  - Removed `updateStats()` lines that set shield values
+  - Removed shield regen block from `update()`
+  - Removed i-frame assignment from `tryDash()`
+  - Removed `takeDamage()` method entirely
+  - Removed `healShield()` method entirely
+  - Removed `isDead` getter entirely
+  - Removed invincibility blink from `render()`
+  - Removed shield arc ring from `render()`
+
+- **`src/systems/CollisionSystem.ts`**
+  - Removed `checkEnemyBulletPlayerCollisions()` method entirely (enemy bullets vs player)
+  - Removed lifesteal `healShield()` call from `checkBulletEnemyCollisions()`
+  - Cleaned up unused imports (`Rock`, `EnemyShip`, `Bullet`, `vecSub`, `vecNormalize`, `vecScale`, `vecFromAngle`)
+
+- **`src/game/Game.ts`**
+  - Removed `checkEnemyBulletPlayerCollisions(this)` call from `updatePlaying()`
+  - Removed `playerShields` / `playerMaxShields` from HUD data object
+  - Simplified `renderGameOver()` — removed `playerDied` branch, always shows "ROUND COMPLETE"
+
+- **`src/ui/HUD.ts`**
+  - Removed `playerShields` / `playerMaxShields` from `HUDData` interface
+  - Removed shield bar from left panel render
+  - Left panel height is now always fixed at 30px (dash indicator only)
+
+**Result:** Enemy bullets still spawn and fly toward the player (for visual interest and the dash EMP mechanic), but hitting the player has no effect. The only loss condition remains Mothership HP reaching zero.
+
+### March 2026 — Ship Switched to spaceship.svg + Non-Cartoony Recolor + Pink Background
+
+**Changes:**
+
+1. **Player ship** — switched from hand-drawn `ship-glider.svg` to `public/assets/ships/spaceship.svg` (a detailed SVG Repo spaceship silhouette). Recolored for a realistic, non-cartoony look:
+   - Hull: horizontal metallic gradient `#0e1f4a → #243d88 → #0e1f4a` (deep navy, not flat)
+   - Cockpit: dark tinted radial gradient (`#4a6fa0 → #0a1a2e`) — looks like glass, not a yellow cartoon dome
+   - Nav lights: dim dark-red (`#7a1010`, 85% opacity) — subtle, not bright arcade dots
+   - Outline: near-black `#050d1e`
+   - ViewBox is square `572×572` — `Player.ts` updated to `SPRITE_W = SPRITE_H = 28`
+
+2. **Background** — shifted nebula palette from blue/purple to pink/rose/lavender:
+   - Base fill: `#160a18` (dark rose-purple, replaces `#10102c`)
+   - 7 nebula clouds now use rose (`200,80,140`), lavender (`155,70,175`), coral pink (`215,90,130`), purple-rose, deep rose, bright pastel pink, and soft mauve — replacing the previous blue/teal/purple set
+
+**Files changed:**
+- `public/assets/ships/spaceship.svg` — new recolored ship with gradients and tinted glass
+- `src/utils/Assets.ts` — `PlayerImages.glider` now loads `spaceship.svg`
+- `src/entities/Player.ts` — `SPRITE_W = SPRITE_H = 28` (square viewBox)
+- `src/game/Game.ts` — `buildBgCache()` base fill + nebula palette shifted to pinks/roses

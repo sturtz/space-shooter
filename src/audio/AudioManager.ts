@@ -242,7 +242,11 @@ export class AudioManager {
       this.coneTrackTimer = null;
     }
     for (const n of this.coneTrackNodes) {
-      try { n.stop(); } catch (_) { /* already stopped */ }
+      try {
+        n.stop();
+      } catch (_) {
+        /* already stopped */
+      }
     }
     this.coneTrackNodes = [];
   }
@@ -298,9 +302,12 @@ export class AudioManager {
 
     this.coneBeatIndex++;
 
-    this.coneTrackTimer = window.setTimeout(() => {
-      this.scheduleConeLoop();
-    }, BEAT * 1000 - 25);
+    this.coneTrackTimer = window.setTimeout(
+      () => {
+        this.scheduleConeLoop();
+      },
+      BEAT * 1000 - 25
+    );
   }
 
   /** Deep muffled kick — low sine with slow decay, no click transient */

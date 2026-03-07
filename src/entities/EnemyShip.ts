@@ -1,21 +1,7 @@
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
-import {
-  Vec2,
-  vec2,
-  vecSub,
-  vecNormalize,
-  vecAdd,
-  vecScale,
-  vecAngle,
-  randomRange,
-} from "../utils/Math";
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  ENEMY_SHIP_SIZE,
-  COLORS,
-} from "../utils/Constants";
+import { vec2, vecSub, vecNormalize, vecAdd, vecScale, vecAngle, randomRange } from "../utils/Math";
+import { ENEMY_SHIP_SIZE, COLORS } from "../utils/Constants";
 
 export class EnemyShip extends Enemy {
   shootCooldown: number;
@@ -24,13 +10,7 @@ export class EnemyShip extends Enemy {
   wobbleOffset: number;
   wobbleTimer: number = 0;
 
-  constructor(
-    x: number,
-    y: number,
-    hp: number,
-    speed: number,
-    canShoot: boolean = false,
-  ) {
+  constructor(x: number, y: number, hp: number, speed: number, canShoot: boolean = false) {
     super(x, y, ENEMY_SHIP_SIZE, hp, speed, 2);
     this.canShoot = canShoot;
     this.shootCooldown = randomRange(2, 4);
@@ -48,10 +28,7 @@ export class EnemyShip extends Enemy {
     const dir = vecNormalize(vecSub(this.targetPos, this.pos));
     const wobble = Math.sin(this.wobbleTimer * 3 + this.wobbleOffset) * 0.3;
     const moveDir = vec2(dir.x + dir.y * wobble, dir.y - dir.x * wobble);
-    this.pos = vecAdd(
-      this.pos,
-      vecScale(vecNormalize(moveDir), this.effectiveSpeed * dt),
-    );
+    this.pos = vecAdd(this.pos, vecScale(vecNormalize(moveDir), this.effectiveSpeed * dt));
     this.angle = vecAngle(dir);
 
     // Shoot cooldown
@@ -80,11 +57,7 @@ export class EnemyShip extends Enemy {
     ctx.lineJoin = "miter";
 
     const isPoisoned = this.poisonTimer > 0;
-    const mainColor = this.isElite
-      ? "#ffaa00"
-      : isPoisoned
-        ? "#44ff44"
-        : COLORS.enemyShip;
+    const mainColor = this.isElite ? "#ffaa00" : isPoisoned ? "#44ff44" : COLORS.enemyShip;
     const accentColor = this.isElite ? "#ff6600" : COLORS.enemyShipAccent;
 
     // Engine exhaust flicker
@@ -155,13 +128,7 @@ export class EnemyShip extends Enemy {
       const barX = this.pos.x - barW / 2;
       const barY = this.pos.y - ENEMY_SHIP_SIZE - 6;
       renderer.drawRect(barX, barY, barW, barH, "#333");
-      renderer.drawRect(
-        barX,
-        barY,
-        barW * (this.hp / this.maxHp),
-        barH,
-        COLORS.hpBarDamage,
-      );
+      renderer.drawRect(barX, barY, barW * (this.hp / this.maxHp), barH, COLORS.hpBarDamage);
     }
   }
 }

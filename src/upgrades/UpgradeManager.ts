@@ -1,12 +1,5 @@
 import { SaveData } from "../utils/SaveManager";
-import {
-  UPGRADE_TREE,
-  STAR_UPGRADES,
-  getUpgradeCost,
-  UpgradeNode,
-  UpgradeBranch,
-  StarUpgrade,
-} from "./UpgradeTree";
+import { getUpgradeCost, UpgradeNode, StarUpgrade } from "./UpgradeTree";
 import {
   PLAYER_BASE_SPEED,
   PLAYER_BASE_FIRE_RATE,
@@ -137,13 +130,13 @@ export class UpgradeManager {
 
     // === DAMAGE ===
     let damage = PLAYER_BASE_DAMAGE;
-    damage *= 1 + this.getLevel("dmg_core") * 0.50;
+    damage *= 1 + this.getLevel("dmg_core") * 0.5;
     damage *= 1 + this.getLevel("guns_caliber") * 0.25;
     damage *= starPower;
 
     // === MOVEMENT ===
     let moveSpeed = PLAYER_BASE_SPEED;
-    moveSpeed *= 1 + this.getLevel("move_core") * 0.50;
+    moveSpeed *= 1 + this.getLevel("move_core") * 0.5;
     moveSpeed *= starSpeed;
 
     // === FIRE RATE ===
@@ -179,7 +172,7 @@ export class UpgradeManager {
     const coinDropMult = coinValueMult;
 
     // Enemy density scales 50% per game level
-    const enemySpawnMult = 1 + (this.save.currentLevel - 1) * 0.50;
+    const enemySpawnMult = 1 + (this.save.currentLevel - 1) * 0.5;
 
     // === CRIT ===
     const critChance = this.getLevel("dmg_crit") * 0.05;
@@ -243,8 +236,7 @@ export class UpgradeManager {
 
     // === MOTHERSHIP BARRIER ===
     const msBarrierLevel = this.getLevel("ms_barrier");
-    const msBarrierHits =
-      msBarrierLevel > 0 ? 1 + Math.floor(msBarrierLevel / 3) : 0;
+    const msBarrierHits = msBarrierLevel > 0 ? 1 + Math.floor(msBarrierLevel / 3) : 0;
     const msBarrierCooldown = 25;
 
     // === TURRET ===

@@ -10,12 +10,7 @@ import {
   vecDist,
   randomRange,
 } from "../utils/Math";
-import {
-  COIN_SIZE,
-  COIN_LIFETIME,
-  COIN_SPEED,
-  COLORS,
-} from "../utils/Constants";
+import { COIN_SIZE, COIN_LIFETIME, COIN_SPEED, COLORS } from "../utils/Constants";
 import { ItemImages, imageReady } from "../utils/Assets";
 
 export class Coin extends Entity {
@@ -115,7 +110,7 @@ export class Coin extends Entity {
         color,
         8,
         "center",
-        "middle",
+        "middle"
       );
     }
 

@@ -1,12 +1,5 @@
 import { Entity } from "./Entity";
-import {
-  Vec2,
-  vec2,
-  vecSub,
-  vecNormalize,
-  vecAdd,
-  vecScale,
-} from "../utils/Math";
+import { Vec2, vec2 } from "../utils/Math";
 import { GAME_WIDTH, GAME_HEIGHT } from "../utils/Constants";
 
 /**
@@ -27,14 +20,7 @@ export abstract class Enemy extends Entity {
   slowFactor: number = 1; // 1 = normal speed, < 1 = slowed
   slowTimer: number = 0;
 
-  constructor(
-    x: number,
-    y: number,
-    radius: number,
-    hp: number,
-    speed: number,
-    coinValue: number,
-  ) {
+  constructor(x: number, y: number, radius: number, hp: number, speed: number, coinValue: number) {
     super(x, y, radius);
     this.hp = hp;
     this.maxHp = hp;

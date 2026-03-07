@@ -2,23 +2,8 @@ import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
 import { InputManager } from "../input/InputManager";
 import { PlayerStats } from "../upgrades/UpgradeManager";
-import {
-  Vec2,
-  vec2,
-  vecAdd,
-  vecSub,
-  vecScale,
-  vecNormalize,
-  vecAngle,
-  vecFromAngle,
-  clamp,
-} from "../utils/Math";
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  PLAYER_COLLISION_RADIUS,
-  COLORS,
-} from "../utils/Constants";
+import { Vec2, vec2, vecScale, vecFromAngle, clamp } from "../utils/Math";
+import { GAME_WIDTH, GAME_HEIGHT, PLAYER_COLLISION_RADIUS, COLORS } from "../utils/Constants";
 import { PlayerImages, imageReady } from "../utils/Assets";
 
 export interface DashResult {
@@ -29,20 +14,13 @@ export interface DashResult {
 export class Player extends Entity {
   stats!: PlayerStats;
   fireCooldown: number = 0;
-  invincibleTimer: number = 0;
-
-  // Shield system (from health_core upgrade)
-  shields: number = 0;
-  maxShields: number = 0;
-  shieldRegenTimer: number = 0;
 
   // Dash ability
   dashCooldown: number = 0;
-  readonly DASH_COOLDOWN_TIME = 2.5;       // seconds between dashes
-  readonly DASH_BASE_DISTANCE = 110;       // pixels to cover per dash
-  readonly DASH_DURATION = 0.18;           // seconds the dash motion takes
-  readonly DASH_BASE_INVINCIBILITY = 0.25; // i-frame duration (at least DASH_DURATION)
-  readonly DASH_BASE_RING_RADIUS = 60;     // base explosion ring radius
+  readonly DASH_COOLDOWN_TIME = 2.5; // seconds between dashes
+  readonly DASH_BASE_DISTANCE = 110; // pixels to cover per dash
+  readonly DASH_DURATION = 0.18; // seconds the dash motion takes
+  readonly DASH_BASE_RING_RADIUS = 60; // base explosion ring radius
 
   // Smooth dash state
   isDashing: boolean = false;
@@ -58,14 +36,9 @@ export class Player extends Entity {
 
   updateStats(stats: PlayerStats) {
     this.stats = stats;
-    this.maxShields = stats.playerShields;
-    this.shields = this.maxShields;
   }
 
   update(dt: number) {
-    if (this.invincibleTimer > 0) {
-      this.invincibleTimer -= dt;
-    }
     if (this.fireCooldown > 0) {
       this.fireCooldown -= dt;
     }
@@ -82,15 +55,6 @@ export class Player extends Entity {
       if (this.dashTimer <= 0) {
         this.isDashing = false;
         this.dashTimer = 0;
-      }
-    }
-
-    // Shield regen
-    if (this.stats.shieldRegenInterval > 0 && this.shields < this.maxShields) {
-      this.shieldRegenTimer += dt;
-      if (this.shieldRegenTimer >= this.stats.shieldRegenInterval) {
-        this.shieldRegenTimer = 0;
-        this.shields = Math.min(this.maxShields, this.shields + 1);
       }
     }
   }
@@ -144,55 +108,8 @@ export class Player extends Entity {
     this.dashTimer = this.DASH_DURATION;
     this.dashVelocity = vecScale(dashDir, dashSpeed);
 
-    // I-frames cover at least the full dash duration
-    const totalInvincibility = Math.max(
-      this.DASH_DURATION + 0.08,
-      this.DASH_BASE_INVINCIBILITY + this.stats.dashInvincibility,
-    );
-    this.invincibleTimer = Math.max(this.invincibleTimer, totalInvincibility);
-
     const ringRadius = this.DASH_BASE_RING_RADIUS + this.stats.flashbangRadius;
     return { dashed: true, flashbangRadius: ringRadius };
-  }
-
-  /**
-   * Take damage. Player has no HP — hits either absorb on shields
-   * or grant invincibility frames. Player never dies from combat.
-   */
-  takeDamage(amount: number): {
-    actualDamage: number;
-    evaded: boolean;
-    playerDied: boolean;
-  } {
-    // Invincibility check
-    if (this.invincibleTimer > 0) {
-      return { actualDamage: 0, evaded: true, playerDied: false };
-    }
-
-    // Evasion check
-    if (Math.random() < this.stats.evasionChance) {
-      return { actualDamage: 0, evaded: true, playerDied: false };
-    }
-
-    // Shield absorb
-    if (this.shields > 0) {
-      this.shields--;
-      this.invincibleTimer = 0.5;
-      return { actualDamage: 0, evaded: false, playerDied: false };
-    }
-
-    // No shields — grant invincibility frames, player cannot die
-    this.invincibleTimer = 1.5;
-    return { actualDamage: 0, evaded: false, playerDied: false };
-  }
-
-  healShield(amount: number = 1) {
-    this.shields = Math.min(this.maxShields, this.shields + amount);
-  }
-
-  /** Player no longer has HP — always alive */
-  get isDead(): boolean {
-    return false;
   }
 
   get dashReady(): boolean {
@@ -228,27 +145,31 @@ export class Player extends Entity {
 
   render(renderer: Renderer) {
     const ctx = renderer.ctx;
-    const s = 0.55; // hull scale factor
+    const s = 0.55; // hull scale factor (fallback only)
 
-    const SPRITE_SIZE = 22; // 70% of original 32px
+    // ship-glider.svg — nose points up (north) in SVG space.
+    // rotate(angle + Math.PI/2) maps north → aim direction correctly.
+    // spaceship.svg has a square viewBox — use equal W and H.
+    const SPRITE_W = 40; // display size in game-pixels
+    const SPRITE_H = 40; // square viewBox → equal dimensions
 
     // ── DASH FLASH ──────────────────────────────────────────────
     // During a dash: rapidly alternate between bright cyan-tinted sprite and blank.
     if (this.isDashing) {
       const flashOn = Math.floor(this.dashTimer * 22) % 2 === 0;
       if (flashOn) {
-        const sprite = imageReady(PlayerImages.moving) ? PlayerImages.moving : null;
+        const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
         ctx.save();
         ctx.translate(this.pos.x, this.pos.y);
-        ctx.rotate(this.angle + Math.PI / 2); // flipped 180° from original up-facing sprite
+        ctx.rotate(this.angle + Math.PI / 2);
         if (sprite) {
           ctx.shadowColor = COLORS.player;
           ctx.shadowBlur = 22;
-          ctx.drawImage(sprite, -SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+          ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
           // Cyan overlay tint
           ctx.globalCompositeOperation = "source-atop";
           ctx.fillStyle = "rgba(0,255,204,0.7)";
-          ctx.fillRect(-SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+          ctx.fillRect(-SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
           ctx.globalCompositeOperation = "source-over";
         } else {
           // Fallback silhouette
@@ -266,25 +187,24 @@ export class Player extends Entity {
       return; // skip normal hull and overlays during dash
     }
 
-    // ── INVINCIBILITY BLINK ──────────────────────────────────────
-    if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer * 10) % 2 === 0) {
-      return;
-    }
-
-    // ── NORMAL SHIP RENDER (sprite) ───────────────────────────────
-    const sprite = this.isMoving
-      ? (imageReady(PlayerImages.moving) ? PlayerImages.moving : null)
-      : (imageReady(PlayerImages.still) ? PlayerImages.still : null);
+    // ── NORMAL SHIP RENDER (ship-glider.svg) ──────────────────────
+    const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.angle + Math.PI / 2); // flipped 180° — sprite faces down in PNG
+    ctx.rotate(this.angle + Math.PI / 2); // nose-up SVG → faces aim direction
 
     if (sprite) {
-      ctx.drawImage(sprite, -SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+      // Add a subtle engine-glow halo when moving
+      if (this.isMoving) {
+        ctx.shadowColor = "#ffcc00";
+        ctx.shadowBlur = 10;
+      }
+      ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
+      ctx.shadowBlur = 0;
     } else {
-      // Canvas fallback while images load
-      ctx.fillStyle = "#111111";
+      // Canvas fallback while SVG loads — Galaga red/white/black
+      ctx.fillStyle = "#ffffff";
       ctx.beginPath();
       ctx.moveTo(10 * s, 0);
       ctx.lineTo(2 * s, -3 * s);
@@ -298,32 +218,26 @@ export class Player extends Entity {
       ctx.lineTo(2 * s, 3 * s);
       ctx.closePath();
       ctx.fill();
-      ctx.strokeStyle = "#cc2222";
-      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = "#0f0f0f";
+      ctx.lineWidth = 1.2;
       ctx.stroke();
+      // Red accent on wings
+      ctx.fillStyle = "#c81414";
+      ctx.beginPath();
+      ctx.moveTo(-3 * s, -5 * s);
+      ctx.lineTo(-6 * s, -6 * s);
+      ctx.lineTo(-5 * s, -2.5 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-3 * s, 5 * s);
+      ctx.lineTo(-6 * s, 6 * s);
+      ctx.lineTo(-5 * s, 2.5 * s);
+      ctx.closePath();
+      ctx.fill();
     }
 
     ctx.restore();
-
-    // ── SHIELD RING ───────────────────────────────────────────────
-    if (this.maxShields > 0 && this.shields > 0) {
-      ctx.save();
-      ctx.strokeStyle = COLORS.shield;
-      ctx.lineWidth = 1;
-      ctx.globalAlpha = 0.5;
-      const shieldArc = (this.shields / this.maxShields) * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(
-        this.pos.x,
-        this.pos.y,
-        PLAYER_COLLISION_RADIUS + 6,
-        -Math.PI / 2,
-        -Math.PI / 2 + shieldArc,
-      );
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-    }
 
     // ── DASH COOLDOWN ARC ─────────────────────────────────────────
     if (this.dashCooldown > 0) {
@@ -338,7 +252,7 @@ export class Player extends Entity {
         this.pos.y,
         PLAYER_COLLISION_RADIUS + 10,
         -Math.PI / 2,
-        -Math.PI / 2 + dashArc,
+        -Math.PI / 2 + dashArc
       );
       ctx.stroke();
       ctx.globalAlpha = 1;

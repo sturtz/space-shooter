@@ -1,6 +1,5 @@
 import { Renderer } from "../rendering/Renderer";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
-import { vec2 } from "../utils/Math";
 
 export interface HUDData {
   roundTimer: number;
@@ -12,8 +11,6 @@ export interface HUDData {
   level: number;
   mothershipHp: number;
   mothershipMaxHp: number;
-  playerShields: number;
-  playerMaxShields: number;
   streakCoinBonus: number;
   dashReady: boolean;
   dashCooldownRatio: number;
@@ -38,8 +35,24 @@ export class HUD {
     // Level badge (left)
     const lvlW = 56;
     renderer.drawRoundedRect(pad + 4, pad + 4, lvlW, topBarH - 8, 4, "rgba(0, 255, 204, 0.1)");
-    renderer.drawRoundedRectStroke(pad + 4, pad + 4, lvlW, topBarH - 8, 4, "rgba(0, 255, 204, 0.3)", 1);
-    renderer.drawTitleText(`LV ${data.level}`, pad + 4 + lvlW / 2, pad + topBarH / 2, COLORS.player, 10, "center", "middle");
+    renderer.drawRoundedRectStroke(
+      pad + 4,
+      pad + 4,
+      lvlW,
+      topBarH - 8,
+      4,
+      "rgba(0, 255, 204, 0.3)",
+      1
+    );
+    renderer.drawTitleText(
+      `LV ${data.level}`,
+      pad + 4 + lvlW / 2,
+      pad + topBarH / 2,
+      COLORS.player,
+      10,
+      "center",
+      "middle"
+    );
 
     // Timer bar (center)
     const timerRatio = Math.max(0, data.roundTimer / data.roundDuration);
@@ -49,13 +62,27 @@ export class HUD {
     const timerBarH = 14;
     const timerColorStart = timerRatio > 0.3 ? "#2266ff" : "#ff2244";
     const timerColorEnd = timerRatio > 0.3 ? "#44aaff" : "#ff6644";
-    renderer.drawGradientBar(timerBarX, timerBarY, timerBarW, timerBarH, timerRatio, timerColorStart, timerColorEnd, "rgba(0,0,0,0.4)", "rgba(255,255,255,0.08)");
+    renderer.drawGradientBar(
+      timerBarX,
+      timerBarY,
+      timerBarW,
+      timerBarH,
+      timerRatio,
+      timerColorStart,
+      timerColorEnd,
+      "rgba(0,0,0,0.4)",
+      "rgba(255,255,255,0.08)"
+    );
     ctx.save();
     ctx.font = `bold 9px 'Orbitron', monospace`;
     ctx.fillStyle = "#fff";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(data.roundTimer.toFixed(1) + "s", timerBarX + timerBarW / 2, timerBarY + timerBarH / 2 + 1);
+    ctx.fillText(
+      data.roundTimer.toFixed(1) + "s",
+      timerBarX + timerBarW / 2,
+      timerBarY + timerBarH / 2 + 1
+    );
     ctx.restore();
 
     // Coins (right)
@@ -72,18 +99,12 @@ export class HUD {
     ctx.restore();
 
     // ═══════════════════════════════════════════════════════════
-    // LEFT PANEL — Shields + Dash  (HP removed)
+    // LEFT PANEL — Dash indicator
     // ═══════════════════════════════════════════════════════════
     const leftPanelX = pad;
     const leftPanelY = pad + topBarH + 6;
     const leftPanelW = 140;
-    const barX = leftPanelX + 6;
-    const barW = leftPanelW - 12;
-    const barH = 10;
-
-    // Determine panel height based on whether shields exist
-    const hasShields = data.playerMaxShields > 0;
-    const leftPanelH = hasShields ? 46 : 30;
+    const leftPanelH = 30;
 
     renderer.drawPanel(leftPanelX, leftPanelY, leftPanelW, leftPanelH, {
       bg: "rgba(6, 6, 18, 0.75)",
@@ -91,26 +112,10 @@ export class HUD {
       radius: 6,
     });
 
-    let nextY = leftPanelY + 6;
-
-    // Shield bar (if player has shields)
-    if (hasShields) {
-      const shieldRatio = data.playerShields / data.playerMaxShields;
-      renderer.drawGradientBar(barX, nextY, barW, barH, shieldRatio, "#2244aa", "#4488ff", "rgba(10,10,40,0.6)", "rgba(68,136,255,0.2)");
-      ctx.save();
-      ctx.font = `bold 7px 'Orbitron', monospace`;
-      ctx.fillStyle = "#aaccff";
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`🛡 ${data.playerShields}/${data.playerMaxShields}`, barX + 3, nextY + barH / 2 + 1);
-      ctx.restore();
-      nextY += barH + 5;
-    }
-
     // Dash indicator
     const dashSize = 8;
     const dashCenterX = leftPanelX + 14;
-    const dashCenterY = nextY + dashSize;
+    const dashCenterY = leftPanelY + 6 + dashSize;
 
     if (data.dashReady) {
       ctx.save();
@@ -166,7 +171,8 @@ export class HUD {
     // BOTTOM AREA — Streak + Kills
     // ═══════════════════════════════════════════════════════════
     if (data.killStreak > 1) {
-      const streakColor = data.killStreak > 10 ? "#ff4444" : data.killStreak > 5 ? "#ffaa00" : "#ffff00";
+      const streakColor =
+        data.killStreak > 10 ? "#ff4444" : data.killStreak > 5 ? "#ffaa00" : "#ffff00";
       const multStr = data.streakCoinBonus > 1.0 ? ` ×${data.streakCoinBonus.toFixed(1)}` : "";
       const streakY = GAME_HEIGHT - 14;
       renderer.drawPanel(pad, streakY - 12, 160, 22, {

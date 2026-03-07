@@ -1,13 +1,7 @@
 import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
 import { Vec2, vecAdd, vecScale, vecAngle } from "../utils/Math";
-import {
-  GAME_WIDTH,
-  GAME_HEIGHT,
-  BULLET_SIZE,
-  BULLET_LIFETIME,
-  COLORS,
-} from "../utils/Constants";
+import { GAME_WIDTH, GAME_HEIGHT, BULLET_SIZE, BULLET_LIFETIME, COLORS } from "../utils/Constants";
 
 export class Bullet extends Entity {
   damage: number;
@@ -26,7 +20,7 @@ export class Bullet extends Entity {
     damage: number,
     isCrit: boolean = false,
     pierceCount: number = 0,
-    isEnemy: boolean = false,
+    isEnemy: boolean = false
   ) {
     super(x, y, BULLET_SIZE);
     this.direction = direction;
