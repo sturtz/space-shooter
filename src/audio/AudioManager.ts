@@ -5,6 +5,10 @@ export class AudioManager {
   private initialized = false;
   private masterGain: GainNode | null = null;
 
+  // Menu background music (HTML Audio element — easiest for looping a file)
+  private menuMusic: HTMLAudioElement;
+  private menuMusicStarted = false;
+
   // Cone-attack music track state
   private coneTrackPlaying = false;
   private coneTrackTimer: number | null = null;
@@ -12,16 +16,43 @@ export class AudioManager {
   private coneBeatCallback: (() => void) | null = null;
   private coneBeatIndex = 0;
 
+  constructor() {
+    // Pre-create audio element — won't play until init() is called on first interaction
+    this.menuMusic = new Audio("/assets/sounds/fire.mp3");
+    this.menuMusic.loop = true;
+    this.menuMusic.volume = 0.3;
+  }
+
   init() {
     if (this.initialized) return;
     try {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.3;
+      this.masterGain.gain.value = 0.5;
       this.masterGain.connect(this.ctx.destination);
       this.initialized = true;
     } catch (e) {
       console.warn("Web Audio not available:", e);
+    }
+    // Start menu music on first user interaction (browser autoplay policy)
+    if (!this.menuMusicStarted) {
+      this.menuMusicStarted = true;
+      this.menuMusic.play().catch(() => {
+        /* silently ignore if still blocked */
+      });
+    }
+  }
+
+  /** Stop and reset menu music — call when starting a game run */
+  stopMenuMusic() {
+    this.menuMusic.pause();
+    this.menuMusic.currentTime = 0;
+  }
+
+  /** Resume menu music — call when returning to menu/upgrade screen */
+  resumeMenuMusic() {
+    if (this.menuMusicStarted && this.menuMusic.paused) {
+      this.menuMusic.play().catch(() => {});
     }
   }
 

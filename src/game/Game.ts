@@ -34,7 +34,7 @@ import { HUD } from "../ui/HUD";
 import { UpgradeScreen } from "../ui/UpgradeScreen";
 import { AudioManager } from "../audio/AudioManager";
 import { IGame } from "./GameInterface";
-export type GameState = "menu" | "playing" | "upgradeScreen" | "gameover";
+export type GameState = "menu" | "playing" | "bossReward" | "upgradeScreen" | "gameover";
 
 interface Star {
   x: number;
@@ -61,6 +61,61 @@ interface DashRing {
   life: number;
   maxLife: number;
 }
+
+/** Fading laser beam visual */
+interface LaserBeam {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  life: number;
+  maxLife: number;
+}
+
+/** Delayed bomb dropped on dash landing */
+interface PendingBomb {
+  x: number;
+  y: number;
+  timer: number;
+  maxTimer: number;
+  radius: number;
+}
+
+interface BossRewardChoice {
+  id: string;
+  name: string;
+  lines: string[];
+  color: string;
+  borderColor: string;
+  glowColor: string;
+}
+
+const BOSS_REWARD_CHOICES: BossRewardChoice[] = [
+  {
+    id: "laser",
+    name: "TARGETING LASER",
+    lines: ["Fires at nearest enemy", "every 2.5 seconds", "Deals 3× weapon damage"],
+    color: "#ff4444",
+    borderColor: "rgba(255,68,68,0.7)",
+    glowColor: "rgba(255,68,68,0.15)",
+  },
+  {
+    id: "bomb_dash",
+    name: "DASH BOMB",
+    lines: ["Dash drops a bomb at", "landing point", "5× damage, 80px blast"],
+    color: "#ffaa00",
+    borderColor: "rgba(255,170,0,0.7)",
+    glowColor: "rgba(255,170,0,0.15)",
+  },
+  {
+    id: "flashbang",
+    name: "STUN FIELD",
+    lines: ["Dash EMP freezes all", "enemies for 2 seconds", "+20px EMP range bonus"],
+    color: "#44ccff",
+    borderColor: "rgba(68,200,255,0.7)",
+    glowColor: "rgba(68,200,255,0.15)",
+  },
+];
 
 export class Game implements IGame {
   renderer: Renderer;
@@ -117,6 +172,11 @@ export class Game implements IGame {
   readonly MISSILE_FIRE_EVERY = 2; // fire every 2nd beat
   readonly MISSILE_SPEED = 180; // slower than bullets, tracks target
 
+  // Special ability state (persists across rounds via save.specialAbility)
+  laserTimer: number = 0;
+  laserBeams: LaserBeam[] = [];
+  pendingBombs: PendingBomb[] = [];
+
   // Starfield
   stars: Star[] = [];
   private bgCache: HTMLCanvasElement | null = null;
@@ -156,12 +216,16 @@ export class Game implements IGame {
       if (this.state === "menu") {
         this.audio.init();
         this.startRun();
+      } else if (this.state === "bossReward") {
+        this.handleBossRewardClick(mx, my);
       } else if (this.state === "upgradeScreen") {
         this.audio.init();
         this.upgradeScreen.handleClick(mx, my);
       } else if (this.state === "gameover") {
         this.state = "upgradeScreen";
         this.upgradeScreen.refresh();
+        // Resume menu music on upgrade screen
+        this.audio.resumeMenuMusic();
       }
     });
 
@@ -173,6 +237,15 @@ export class Game implements IGame {
       // Dash on Shift key
       if (e.key === "Shift" && this.state === "playing" && !this.paused) {
         this.handleDash();
+      }
+      // D key — instant forfeit, skip gameover, go straight to upgrade screen
+      if (e.key.toLowerCase() === "d" && this.state === "playing") {
+        this.audio.stopConeTrack();
+        this.save.lifetimeKills += this.roundKills;
+        saveGame(this.save);
+        this.state = "upgradeScreen";
+        this.upgradeScreen.refresh();
+        this.audio.resumeMenuMusic();
       }
     });
   }
@@ -229,6 +302,33 @@ export class Game implements IGame {
       }
     }
 
+    // Special ability: stun field — freeze all enemies in ring radius for 2 seconds
+    if (this.save.specialAbility === "flashbang") {
+      const stunRadius = ringRadius + 20; // slightly larger stun range
+      for (const enemy of this.enemies) {
+        if (!enemy.alive) continue;
+        if (vecDist(ringOrigin, enemy.pos) <= stunRadius) {
+          enemy.applyStun(2.0);
+        }
+      }
+      // Brighter cyan flash for stun
+      this.screenFlashTimer = 0.12;
+      this.screenFlashColor = "rgba(80, 210, 255, 0.2)";
+      this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 12, "#44ccff", 80, 0.3, 2);
+    }
+
+    // Special ability: drop bomb at dash landing position
+    if (this.save.specialAbility === "bomb_dash") {
+      this.pendingBombs.push({
+        x: ringOrigin.x,
+        y: ringOrigin.y,
+        timer: 1.5,
+        maxTimer: 1.5,
+        radius: 80,
+      });
+      this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 4, "#ffaa00", 40, 0.15, 1.5);
+    }
+
     // Play flashbang sound for the ring
     this.audio.playFlashbang();
   }
@@ -269,9 +369,14 @@ export class Game implements IGame {
     this.bossDefeated = false;
     this.bossEnemy = null;
     this.dashRings = [];
+    this.laserBeams = [];
+    this.pendingBombs = [];
+    this.laserTimer = 2.5; // laser fires after initial 2.5s delay
     this.coneFlashTimer = 0;
     this.particles.clear();
     this.spawner.reset(this);
+    // Stop menu music when run starts
+    this.audio.stopMenuMusic();
     this.state = "playing";
 
     // Spawn initial small asteroids spread around the arena
@@ -427,6 +532,10 @@ export class Game implements IGame {
           this.updatePlaying(dt);
         }
         break;
+      case "bossReward":
+        // Particles keep animating while player chooses reward
+        this.particles.update(dt);
+        break;
       case "upgradeScreen":
         break;
       case "gameover":
@@ -436,12 +545,15 @@ export class Game implements IGame {
   }
 
   updatePlaying(dt: number) {
-    // Timer — counts down; when it hits 0 the round ends (win)
+    // Timer — counts down; when it hits 0 force-spawn the boss if not yet spawned.
+    // The round does NOT end on timer expiry — only killing the boss advances the level.
     this.roundTimer -= dt;
     if (this.roundTimer <= 0) {
       this.roundTimer = 0;
-      this.endRound(false); // time's up → round over (survived)
-      return;
+      if (!this.bossSpawned) {
+        this.spawnMegaRock();
+        this.bossSpawned = true;
+      }
     }
 
     // Streak decay
@@ -512,14 +624,36 @@ export class Game implements IGame {
       }
     }
 
-    // Boss spawn at 15 seconds elapsed
+    // Boss spawn at 15 seconds elapsed (or on timer expiry above)
     const elapsed = this.roundDuration - this.roundTimer;
     if (!this.bossSpawned && elapsed >= 15) {
       this.spawnMegaRock();
       this.bossSpawned = true;
     }
 
-    // Spawn rate ramps within a round (Issue #18 fix)
+    // Special ability: targeting laser fires every 2.5s
+    if (this.save.specialAbility === "laser") {
+      this.laserTimer -= dt;
+      if (this.laserTimer <= 0) {
+        this.fireLaser();
+        this.laserTimer = 2.5;
+      }
+    }
+
+    // Special ability: tick pending dash bombs
+    if (this.pendingBombs.length > 0) {
+      this.updateBombs(dt);
+    }
+
+    // Decay fading laser beams
+    for (let i = this.laserBeams.length - 1; i >= 0; i--) {
+      this.laserBeams[i].life -= dt;
+      if (this.laserBeams[i].life <= 0) {
+        this.laserBeams.splice(i, 1);
+      }
+    }
+
+    // Spawn rate ramps within a round
     const rampFactor = 1 - (elapsed / this.roundDuration) * 0.4; // speeds up to 60% of base by end
     const currentSpawnRate = this.spawnRate * Math.max(0.4, rampFactor);
 
@@ -590,10 +724,8 @@ export class Game implements IGame {
     this.bossEnemy = boss;
     this.enemies.push(boss);
 
-    // Announce boss
-    this.screenFlashTimer = 0.15;
-    this.screenFlashColor = "rgba(255, 50, 50, 0.2)";
-    this.renderer.shake(5);
+    // Announce boss — shake only, no screen flash (flash was jarring/confusing)
+    this.renderer.shake(4);
   }
 
   onEnemyKilled(enemy: Enemy) {
@@ -602,13 +734,23 @@ export class Game implements IGame {
       this.bossDefeated = true;
       this.bossEnemy = null;
       // Big boss explosion
-      this.particles.emit(enemy.pos, 30, "#ff4444", 150, 0.6, 4);
-      this.particles.emit(enemy.pos, 20, "#ffaa00", 120, 0.5, 3);
-      this.renderer.shake(8);
-      this.screenFlashTimer = 0.2;
-      this.screenFlashColor = "rgba(255, 255, 255, 0.3)";
-      // Boss killed = round won, level up
-      this.endRound(false);
+      this.particles.emit(enemy.pos, 40, "#ff4444", 160, 0.7, 5);
+      this.particles.emit(enemy.pos, 25, "#ffaa00", 130, 0.55, 4);
+      this.particles.emit(enemy.pos, 15, "#ffffff", 90, 0.35, 2.5);
+      this.renderer.shake(10);
+      this.screenFlashTimer = 0.25;
+      this.screenFlashColor = "rgba(255, 255, 255, 0.35)";
+      this.audio.playExplosion();
+      // Stop the beat track
+      this.audio.stopConeTrack();
+      // Level up — only boss kill advances the level
+      this.save.currentLevel++;
+      if (this.save.currentLevel > this.save.highestLevel) {
+        this.save.highestLevel = this.save.currentLevel;
+      }
+      this.save.starCoins++;
+      // Transition to boss reward selection screen
+      this.state = "bossReward";
       return;
     }
 
@@ -640,18 +782,12 @@ export class Game implements IGame {
   }
 
   endRound(mothershipDestroyed: boolean) {
-    // Stop cone attack music if playing
+    // Stop the beat track
     this.audio.stopConeTrack();
-
-    if (!mothershipDestroyed) {
-      // Timer ran out — survived! Level up
-      this.save.currentLevel++;
-      if (this.save.currentLevel > this.save.highestLevel) {
-        this.save.highestLevel = this.save.currentLevel;
-      }
-      this.save.starCoins++;
-    }
-
+    // endRound is now ONLY called when the mothership is destroyed (loss path).
+    // Boss kill goes through onEnemyKilled → bossReward state instead.
+    // mothershipDestroyed is kept for IGame interface compatibility.
+    void mothershipDestroyed;
     this.save.lifetimeKills += this.roundKills;
     saveGame(this.save);
     this.state = "gameover";
@@ -660,6 +796,7 @@ export class Game implements IGame {
   goToUpgradeScreen() {
     this.state = "upgradeScreen";
     this.upgradeScreen.refresh();
+    this.audio.resumeMenuMusic();
   }
 
   render() {
@@ -677,6 +814,11 @@ export class Game implements IGame {
         if (this.paused) {
           this.renderPauseOverlay();
         }
+        break;
+      case "bossReward":
+        // Render frozen game state as backdrop, then overlay the reward cards
+        this.renderPlaying();
+        this.renderBossReward();
         break;
       case "upgradeScreen":
         this.upgradeScreen.render(this.renderer, this.lastDt);
@@ -1041,6 +1183,74 @@ export class Game implements IGame {
     // Particles on top
     this.particles.render(this.renderer);
 
+    // ── Special ability visuals ──────────────────────────────────────────
+
+    // Targeting laser beams (fading red beams)
+    {
+      const ctx = this.renderer.ctx;
+      for (const beam of this.laserBeams) {
+        const alpha = beam.life / beam.maxLife;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        // Outer glow stroke
+        ctx.strokeStyle = "#ff6666";
+        ctx.lineWidth = 3 + alpha * 3;
+        ctx.shadowColor = "#ff2222";
+        ctx.shadowBlur = 10;
+        ctx.beginPath();
+        ctx.moveTo(beam.x1, beam.y1);
+        ctx.lineTo(beam.x2, beam.y2);
+        ctx.stroke();
+        // Bright core
+        ctx.strokeStyle = "#ffffff";
+        ctx.lineWidth = 1;
+        ctx.shadowBlur = 0;
+        ctx.beginPath();
+        ctx.moveTo(beam.x1, beam.y1);
+        ctx.lineTo(beam.x2, beam.y2);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
+    // Pending bombs (pulsing orange glow + countdown arc)
+    {
+      const ctx = this.renderer.ctx;
+      for (const bomb of this.pendingBombs) {
+        const progress = 1 - bomb.timer / bomb.maxTimer; // 0→1 as countdown completes
+        const pulse = 0.5 + 0.5 * Math.sin(this.gameTime * 12 + progress * Math.PI * 4);
+        ctx.save();
+        // Dashed blast-radius indicator
+        ctx.globalAlpha = 0.07 + pulse * 0.06;
+        ctx.strokeStyle = "#ff8800";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.arc(bomb.x, bomb.y, bomb.radius, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        // Core glow (intensifies as detonation approaches)
+        ctx.globalAlpha = 0.55 + progress * 0.4;
+        const gradient = ctx.createRadialGradient(bomb.x, bomb.y, 0, bomb.x, bomb.y, 14);
+        gradient.addColorStop(0, "#ffff88");
+        gradient.addColorStop(0.45, "#ff6600");
+        gradient.addColorStop(1, "rgba(255,50,0,0)");
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(bomb.x, bomb.y, 14, 0, Math.PI * 2);
+        ctx.fill();
+        // Countdown arc (orange ring, fills clockwise from top)
+        ctx.globalAlpha = 0.9;
+        ctx.strokeStyle = "#ffcc00";
+        ctx.lineWidth = 2.5;
+        const countArc = progress * Math.PI * 2;
+        ctx.beginPath();
+        ctx.arc(bomb.x, bomb.y, 10, -Math.PI / 2, -Math.PI / 2 + countArc);
+        ctx.stroke();
+        ctx.restore();
+      }
+    }
+
     // Dash explosion rings
     for (const ring of this.dashRings) {
       const ctx = this.renderer.ctx;
@@ -1117,6 +1327,22 @@ export class Game implements IGame {
       dashCooldownRatio: this.player.dashCooldownRatio,
       isMobile: this.input.isTouchDevice,
     });
+
+    // Special ability active indicator (bottom center, subtle)
+    if (this.save.specialAbility) {
+      const choice = BOSS_REWARD_CHOICES.find((c) => c.id === this.save.specialAbility);
+      if (choice) {
+        const ctx = this.renderer.ctx;
+        ctx.save();
+        ctx.globalAlpha = 0.55;
+        ctx.font = `bold 8px 'Orbitron', monospace`;
+        ctx.fillStyle = choice.color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`⚡ ${choice.name}`, GAME_WIDTH / 2, GAME_HEIGHT - 14);
+        ctx.restore();
+      }
+    }
 
     // Mobile controls overlay
     if (this.input.isTouchDevice) {
@@ -1259,6 +1485,327 @@ export class Game implements IGame {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText("Press P or ESC to resume", cx, cy + 18);
+    ctx.fillText("Press D to Die", cx, cy + 34);
+    ctx.restore();
+  }
+
+  /** Fire the targeting laser at the nearest enemy (special ability) */
+  private fireLaser() {
+    if (this.state !== "playing" || this.paused) return;
+    const target = this.findNearestEnemy();
+    if (!target) return;
+
+    const laserDmg = this.stats.damage * 3;
+    const wasAlive = target.alive;
+    target.takeDamage(laserDmg);
+    this.spawnDamageNumber(target.pos.x, target.pos.y, laserDmg, false);
+    this.particles.emit(target.pos, 5, "#ff4444", 80, 0.2, 2);
+
+    if (wasAlive && !target.alive) {
+      this.onEnemyKilled(target);
+    }
+
+    // Store beam for visual fade-out
+    this.laserBeams.push({
+      x1: this.player.pos.x,
+      y1: this.player.pos.y,
+      x2: target.pos.x,
+      y2: target.pos.y,
+      life: 0.22,
+      maxLife: 0.22,
+    });
+
+    this.renderer.shake(1);
+  }
+
+  /** Tick pending dash bombs — detonate when countdown reaches 0 */
+  private updateBombs(dt: number) {
+    for (let i = this.pendingBombs.length - 1; i >= 0; i--) {
+      const bomb = this.pendingBombs[i];
+      bomb.timer -= dt;
+      if (bomb.timer <= 0) {
+        // DETONATE
+        const bombDmg = this.stats.damage * 5;
+        const bPos = vec2(bomb.x, bomb.y);
+        this.particles.emit(bPos, 45, "#ff8800", 200, 0.65, 6);
+        this.particles.emit(bPos, 25, "#ffcc00", 150, 0.45, 4);
+        this.particles.emit(bPos, 15, "#ffffff", 110, 0.25, 2.5);
+        this.renderer.shake(7);
+        this.screenFlashTimer = 0.12;
+        this.screenFlashColor = "rgba(255, 140, 0, 0.22)";
+        this.audio.playExplosion();
+
+        for (const enemy of this.enemies) {
+          if (!enemy.alive) continue;
+          if (vecDist(bPos, enemy.pos) <= bomb.radius) {
+            const wasAlive = enemy.alive;
+            enemy.takeDamage(bombDmg);
+            this.spawnDamageNumber(enemy.pos.x, enemy.pos.y, bombDmg, false);
+            if (wasAlive && !enemy.alive) {
+              this.onEnemyKilled(enemy);
+            }
+          }
+        }
+
+        this.pendingBombs.splice(i, 1);
+      }
+    }
+  }
+
+  /** Handle click on the boss reward choice screen */
+  private handleBossRewardClick(mx: number, my: number) {
+    const layout = this.getBossRewardLayout();
+    for (let i = 0; i < BOSS_REWARD_CHOICES.length; i++) {
+      const card = layout[i];
+      if (mx >= card.x && mx <= card.x + card.w && my >= card.y && my <= card.y + card.h) {
+        this.selectSpecialAbility(BOSS_REWARD_CHOICES[i].id);
+        return;
+      }
+    }
+  }
+
+  /** Store the chosen special ability, save progress, and move to gameover screen */
+  private selectSpecialAbility(id: string) {
+    this.save.specialAbility = id;
+    this.save.lifetimeKills += this.roundKills;
+    saveGame(this.save);
+    this.state = "gameover";
+  }
+
+  /** Card layout data for boss reward screen (used for both click detection and rendering) */
+  private getBossRewardLayout(): Array<{ x: number; y: number; w: number; h: number }> {
+    const cardW = 155;
+    const cardH = 220;
+    const gap = 15;
+    const totalW = cardW * 3 + gap * 2;
+    const startX = (GAME_WIDTH - totalW) / 2;
+    const startY = 280;
+    return BOSS_REWARD_CHOICES.map((_, i) => ({
+      x: startX + i * (cardW + gap),
+      y: startY,
+      w: cardW,
+      h: cardH,
+    }));
+  }
+
+  /** Render the boss reward ability selection overlay */
+  private renderBossReward() {
+    const ctx = this.renderer.ctx;
+    const cx = GAME_WIDTH / 2;
+
+    // Dark transparent backdrop
+    ctx.fillStyle = "rgba(0,0,0,0.78)";
+    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    // Title
+    ctx.save();
+    ctx.shadowColor = "#ffcc00";
+    ctx.shadowBlur = 22;
+    this.renderer.drawTitleTextOutline(
+      "BOSS DEFEATED!",
+      cx,
+      180,
+      "#ffcc00",
+      "#000",
+      24,
+      "center",
+      "middle"
+    );
+    ctx.restore();
+
+    this.renderer.drawTitleText(
+      "Choose your Special Ability",
+      cx,
+      218,
+      COLORS.textSecondary,
+      12,
+      "center",
+      "middle"
+    );
+
+    // Show current ability if already equipped
+    if (this.save.specialAbility) {
+      const existing = BOSS_REWARD_CHOICES.find((c) => c.id === this.save.specialAbility);
+      if (existing) {
+        ctx.save();
+        ctx.font = `8px monospace`;
+        ctx.fillStyle = existing.color;
+        ctx.globalAlpha = 0.7;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`Currently equipped: ${existing.name} — choose again to switch`, cx, 242);
+        ctx.restore();
+      }
+    }
+
+    // Cards
+    const layout = this.getBossRewardLayout();
+    for (let i = 0; i < BOSS_REWARD_CHOICES.length; i++) {
+      const choice = BOSS_REWARD_CHOICES[i];
+      const card = layout[i];
+      const isCurrent = this.save.specialAbility === choice.id;
+
+      // Card panel with colored glow
+      this.renderer.drawPanel(card.x, card.y, card.w, card.h, {
+        bg: isCurrent ? "rgba(25,25,55,0.96)" : "rgba(10,10,28,0.94)",
+        border: isCurrent ? choice.borderColor : "rgba(120,120,160,0.35)",
+        radius: 10,
+        glow: choice.glowColor,
+        glowBlur: isCurrent ? 22 : 10,
+      });
+
+      // Icon (canvas shapes)
+      this.drawAbilityIcon(ctx, choice.id, card.x + card.w / 2, card.y + 52, choice.color);
+
+      // Name
+      ctx.save();
+      ctx.font = `bold 10px 'Orbitron', monospace`;
+      ctx.fillStyle = choice.color;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.shadowColor = choice.color;
+      ctx.shadowBlur = isCurrent ? 8 : 0;
+      ctx.fillText(choice.name, card.x + card.w / 2, card.y + 98);
+      ctx.restore();
+
+      // Description lines
+      ctx.save();
+      ctx.font = `8.5px monospace`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      for (let j = 0; j < choice.lines.length; j++) {
+        ctx.fillText(choice.lines[j], card.x + card.w / 2, card.y + 122 + j * 16);
+      }
+      ctx.restore();
+
+      // CHOOSE / EQUIPPED button at card bottom
+      const btnY = card.y + card.h - 36;
+      const btnX = card.x + 12;
+      const btnW = card.w - 24;
+      this.renderer.drawButton(btnX, btnY, btnW, 24, isCurrent ? "EQUIPPED ✓" : "CHOOSE", {
+        bg: isCurrent ? "rgba(30,30,60,0.9)" : "rgba(10,20,35,0.85)",
+        border: choice.borderColor,
+        textColor: isCurrent ? choice.color : "#ffffff",
+        fontSize: 9,
+        radius: 5,
+      });
+    }
+
+    // Hint text below cards
+    ctx.save();
+    ctx.font = `8px monospace`;
+    ctx.fillStyle = "rgba(150,150,180,0.55)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(
+      "Tap a card to equip — ability carries into future runs",
+      cx,
+      layout[0].y + layout[0].h + 22
+    );
+    ctx.restore();
+  }
+
+  /** Draw a simple canvas icon representing each special ability */
+  private drawAbilityIcon(
+    ctx: CanvasRenderingContext2D,
+    id: string,
+    cx: number,
+    cy: number,
+    color: string
+  ) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.fillStyle = color;
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.92;
+
+    if (id === "laser") {
+      // Targeting reticle + laser beam
+      ctx.beginPath();
+      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
+      ctx.stroke();
+      // Cross hairs
+      const gaps = [
+        [-20, -18],
+        [18, 20],
+        [0, 0],
+        [0, 0],
+      ];
+      for (let g = 0; g < 4; g++) {
+        const angle = (g / 4) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * 17, cy + Math.sin(angle) * 17);
+        ctx.lineTo(cx + Math.cos(angle) * 22, cy + Math.sin(angle) * 22);
+        ctx.stroke();
+      }
+      // Center dot
+      ctx.beginPath();
+      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
+      ctx.fill();
+      // Diagonal beam slash
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx - 22, cy + 10);
+      ctx.lineTo(cx + 10, cy - 22);
+      ctx.stroke();
+      void gaps;
+    } else if (id === "bomb_dash") {
+      // Bomb body
+      ctx.beginPath();
+      ctx.arc(cx, cy + 5, 14, 0, Math.PI * 2);
+      ctx.fill();
+      // Shiny highlight
+      ctx.globalAlpha = 0.4;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.arc(cx - 5, cy - 1, 5, 0, Math.PI * 2);
+      ctx.fill();
+      // Fuse
+      ctx.globalAlpha = 0.9;
+      ctx.strokeStyle = "#aaaaaa";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(cx + 8, cy - 8);
+      ctx.quadraticCurveTo(cx + 16, cy - 16, cx + 11, cy - 22);
+      ctx.stroke();
+      // Spark
+      ctx.fillStyle = "#ffcc00";
+      ctx.globalAlpha = 1;
+      ctx.beginPath();
+      ctx.arc(cx + 11, cy - 22, 3, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (id === "flashbang") {
+      // Starburst freeze icon
+      const spikes = 8;
+      for (let i = 0; i < spikes; i++) {
+        const angle = (i / spikes) * Math.PI * 2;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * 7, cy + Math.sin(angle) * 7);
+        ctx.lineTo(cx + Math.cos(angle) * 18, cy + Math.sin(angle) * 18);
+        ctx.stroke();
+        // Small tick at tip
+        const perpA = angle + Math.PI / 2;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(
+          cx + Math.cos(angle) * 18 + Math.cos(perpA) * 4,
+          cy + Math.sin(angle) * 18 + Math.sin(perpA) * 4
+        );
+        ctx.lineTo(
+          cx + Math.cos(angle) * 18 - Math.cos(perpA) * 4,
+          cy + Math.sin(angle) * 18 - Math.sin(perpA) * 4
+        );
+        ctx.stroke();
+        ctx.lineWidth = 2;
+      }
+      // Inner circle
+      ctx.beginPath();
+      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
     ctx.restore();
   }
 

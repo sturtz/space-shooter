@@ -67,28 +67,59 @@ export class Rock extends Enemy {
     ctx.rotate(this.angle);
 
     if (imageReady(this.sprite)) {
+      // ── Glow halo behind sprite so rocks read against dark bg ──
+      if (!isFlashing) {
+        const glowColor = this.isElite
+          ? "rgba(255,200,0,0.18)"
+          : isPoisoned
+            ? "rgba(80,255,80,0.15)"
+            : "rgba(200,140,80,0.18)";
+        const glowGrad = ctx.createRadialGradient(0, 0, this.radius * 0.3, 0, 0, this.radius * 1.35);
+        glowGrad.addColorStop(0, glowColor);
+        glowGrad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = glowGrad;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius * 1.35, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
       // ── SPRITE RENDER ──────────────────────────────────────────
       if (isFlashing) {
-        // White flash: tint by drawing the sprite twice (normal + white composite)
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.globalCompositeOperation = "source-atop";
         ctx.fillStyle = "rgba(255,255,255,0.85)";
         ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.globalCompositeOperation = "source-over";
       } else if (isPoisoned) {
-        ctx.filter = "hue-rotate(120deg) saturate(3)";
+        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(1.3)";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.filter = "none";
       } else {
+        // Slightly brighten all rocks so they pop against the dark bg
+        ctx.filter = "brightness(1.35) contrast(1.1)";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+        ctx.filter = "none";
       }
 
       // Elite gold tint overlay
       if (this.isElite) {
         ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255, 220, 0, 0.3)";
+        ctx.fillStyle = "rgba(255, 220, 0, 0.35)";
         ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.globalCompositeOperation = "source-over";
+      }
+
+      // Thin rim highlight around the rock sprite
+      if (!isFlashing) {
+        ctx.strokeStyle = this.isElite
+          ? "rgba(255,220,60,0.5)"
+          : isPoisoned
+            ? "rgba(80,255,80,0.4)"
+            : "rgba(210,160,100,0.3)";
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(0, 0, this.radius * 1.05, 0, Math.PI * 2);
+        ctx.stroke();
       }
     } else {
       // ── CANVAS FALLBACK (while image loads) ──────────────────────

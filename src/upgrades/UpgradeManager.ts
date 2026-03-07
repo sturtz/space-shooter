@@ -12,52 +12,57 @@ import {
 } from "../utils/Constants";
 
 export interface PlayerStats {
+  // === Core offense ===
   damage: number;
-  moveSpeed: number;
-  fireRate: number; // seconds between shots
-  bulletSpeed: number;
-  roundDuration: number;
-  mothershipHP: number;
-  timePenaltyPerHit: number;
-  coinMagnetRange: number;
-  coinValueMultiplier: number;
-  enemySpawnMultiplier: number;
-  coinDropMultiplier: number;
   critChance: number;
   critMultiplier: number;
-  splashRadius: number;
+  splashRadius: number; // base AoE radius of pulse weapon
+  pierceCount: number; // bullet pierce
+  chainTargets: number; // chain lightning jumps
+  missileLevel: number; // 0 = none, 1-3 = active; 4 = barrage (4 missiles)
+  barrageSplashBonus: number; // extra splash radius when barrage is active
+  // === DoT / Status ===
+  poisonDps: number; // damage/sec as fraction of base damage
+  slowOnHit: number; // 0–1 slow fraction applied on hit
+  // === Movement ===
+  moveSpeed: number;
+  flashbangRadius: number; // EMP ring radius on dash
+  mineOnDash: boolean; // drop proximity mine on dash
+  mineSlow: boolean; // mines create slow field on detonation
+  // === Auto weapons ===
+  fireRate: number; // seconds between pulse beats
+  autoBomb: boolean; // auto-deploy bomb every 8 beats
+  // === Mothership ===
+  mothershipHP: number;
+  msBarrierHits: number; // 0 = no barrier
+  msBarrierCooldown: number;
+  turretLevel: number; // 0 = no turret
+  // === Economy ===
+  roundDuration: number;
+  coinMagnetRange: number;
+  coinValueMultiplier: number;
+  coinDropMultiplier: number;
+  enemySpawnMultiplier: number;
+  // === Kept for compatibility (unused since player is invincible) ===
+  bulletSpeed: number;
+  timePenaltyPerHit: number;
   extraProjectiles: number;
   spreadAngle: number;
-  pierceCount: number;
-  // Damage effects
-  poisonDps: number;
-  slowOnHit: number;
-  chainTargets: number;
-  // Movement abilities
   evasionChance: number;
   dashDistMult: number;
   dashInvincibility: number;
   slowAuraRange: number;
   slowAuraFactor: number;
   counterDmgMult: number;
-  // Player health/shields
   playerHp: number;
   playerShields: number;
-  shieldRegenInterval: number; // seconds between regen ticks, 0 = no regen
-  armorReduction: number; // fraction of damage reduced
+  shieldRegenInterval: number;
+  armorReduction: number;
   reflectFraction: number;
   lifestealChance: number;
-  flashbangRadius: number;
-  // Mothership extras
   msRegenInterval: number;
-  msBarrierHits: number;
-  msBarrierCooldown: number;
-  turretLevel: number;
   turretDamageMult: number;
-  // Economy extras
   overtimeBonus: number;
-  // Missile weapon (dmg branch 2)
-  missileLevel: number;
 }
 
 export class UpgradeManager {
@@ -119,181 +124,180 @@ export class UpgradeManager {
     return true;
   }
 
-  // Compute all player stats from the upgrade tree
+  /**
+   * Aggregate all upgrade levels into a flat PlayerStats object.
+   * Called once per startRun() — not every frame.
+   */
   computeStats(): PlayerStats {
-    // Star multipliers
+    // ── Star multipliers (prestige bonuses) ──────────────────────────────
     const starPower = 1 + this.getStarLevel("star_power") * 0.25;
     const starSpeed = 1 + this.getStarLevel("star_speed") * 0.15;
     const starEndurance = this.getStarLevel("star_endurance") * 3;
     const starFortune = 1 + this.getStarLevel("star_fortune") * 0.2;
-    const starArmor = 1 - this.getStarLevel("star_armor") * 0.15;
+    const starArmor = Math.max(0.1, 1 - this.getStarLevel("star_armor") * 0.15);
 
-    // === DAMAGE ===
+    // ── DAMAGE ────────────────────────────────────────────────────────────
+    // dmg_core: +30% per level (max 3)
     let damage = PLAYER_BASE_DAMAGE;
-    damage *= 1 + this.getLevel("dmg_core") * 0.5;
-    damage *= 1 + this.getLevel("guns_caliber") * 0.25;
+    damage *= 1 + this.getLevel("dmg_core") * 0.3;
     damage *= starPower;
 
-    // === MOVEMENT ===
+    // ── CRIT ─────────────────────────────────────────────────────────────
+    // dmg_crit: +8% crit chance per level (max 3) → max 24%
+    const critChance = this.getLevel("dmg_crit") * 0.08;
+    const critMultiplier = 2.5; // crits always deal 2.5× — no upgrade for multiplier
+
+    // ── SPLASH / AOE RADIUS ───────────────────────────────────────────────
+    // dmg_range: +20px per level (max 3) → max +60px
+    let splashRadius = this.getLevel("dmg_range") * 20;
+    // guns_barrage adds another 30px when active
+    const barrageActive = this.getLevel("guns_barrage") >= 1;
+    const barrageSplashBonus = barrageActive ? 30 : 0;
+
+    // ── FIRE RATE ─────────────────────────────────────────────────────────
+    // dmg_overclock: halves the beat interval (2× fire rate)
+    let fireRate = PLAYER_BASE_FIRE_RATE;
+    if (this.getLevel("dmg_overclock") >= 1) {
+      fireRate /= 2;
+    }
+
+    // ── PIERCE ────────────────────────────────────────────────────────────
+    // guns_bolt: +1 pierce per level (max 3)
+    const pierceCount = this.getLevel("guns_bolt");
+
+    // ── MISSILES ─────────────────────────────────────────────────────────
+    // guns_missile: level = number of missiles (1–3) every 2 beats
+    // guns_barrage: overrides to fire 4 missiles per volley
+    let missileLevel = this.getLevel("guns_missile"); // 0 = no missiles
+    if (barrageActive && missileLevel > 0) {
+      missileLevel = 4; // barrage always fires 4
+    }
+
+    // ── CHAIN LIGHTNING ───────────────────────────────────────────────────
+    // guns_chain: +1 chain jump per level (max 3)
+    const chainTargets = this.getLevel("guns_chain");
+
+    // ── MOVEMENT ─────────────────────────────────────────────────────────
+    // move_speed: +25% per level (max 3) → max +75%
     let moveSpeed = PLAYER_BASE_SPEED;
-    moveSpeed *= 1 + this.getLevel("move_core") * 0.5;
+    moveSpeed *= 1 + this.getLevel("move_speed") * 0.25;
     moveSpeed *= starSpeed;
 
-    // === FIRE RATE ===
-    let fireRate = PLAYER_BASE_FIRE_RATE;
-    const gunsBonus = 1 + this.getLevel("guns_core") * 0.08;
-    const caliberPenalty = 1 - this.getLevel("guns_caliber") * 0.05;
-    fireRate /= gunsBonus * Math.max(0.5, caliberPenalty);
-
-    // === BULLET SPEED ===
-    let bulletSpeed = BULLET_SPEED;
-    bulletSpeed *= 1 + this.getLevel("guns_velocity") * 0.12;
-
-    // === DURATION ===
-    let roundDuration = BASE_ROUND_DURATION;
-    roundDuration += this.getLevel("econ_duration") * 3.0;
-    roundDuration += starEndurance;
-
-    // === MOTHERSHIP ===
-    const mothershipHP = MOTHERSHIP_BASE_HP + this.getLevel("ms_core");
-    let timePenalty = MOTHERSHIP_TIME_PENALTY;
-    timePenalty *= 1 - this.getLevel("ms_armor") * 0.08;
-    timePenalty *= Math.max(0.1, starArmor);
-    timePenalty = Math.max(0.3, timePenalty);
-
-    // === COINS ===
-    let coinMagnetRange = COIN_MAGNET_RANGE;
-    coinMagnetRange += this.getLevel("econ_core") * 20;
-
-    const econValueLevel = this.getLevel("econ_value");
-    let coinValueMult = 1 + 0.1 * econValueLevel * (1 - econValueLevel * 0.015);
-    coinValueMult *= starFortune;
-
-    const coinDropMult = coinValueMult;
-
-    // Enemy density scales 50% per game level
-    const enemySpawnMult = 1 + (this.save.currentLevel - 1) * 0.5;
-
-    // === CRIT ===
-    const critChance = this.getLevel("dmg_crit") * 0.05;
-    const critMult = 2 + this.getLevel("dmg_crit_dmg") * 0.5;
-
-    // === SPLASH ===
-    const splashRadius = this.getLevel("dmg_splash") * 5;
-
-    // === EXTRA PROJECTILES & SPREAD ===
-    const extraProjectiles = this.getLevel("guns_multi");
-    const spreadAngle = 0.15 + this.getLevel("guns_spread") * 0.1; // wider per level
-
-    // === PIERCE ===
-    const pierceCount = this.getLevel("guns_pierce");
-
-    // === POISON ===
-    const poisonDps = this.getLevel("dmg_poison") * 0.05 * damage;
-
-    // === SLOW ===
-    const slowOnHit = this.getLevel("dmg_slow") * 0.05;
-
-    // === CHAIN LIGHTNING ===
-    const chainTargets = this.getLevel("dmg_chain");
-
-    // === EVASION ===
-    const evasionChance = this.getLevel("move_evasion") * 0.03;
-
-    // === DASH / AFTERBURNER ===
-    const dashDistMult = 1 + this.getLevel("move_dash") * 0.1;
-    const dashInvincibility = this.getLevel("move_phase") * 0.1;
-
-    // === SLOW AURA ===
-    const slowAuraLevel = this.getLevel("move_slow_aura");
-    const slowAuraRange = slowAuraLevel > 0 ? 80 + slowAuraLevel * 15 : 0;
-    const slowAuraFactor = slowAuraLevel * 0.03;
-
-    // === COUNTER STRIKE ===
-    const counterDmgMult = 1 + this.getLevel("move_counter") * 0.15;
-
-    // === PLAYER SHIELDS ===
-    const playerShields = this.getLevel("health_core");
-    const regenLevel = this.getLevel("health_regen");
-    const shieldRegenInterval = regenLevel > 0 ? 30 - regenLevel * 2 : 0;
-
-    // === ARMOR & REFLECT ===
-    const armorReduction = this.getLevel("health_armor") * 0.1;
-    const reflectFraction = this.getLevel("health_reflect") * 0.15;
-
-    // === PLAYER HP ===
-    const playerHp = 1; // base 1 HP, shields serve as extra health
-
-    // === FLASHBANG / EMP BURST ===
+    // ── EMP / FLASHBANG RADIUS ────────────────────────────────────────────
+    // move_emp: +40px per level (max 3) → base 0 + up to 120px
     const flashbangRadius = this.getLevel("move_emp") * 40;
 
-    // === LIFESTEAL ===
-    const lifestealChance = this.getLevel("health_lifesteal") * 0.02;
+    // ── PROXIMITY MINE ────────────────────────────────────────────────────
+    const mineOnDash = this.getLevel("move_mine") >= 1;
+    const mineSlow = this.getLevel("move_trap") >= 1; // mine slow field upgrade
 
-    // === MOTHERSHIP REGEN ===
-    const msRegenLevel = this.getLevel("ms_regen");
-    const msRegenInterval = msRegenLevel > 0 ? 30 - msRegenLevel * 1.5 : 0;
+    // ── POISON ────────────────────────────────────────────────────────────
+    // eff_poison: +5% damage/sec per level (max 3) → max 15% base damage/sec
+    const poisonDps = this.getLevel("eff_poison") * 0.05 * damage;
 
-    // === MOTHERSHIP BARRIER ===
-    const msBarrierLevel = this.getLevel("ms_barrier");
-    const msBarrierHits = msBarrierLevel > 0 ? 1 + Math.floor(msBarrierLevel / 3) : 0;
-    const msBarrierCooldown = 25;
+    // ── SLOW ON HIT ───────────────────────────────────────────────────────
+    // eff_slow: +8% slow per level (max 3) → max 24% movement reduction
+    const slowOnHit = this.getLevel("eff_slow") * 0.08;
 
-    // === TURRET ===
+    // ── AUTO BOMB ─────────────────────────────────────────────────────────
+    const autoBomb = this.getLevel("eff_bomb") >= 1;
+
+    // ── MOTHERSHIP HP ─────────────────────────────────────────────────────
+    // ms_hull: +1 max HP per level (max 4) → base 5 + up to 9
+    const mothershipHP = MOTHERSHIP_BASE_HP + this.getLevel("ms_hull");
+
+    // ── MOTHERSHIP BARRIER ────────────────────────────────────────────────
+    // ms_barrier: +1 hit capacity per level (max 3)
+    const msBarrierHits = this.getLevel("ms_barrier"); // 0 = no barrier
+    const msBarrierCooldown = 25; // fixed recharge delay in seconds
+
+    // ── TURRET ────────────────────────────────────────────────────────────
+    // ms_turret: level = turret tier (0 = none, 1-3 = active)
     const turretLevel = this.getLevel("ms_turret");
-    const turretDamageMult = 1 + this.getLevel("ms_turret_dmg") * 0.2;
 
-    // === OVERTIME ===
-    const overtimeBonus = this.getLevel("econ_overtime") * 0.15;
+    // ── ROUND DURATION ────────────────────────────────────────────────────
+    // econ_duration: +6s per level (max 3) → max +18s
+    let roundDuration = BASE_ROUND_DURATION;
+    roundDuration += this.getLevel("econ_duration") * 6;
+    roundDuration += starEndurance;
 
-    // === MISSILE ===
-    const missileLevel = this.getLevel("dmg_missile");
+    // ── COIN MAGNET ───────────────────────────────────────────────────────
+    // econ_magnet: +20px per level (max 3)
+    let coinMagnetRange = COIN_MAGNET_RANGE;
+    coinMagnetRange += this.getLevel("econ_magnet") * 20;
+
+    // ── COIN VALUE ────────────────────────────────────────────────────────
+    // econ_value: +25% per level (max 3) → max +75%
+    let coinValueMult = 1 + this.getLevel("econ_value") * 0.25;
+    coinValueMult *= starFortune;
+
+    // ── ENEMY SPAWN ───────────────────────────────────────────────────────
+    // Natural level scaling: +50% per game level
+    // econ_swarm: +40% per level (max 2) on top of natural scaling
+    let enemySpawnMult = 1 + (this.save.currentLevel - 1) * 0.5;
+    enemySpawnMult *= 1 + this.getLevel("econ_swarm") * 0.4;
+
+    // ── TIME PENALTY ──────────────────────────────────────────────────────
+    let timePenalty = MOTHERSHIP_TIME_PENALTY;
+    timePenalty *= starArmor;
+    timePenalty = Math.max(0.3, timePenalty);
 
     return {
+      // Offense
       damage,
-      moveSpeed,
-      fireRate,
-      bulletSpeed,
-      roundDuration,
-      mothershipHP,
-      timePenaltyPerHit: timePenalty,
-      coinMagnetRange,
-      coinValueMultiplier: coinValueMult,
-      enemySpawnMultiplier: enemySpawnMult,
-      coinDropMultiplier: coinDropMult,
       critChance,
-      critMultiplier: critMult,
+      critMultiplier,
       splashRadius,
-      extraProjectiles,
-      spreadAngle,
       pierceCount,
+      chainTargets,
+      missileLevel,
+      barrageSplashBonus,
+      // DoT / Status
       poisonDps,
       slowOnHit,
-      chainTargets,
-      evasionChance,
-      dashDistMult,
-      dashInvincibility,
-      slowAuraRange,
-      slowAuraFactor,
-      counterDmgMult,
-      playerHp,
-      playerShields,
-      shieldRegenInterval,
-      armorReduction,
-      reflectFraction,
-      lifestealChance,
+      // Movement
+      moveSpeed,
       flashbangRadius,
-      msRegenInterval,
+      mineOnDash,
+      mineSlow,
+      // Auto weapons
+      fireRate,
+      autoBomb,
+      // Mothership
+      mothershipHP,
       msBarrierHits,
       msBarrierCooldown,
       turretLevel,
-      turretDamageMult,
-      overtimeBonus,
-      missileLevel,
+      // Economy
+      roundDuration,
+      coinMagnetRange,
+      coinValueMultiplier: coinValueMult,
+      coinDropMultiplier: coinValueMult,
+      enemySpawnMultiplier: enemySpawnMult,
+      timePenaltyPerHit: timePenalty,
+      // Compat stubs (player is invincible — these are all inactive)
+      bulletSpeed: BULLET_SPEED,
+      extraProjectiles: 0,
+      spreadAngle: 0.15,
+      evasionChance: 0,
+      dashDistMult: 1,
+      dashInvincibility: 0,
+      slowAuraRange: 0,
+      slowAuraFactor: 0,
+      counterDmgMult: 1,
+      playerHp: 1,
+      playerShields: 0,
+      shieldRegenInterval: 0,
+      armorReduction: 0,
+      reflectFraction: 0,
+      lifestealChance: 0,
+      msRegenInterval: 0,
+      turretDamageMult: 1,
+      overtimeBonus: 0,
     };
   }
 
-  // Prestige: reset regular upgrades, keep star upgrades
+  /** Prestige: wipe regular upgrades, keep star upgrades and star coins. */
   prestige(): void {
     this.save.upgradeLevels = { root: 1 };
     this.save.coins = 0;

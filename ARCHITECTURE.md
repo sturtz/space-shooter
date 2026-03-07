@@ -925,6 +925,142 @@ User clicks "Start Run"
 
 **Result:** Enemy bullets still spawn and fly toward the player (for visual interest and the dash EMP mechanic), but hitting the player has no effect. The only loss condition remains Mothership HP reaching zero.
 
+### March 2026 — Upgrade Tree Overhaul + SVG Icons
+
+**Goal:** Completely replace the old upgrade tree (which used arbitrary upgrade IDs that didn't match the actual `computeStats()` logic) with a clean, thematic, visually-rich tree using the new SVG icon assets. Economy baseline is ~9-10 coins per early round.
+
+**Design principles:**
+- All T1 first-level costs = **9 coins** — affordable after a single round
+- Each subsequent level costs ~2.3-2.5× the previous (exponential curve)
+- T2 nodes start at ~28–55 coins, T3 nodes at ~75–450 coins
+- 21 SVG assets from `public/assets/upgrade-tree/` mapped 1:1 to upgrade nodes
+- 6 branches × 3–4 nodes each, radial layout unchanged
+
+**New upgrade tree — 22 nodes + root:**
+
+| Branch | ID | Name | SVG Icon | Mechanic |
+|---|---|---|---|---|
+| DAMAGE | `dmg_core` | Pulse Amplifier | sword-brandish | +30% dmg/lvl, max 3 |
+| DAMAGE | `dmg_range` | Expanded Rays | expanded-rays | +20px AoE/lvl, max 3 |
+| DAMAGE | `dmg_crit` | Sword Wound | sword-wound | +8% crit/lvl, max 3 |
+| DAMAGE | `dmg_overclock` | Scythe | scythe | 2× fire rate, max 1 |
+| WEAPONS | `guns_bolt` | Hypersonic Bolt | hypersonic-bolt | +1 pierce/lvl, max 3 |
+| WEAPONS | `guns_missile` | Rocket Pods | rocket | +1 homing missile/lvl (1–3), max 3 |
+| WEAPONS | `guns_chain` | Ringed Beam | ringed-beam | +1 chain lightning/lvl, max 3 |
+| WEAPONS | `guns_barrage` | Bombing Run | bombing-run | Override → 4 missiles + 30px splash, max 1 |
+| ECONOMY | `econ_magnet` | Coin Magnet | coins | +20px magnet/lvl, max 3 |
+| ECONOMY | `econ_value` | Double Take | two-coins | +25% coin value/lvl, max 3 |
+| ECONOMY | `econ_duration` | Extended Ops | sundial | +6s round/lvl, max 3 |
+| ECONOMY | `econ_swarm` | Swarm Attractor | surrounded-eye | +40% spawn rate/lvl, max 2 |
+| MOVEMENT | `move_speed` | Starfighter | starfighter | +25% speed/lvl, max 3 |
+| MOVEMENT | `move_emp` | Flash Grenade | flash-grenade | +40px EMP radius/lvl, max 3 |
+| MOVEMENT | `move_mine` | Rolling Bomb | rolling-bomb | Dash drops proximity mine, max 1 |
+| MOVEMENT | `move_trap` | Time Trap | time-trap | Mines → 50% slow field 4s, max 1 |
+| EFFECTS | `eff_poison` | Assassin's Touch | assassin-pocket | +5% poison DPS/lvl, max 3 |
+| EFFECTS | `eff_slow` | Toxic Drop | drop | +8% slow on hit/lvl, max 3 |
+| EFFECTS | `eff_bomb` | Unlit Bomb | unlit-bomb | Auto-bomb every 8 beats, max 1 |
+| MOTHERSHIP | `ms_hull` | Reinforced Hull | shield | +1 MS HP/lvl, max 4 |
+| MOTHERSHIP | `ms_turret` | Sentinel Eye | *(emoji ◉)* | Unlock/upgrade turret, max 3 |
+| MOTHERSHIP | `ms_barrier` | Barrier Echoes | shield-echoes | +1 barrier hit/lvl, max 3 |
+
+**"health" branch relabeled** to `EFFECTS` in `BRANCH_LABELS` (branch type string stays `"health"` for code compatibility) with a new purple color `#cc44ff`.
+
+**`PlayerStats` shape cleaned up** — removed dead fields from the old tree, added:
+- `mineOnDash: boolean` — stat flag for `move_mine`
+- `mineSlow: boolean` — stat flag for `move_trap`
+- `autoBomb: boolean` — stat flag for `eff_bomb`
+- `barrageSplashBonus: number` — extra splash radius from `guns_barrage`
+- `critMultiplier` — now a constant 2.5× (no per-level upgrade)
+- `missileLevel` — 0 = no missiles, 1–3 = active, 4 = barrage override (4 missiles)
+- Old "shield/HP/lifesteal/evasion/etc." fields kept as **compat stubs** (all return 0/false/1) so `Game.ts`, `CollisionSystem.ts`, and `SpawnSystem.ts` compile without changes
+
+**SVG icon rendering in `UpgradeScreen`:**
+- Added `iconImages: Map<string, HTMLImageElement>` field
+- `preloadIcons()` called from constructor — creates `new Image()` for each unique `iconPath` in the tree
+- `renderNodes()` checks `img.complete && img.naturalWidth > 0` and calls `ctx.drawImage` (22×22px, centred in node circle) when the SVG is ready; falls back to emoji text while loading
+
+**Files changed:**
+- `src/upgrades/UpgradeTree.ts` — full rewrite (new IDs, names, costs, SVG paths, BRANCH_LABELS)
+- `src/upgrades/UpgradeManager.ts` — new `PlayerStats` interface + clean `computeStats()` keyed to new IDs
+- `src/ui/UpgradeScreen.ts` — `preloadIcons()`, `iconImages` map, SVG-aware `renderNodes()`
+
+**No changes required in:** `Game.ts`, `CollisionSystem.ts`, `SpawnSystem.ts`, `Player.ts` — all compat stubs keep compilation clean.
+
+**Cost reference table (T1 → T3):**
+
+```
+T1 first level:   9 coins  (all 6 branch roots)
+T1 level 2:       19–25
+T1 level 3:       40–58
+T1 level 4:       105      (ms_hull only)
+T2 first level:   28–80
+T2 level 2:       62–125
+T2 level 3:       140–280
+T3 (1-level):     75–210   (mine/trap/bomb)
+T3 (1-level):     420–450  (overclock/barrage — endgame)
+```
+
+---
+
+### March 2026 — Level System Fix + Boss Token + Special Abilities
+
+**Problem:** The level system was broken — the round ended (and the level incremented) as soon as the round timer hit zero, regardless of whether the boss was defeated. The design should be: stay on level 1 until the boss is killed.
+
+**New design:**
+- **Timer hits 0** → force-spawn the boss immediately (if not already spawned). Round does NOT end. The timer now serves only as a "prep phase" before the boss fight.
+- **Boss killed** → level increments, star coin awarded, special ability selection screen shown.
+- **Mothership destroyed** → round ends as a loss via `endRound(true)` — no level up.
+
+**New game state: `"bossReward"`**
+
+After the boss is killed, the game transitions to `"bossReward"` instead of `"gameover"`. This shows a modal choice screen overlaid on the frozen game state. The player selects one of three special abilities. After choosing, the game moves to `"gameover"` (round stats) → `"upgradeScreen"`.
+
+**Three boss-token special abilities (unlocked on first boss kill, re-choosable on each subsequent boss kill):**
+
+| Ability | ID | Effect |
+|---|---|---|
+| Targeting Laser | `"laser"` | Auto-fires at nearest enemy every 2.5s for 3× weapon damage. Bright red beam visual. |
+| Dash Bomb | `"bomb_dash"` | Each dash drops a bomb at the landing position. Detonates after 1.5s — 5× damage in 80px radius. Pulsing orange glow + countdown arc visual. |
+| Stun Field | `"flashbang"` | Dash EMP ring now freezes all enemies in radius for 2 seconds (+20px larger than normal EMP). Cyan particle burst. |
+
+The chosen ability persists across runs (stored in `save.specialAbility`). When the boss is killed again in a future run, the player may keep their current ability or switch to a different one.
+
+**New field in `SaveData`:**
+```typescript
+specialAbility: string | null; // "laser" | "bomb_dash" | "flashbang"
+```
+
+**Files changed:**
+
+- **`src/utils/SaveManager.ts`**
+  - Added `specialAbility: string | null` to `SaveData` interface
+  - Added `specialAbility: null` to `getDefaultSave()`
+
+- **`src/entities/Enemy.ts`**
+  - Added `stunTimer: number = 0` field
+  - Added `applyStun(duration)` method
+  - Added `isStunned` getter
+  - `updateDebuffs()` now ticks `stunTimer` down
+  - `effectiveSpeed` getter returns `0` when `stunTimer > 0` (frozen movement)
+
+- **`src/game/Game.ts`** (major changes)
+  - `GameState` type: added `"bossReward"` state
+  - New module-level types: `LaserBeam`, `PendingBomb`, `BossRewardChoice`
+  - New constant: `BOSS_REWARD_CHOICES` (array of 3 ability definitions with colors/descriptions)
+  - New Game fields: `laserTimer`, `laserBeams[]`, `pendingBombs[]`
+  - `startRun()`: initializes new fields; `laserTimer` starts at 2.5s (first laser fires after brief delay)
+  - `handleDash()`: two new special ability branches — stun field (flashbang) and bomb drop (bomb_dash)
+  - `updatePlaying()` timer block: no longer calls `endRound()` on timer expiry; forces boss spawn instead
+  - `updatePlaying()`: special ability logic — laser timer countdown, bomb ticking, laser beam decay
+  - `onEnemyKilled()` boss path: stops music, increments level, sets `state = "bossReward"` (no longer calls `endRound`)
+  - `endRound()`: simplified — now only handles mothership destruction (no level-up logic)
+  - `update()` switch: added `"bossReward"` case (ticks particles)
+  - `render()` switch: added `"bossReward"` case (renders frozen game + reward overlay)
+  - `renderPlaying()`: added laser beam rendering (glowing red line + white core), bomb rendering (pulsing glow + countdown arc + dashed radius), and bottom-center special ability indicator
+  - New private methods: `fireLaser()`, `updateBombs()`, `handleBossRewardClick()`, `selectSpecialAbility()`, `getBossRewardLayout()`, `renderBossReward()`, `drawAbilityIcon()`
+
+---
+
 ### March 2026 — Ship Switched to spaceship.svg + Non-Cartoony Recolor + Pink Background
 
 **Changes:**

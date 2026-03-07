@@ -10,6 +10,8 @@ export interface SaveData {
   lifetimeKills: number;
   prestigeCount: number;
   highestLevel: number;
+  /** Special ability earned by defeating the boss — persists between runs */
+  specialAbility: string | null;
 }
 
 export function getDefaultSave(): SaveData {
@@ -23,6 +25,7 @@ export function getDefaultSave(): SaveData {
     lifetimeKills: 0,
     prestigeCount: 0,
     highestLevel: 1,
+    specialAbility: null,
   };
 }
 

@@ -19,6 +19,7 @@ export abstract class Enemy extends Entity {
   poisonDps: number = 0;
   slowFactor: number = 1; // 1 = normal speed, < 1 = slowed
   slowTimer: number = 0;
+  stunTimer: number = 0; // > 0 = frozen (cannot move)
 
   constructor(x: number, y: number, radius: number, hp: number, speed: number, coinValue: number) {
     super(x, y, radius);
@@ -49,8 +50,22 @@ export abstract class Enemy extends Entity {
     this.slowTimer = Math.max(this.slowTimer, duration);
   }
 
+  applyStun(duration: number) {
+    this.stunTimer = Math.max(this.stunTimer, duration);
+  }
+
+  get isStunned(): boolean {
+    return this.stunTimer > 0;
+  }
+
   /** Call in subclass update() to tick debuffs. Returns true if killed by poison. */
   updateDebuffs(dt: number): boolean {
+    // Stun tick (freeze)
+    if (this.stunTimer > 0) {
+      this.stunTimer -= dt;
+      if (this.stunTimer < 0) this.stunTimer = 0;
+    }
+
     // Poison tick
     if (this.poisonTimer > 0) {
       this.poisonTimer -= dt;
@@ -72,8 +87,9 @@ export abstract class Enemy extends Entity {
     return false;
   }
 
-  /** Effective speed accounting for slow debuff */
+  /** Effective speed accounting for slow debuff and stun */
   get effectiveSpeed(): number {
+    if (this.stunTimer > 0) return 0;
     return this.speed * Math.max(0.1, this.slowFactor);
   }
 }

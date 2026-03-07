@@ -5,7 +5,7 @@ export const GAME_WIDTH = 900;
 export const GAME_HEIGHT = 600;
 
 // Player
-export const PLAYER_BASE_SPEED = 75; // pixels/sec (slow, deliberate)
+export const PLAYER_BASE_SPEED = 60; // pixels/sec (slow, deliberate)
 export const PLAYER_BASE_FIRE_RATE = 0.4; // seconds between shots
 export const PLAYER_BASE_DAMAGE = 1;
 export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
@@ -23,11 +23,11 @@ export const BULLET_LIFETIME = 2; // seconds
 // Enemies
 export const ROCK_BASE_HP = 2; // small rocks: 2 hits (was 3, rebalanced for early game)
 export const ROCK_BIG_HP = 5; // big rocks: 5 hits
-export const ROCK_BASE_SPEED = 20;
+export const ROCK_BASE_SPEED = 15;
 export const ROCK_SIZE = 10;
 export const ROCK_BIG_SIZE = 16;
 export const ENEMY_SHIP_BASE_HP = 4;
-export const ENEMY_SHIP_BASE_SPEED = 50;
+export const ENEMY_SHIP_BASE_SPEED = 30;
 export const ENEMY_SHIP_SIZE = 12;
 
 // Coins
@@ -38,7 +38,7 @@ export const COIN_SPEED = 120; // speed when flying to player
 
 // Waves
 export const BASE_ROUND_DURATION = 15; // seconds
-export const SPAWN_RATE_BASE = 2.5; // seconds between spawns (fewer enemies at start)
+export const SPAWN_RATE_BASE = 2.0; // seconds between spawns (fewer enemies at start)
 export const SPAWN_DISTANCE = 350; // distance from center to spawn
 
 // Upgrades

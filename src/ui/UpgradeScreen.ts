@@ -8,7 +8,6 @@ import {
   getParentNode,
   BRANCH_ANGLES,
   BRANCH_COLORS,
-  BRANCH_LABELS,
 } from "../upgrades/UpgradeTree";
 import { saveGame, clearSave, getDefaultSave } from "../utils/SaveManager";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
@@ -41,6 +40,8 @@ export class UpgradeScreen {
   tooltip: { node: UpgradeNode; x: number; y: number } | null = null;
   cantAffordShake: ShakeAnim | null = null;
   cantAffordMessage: { text: string; timer: number } | null = null;
+  /** Preloaded SVG images keyed by iconPath */
+  iconImages: Map<string, HTMLImageElement> = new Map();
 
   // Layout constants — larger for mobile
   readonly CX = GAME_WIDTH / 2;
@@ -53,6 +54,18 @@ export class UpgradeScreen {
     this.upgrades = upgrades;
     this.game = game;
     this.computeNodePositions();
+    this.preloadIcons();
+  }
+
+  /** Preload all unique SVG icon paths from the upgrade tree. */
+  preloadIcons() {
+    for (const node of UPGRADE_TREE) {
+      if (node.iconPath && !this.iconImages.has(node.iconPath)) {
+        const img = new Image();
+        img.src = node.iconPath;
+        this.iconImages.set(node.iconPath, img);
+      }
+    }
   }
 
   refresh() {
@@ -246,30 +259,28 @@ export class UpgradeScreen {
       const unlocked = this.upgrades.isUnlocked(node);
 
       if (level > 0) {
+        // Purchased — solid branch color, no glow
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 2.5;
-        ctx.globalAlpha = 0.8;
-        // Glow effect on purchased connections
-        ctx.save();
-        ctx.shadowColor = BRANCH_COLORS[node.branch];
-        ctx.shadowBlur = 6;
+        ctx.lineWidth = 2;
+        ctx.globalAlpha = 0.7;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
         ctx.stroke();
-        ctx.restore();
       } else if (unlocked) {
+        // Unlocked, not yet bought — dim branch color
         ctx.strokeStyle = BRANCH_COLORS[node.branch];
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.35;
+        ctx.globalAlpha = 0.25;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
         ctx.stroke();
       } else {
-        ctx.strokeStyle = "#333";
+        // Locked — muted grey, still visible
+        ctx.strokeStyle = "#445566";
         ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.15;
+        ctx.globalAlpha = 0.28;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
@@ -279,7 +290,7 @@ export class UpgradeScreen {
     }
 
     // Depth rings
-    ctx.globalAlpha = 0.08;
+    ctx.globalAlpha = 0.07;
     ctx.strokeStyle = "#334466";
     ctx.lineWidth = 0.5;
     for (let d = 1; d <= 3; d++) {
@@ -303,34 +314,19 @@ export class UpgradeScreen {
     for (const branch of branches) {
       const angle = BRANCH_ANGLES[branch];
       const dist = 3.3 * this.DEPTH_SPACING;
-      let lx = this.CX + Math.cos(angle) * dist;
       let ly = this.CY + Math.sin(angle) * dist;
       if (ly < 62) ly = 62;
       if (ly > GAME_HEIGHT - 48) ly = GAME_HEIGHT - 48;
 
       // Label with subtle bg pill
-      const label = BRANCH_LABELS[branch];
       ctx.save();
       ctx.font = `bold 8px 'Orbitron', monospace`;
-      const textW = ctx.measureText(label).width;
-      const pillW = textW + 10;
-      const pillH = 14;
 
-      ctx.globalAlpha = 0.5;
-      renderer.drawRoundedRect(
-        lx - pillW / 2,
-        ly - pillH / 2,
-        pillW,
-        pillH,
-        3,
-        "rgba(0, 0, 0, 0.5)"
-      );
       ctx.globalAlpha = 1;
 
       ctx.fillStyle = BRANCH_COLORS[branch];
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText(label, lx, ly);
       ctx.restore();
     }
   }
@@ -362,52 +358,41 @@ export class UpgradeScreen {
       const ny = pos.y + shakeY;
 
       if (isRoot) {
-        // Root node — glowing central hub
-        ctx.save();
-        ctx.shadowColor = COLORS.player;
-        ctx.shadowBlur = 12;
+        // Root node — central hub, no heavy glow
         ctx.fillStyle = "#111133";
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = COLORS.player;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.restore();
-      } else if (maxed) {
-        // Maxed node — filled with glow
-        ctx.save();
-        ctx.shadowColor = BRANCH_COLORS[node.branch];
-        ctx.shadowBlur = 10;
-
-        const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
-        grad.addColorStop(0, BRANCH_COLORS[node.branch]);
-        grad.addColorStop(0.6, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.4));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15));
-        ctx.fillStyle = grad;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
+        ctx.strokeStyle = "rgba(80,200,180,0.7)";
         ctx.lineWidth = 2;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.restore();
+      } else if (maxed) {
+        // Maxed — filled, subtle inner gradient, no heavy shadow
+        const grad = ctx.createRadialGradient(nx, ny, 0, nx, ny, r);
+        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.75));
+        grad.addColorStop(0.65, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
+        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.1));
+        ctx.fillStyle = grad;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.85);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.stroke();
       } else if (level > 0) {
-        // Partially upgraded — progress arc
+        // Partially upgraded — dark bg + progress arc slice + colored border
         ctx.fillStyle = "#0d0d20";
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
 
-        // Progress arc fill
         const progressAngle = (level / node.maxLevel) * Math.PI * 2;
         ctx.save();
-        ctx.fillStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.25);
+        ctx.fillStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.22);
         ctx.beginPath();
         ctx.moveTo(nx, ny);
         ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
@@ -415,46 +400,43 @@ export class UpgradeScreen {
         ctx.fill();
         ctx.restore();
 
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (canBuy) {
-        // Affordable — pulsing subtle outline
-        ctx.fillStyle = "#0d0d1a";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.save();
-        ctx.shadowColor = BRANCH_COLORS[node.branch];
-        ctx.shadowBlur = 6;
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
+        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.9);
         ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
-        ctx.restore();
-      } else if (unlocked) {
-        // Unlocked but can't afford
-        ctx.fillStyle = "#0a0a15";
+      } else if (canBuy) {
+        // Affordable and unlocked — slightly brighter bg, clean colored border
+        ctx.fillStyle = "#10101e";
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "rgba(80, 80, 100, 0.5)";
+        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.85);
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.stroke();
+      } else if (unlocked) {
+        // Unlocked but can't afford — grey tint of branch color, reduced opacity
+        ctx.globalAlpha = 0.65;
+        ctx.fillStyle = "#0c0c18";
+        ctx.beginPath();
+        ctx.arc(nx, ny, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.35);
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.globalAlpha = 1;
       } else {
-        // Locked
-        ctx.globalAlpha = 0.35;
-        ctx.fillStyle = "#0a0a10";
+        // Locked — clearly visible but greyed, so player can see what's coming
+        ctx.globalAlpha = 0.55;
+        ctx.fillStyle = "#0c0c16";
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.fill();
-        ctx.strokeStyle = "#222";
+        ctx.strokeStyle = "#445566";
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
@@ -462,15 +444,32 @@ export class UpgradeScreen {
         ctx.globalAlpha = 1;
       }
 
-      // Icon
-      const iconAlpha = unlocked ? 1 : 0.25;
-      ctx.globalAlpha = iconAlpha;
+      // Icon alpha: locked = 0.45 (visible, greyed), unlocked-can't-afford = 0.6, else full
+      const iconAlpha = !unlocked ? 0.45 : !canBuy && !maxed && level === 0 ? 0.6 : 1.0;
       ctx.save();
-      ctx.font = `${isRoot ? 16 : 13}px monospace`;
-      ctx.fillStyle = "#fff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(node.icon, nx, ny);
+      ctx.globalAlpha = iconAlpha;
+      if (node.iconPath) {
+        const img = this.iconImages.get(node.iconPath);
+        if (img && img.complete && img.naturalWidth > 0) {
+          // SVG loaded — draw centred inside the node circle
+          const iconSize = isRoot ? 28 : 22;
+          ctx.drawImage(img, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
+        } else {
+          // Still loading — text fallback
+          ctx.font = `${isRoot ? 16 : 13}px monospace`;
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(node.icon, nx, ny);
+        }
+      } else {
+        // No SVG — pure emoji/text icon
+        ctx.font = `${isRoot ? 16 : 13}px monospace`;
+        ctx.fillStyle = "#fff";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(node.icon, nx, ny);
+      }
       ctx.restore();
       ctx.globalAlpha = 1;
 
