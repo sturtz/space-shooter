@@ -87,8 +87,8 @@ export class Player extends Entity {
     this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
     this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
 
-    // Face toward mouse target (on desktop) — on mobile, Game.ts overrides with auto-aim
-    if (!input.isTouchDevice && dist > STOP_THRESHOLD) {
+    // Face toward mouse target
+    if (dist > STOP_THRESHOLD) {
       this.angle = Math.atan2(dy, dx);
     }
   }

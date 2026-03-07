@@ -78,60 +78,6 @@ canvas {
     0 0 120px rgba(0, 0, 0, 0.6);
 }
 
-/* ── Portrait Orientation Overlay ── */
-#rotate-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  z-index: 99999;
-  background: rgba(10, 10, 26, 0.97);
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  text-align: center;
-  font-family: var(--font-main);
-  color: var(--primary);
-  width: 100%;
-  height: 100%;
-}
-
-#rotate-overlay .rotate-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 1.4rem;
-}
-
-#rotate-overlay .rotate-icon {
-  animation: rock 2s ease-in-out infinite;
-}
-
-#rotate-overlay p {
-  font-size: 1.1rem;
-  letter-spacing: 0.05em;
-  max-width: 260px;
-  line-height: 1.5;
-}
-
-@keyframes rock {
-  0%,
-  100% {
-    transform: rotate(0deg);
-  }
-  25% {
-    transform: rotate(-25deg);
-  }
-  75% {
-    transform: rotate(25deg);
-  }
-}
-
-@media screen and (orientation: portrait) and (max-width: 1024px) {
-  #rotate-overlay {
-    display: flex;
-  }
-}
-
 /* ── Hide scrollbars everywhere ── */
 ::-webkit-scrollbar {
   display: none;
@@ -148,31 +94,34 @@ canvas {
 /* ── Volume Control Overlay ── */
 #volume-control {
   position: absolute;
-  bottom: 16px;
-  left: 16px;
+  bottom: 32px;
+  left: 32px;
   display: flex;
   align-items: center;
   gap: 6px;
   z-index: 10;
   opacity: 0.5;
   transition: opacity 0.2s;
+  width: 80px;
+  cursor: pointer;
 }
 
 #volume-control:hover {
   opacity: 1;
+  width: 140px;
 }
 
 #volume-icon {
   color: var(--primary);
   font-size: 18px;
   line-height: 1;
-  cursor: default;
+  cursor: pointer;
 }
 
 #music-volume {
+  width: 100%;
   -webkit-appearance: none;
   appearance: none;
-  width: 120px;
   height: 6px;
   background: rgba(15, 162, 147, 0.5);
   border-radius: 2px;

@@ -34,12 +34,12 @@ export class AudioManager {
     try {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.5;
+      this.masterGain.gain.value = 0.1;
       this.masterGain.connect(this.ctx.destination);
 
       // Cone synth sub-gain (silent — fire.mp3 provides the music)
       this.coneTrackGain = this.ctx.createGain();
-      this.coneTrackGain.gain.value = 0;
+      this.coneTrackGain.gain.value = 1;
       this.coneTrackGain.connect(this.masterGain);
 
       this.initialized = true;
@@ -94,7 +94,7 @@ export class AudioManager {
     osc.type = "square";
     osc.frequency.setValueAtTime(880, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
+    gain.gain.setValueAtTime(0.1, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
     osc.connect(gain);
     gain.connect(this.masterGain!);
