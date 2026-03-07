@@ -23,7 +23,7 @@ export const BULLET_LIFETIME = 2; // seconds
 // Enemies
 export const ROCK_BASE_HP = 2; // small rocks: 2 hits (was 3, rebalanced for early game)
 export const ROCK_BIG_HP = 5; // big rocks: 5 hits
-export const ROCK_BASE_SPEED = 30;
+export const ROCK_BASE_SPEED = 20;
 export const ROCK_SIZE = 10;
 export const ROCK_BIG_SIZE = 16;
 export const ENEMY_SHIP_BASE_HP = 4;

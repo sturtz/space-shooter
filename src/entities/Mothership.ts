@@ -6,12 +6,17 @@ import {
   MOTHERSHIP_COLLISION_RADIUS,
   COLORS,
 } from "../utils/Constants";
+import { ShipImages, imageReady } from "../utils/Assets";
 
 export class Mothership extends Entity {
   maxHp: number;
   hp: number;
   damageFlash: number = 0;
   pulseTimer: number = 0;
+  /** True once HP hits 0 — plays the death gif overlay */
+  isDestroyed: boolean = false;
+  deathAnimTimer: number = 0;
+  readonly DEATH_ANIM_DURATION = 1.2; // seconds to show death gif
 
   constructor(maxHp: number) {
     super(GAME_WIDTH / 2, GAME_HEIGHT / 2, MOTHERSHIP_COLLISION_RADIUS);
@@ -24,6 +29,8 @@ export class Mothership extends Entity {
     this.damageFlash = 0.3;
     if (this.hp <= 0) {
       this.hp = 0;
+      this.isDestroyed = true;
+      this.deathAnimTimer = this.DEATH_ANIM_DURATION;
       return true; // destroyed
     }
     return false;
@@ -37,6 +44,9 @@ export class Mothership extends Entity {
     this.pulseTimer += dt;
     if (this.damageFlash > 0) {
       this.damageFlash -= dt;
+    }
+    if (this.deathAnimTimer > 0) {
+      this.deathAnimTimer -= dt;
     }
   }
 
@@ -157,6 +167,18 @@ export class Mothership extends Entity {
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);
+
+    // ── DEATH ANIMATION GIF ────────────────────────────────────────
+    if (this.isDestroyed && this.deathAnimTimer > 0) {
+      const deathImg = ShipImages.mothershipDeath;
+      if (imageReady(deathImg)) {
+        const progress = 1 - this.deathAnimTimer / this.DEATH_ANIM_DURATION;
+        const gifSize = 80 + progress * 40; // expands 80→120px
+        ctx.globalAlpha = Math.min(1, this.deathAnimTimer / 0.3); // fade out in last 300ms
+        ctx.drawImage(deathImg, cx - gifSize / 2, cy - gifSize / 2, gifSize, gifSize);
+        ctx.globalAlpha = 1;
+      }
+    }
 
     ctx.restore();
   }

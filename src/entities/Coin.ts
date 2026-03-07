@@ -16,6 +16,7 @@ import {
   COIN_SPEED,
   COLORS,
 } from "../utils/Constants";
+import { ItemImages, imageReady } from "../utils/Assets";
 
 export class Coin extends Entity {
   value: number;
@@ -74,41 +75,43 @@ export class Coin extends Entity {
       ctx.globalAlpha = this.lifetime / 2;
     }
 
-    // Coin glow
     const baseAlpha = ctx.globalAlpha;
-    ctx.globalAlpha = baseAlpha * 0.3;
-    renderer.drawCircle(
-      vec2(this.pos.x, this.pos.y + bob),
-      COIN_SIZE + 2,
-      this.value >= 5 ? "#ffaa00" : COLORS.coin,
-    );
+    const drawX = this.pos.x;
+    const drawY = this.pos.y + bob;
+    const coinSprite = imageReady(ItemImages.coin) ? ItemImages.coin : null;
+
+    // Coin glow ring (soft pulse behind sprite)
+    const glowColor = this.value >= 50 ? "#ff44ff" : this.value >= 5 ? "#ffaa00" : COLORS.coin;
+    ctx.globalAlpha = baseAlpha * 0.35 * (0.7 + 0.3 * Math.sin(this.sparkleTimer * 5));
+    renderer.drawCircle(vec2(drawX, drawY), COIN_SIZE + 3, glowColor);
     ctx.globalAlpha = baseAlpha;
 
-    // Coin body
-    const color =
-      this.value >= 50 ? "#ff44ff" : this.value >= 5 ? "#ffaa00" : COLORS.coin;
-    renderer.drawCircle(vec2(this.pos.x, this.pos.y + bob), COIN_SIZE, color);
+    if (coinSprite) {
+      // Draw sprite — scale high-value coins slightly bigger
+      const drawSize = this.value >= 5 ? COIN_SIZE * 2.8 : COIN_SIZE * 2.2;
+      ctx.drawImage(coinSprite, drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
 
-    // Shine
-    ctx.fillStyle = COLORS.coinShine;
-    ctx.globalAlpha = baseAlpha * (0.6 + Math.sin(this.sparkleTimer * 6) * 0.4);
-    ctx.beginPath();
-    ctx.arc(
-      this.pos.x - 1,
-      this.pos.y + bob - 1,
-      COIN_SIZE * 0.4,
-      0,
-      Math.PI * 2,
-    );
-    ctx.fill();
+      // Gold/purple tint overlay for high-value coins
+      if (this.value >= 5) {
+        ctx.globalCompositeOperation = "source-atop";
+        ctx.fillStyle = this.value >= 50 ? "rgba(200,0,255,0.35)" : "rgba(255,160,0,0.35)";
+        ctx.fillRect(drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
+        ctx.globalCompositeOperation = "source-over";
+      }
+    } else {
+      // Canvas circle fallback
+      const color = this.value >= 50 ? "#ff44ff" : this.value >= 5 ? "#ffaa00" : COLORS.coin;
+      renderer.drawCircle(vec2(drawX, drawY), COIN_SIZE, color);
+    }
     ctx.globalAlpha = baseAlpha;
 
-    // Value text for high-value coins
+    // Value label above coin for multi-value drops
     if (this.value > 1) {
+      const color = this.value >= 50 ? "#ff44ff" : this.value >= 5 ? "#ffaa00" : COLORS.coin;
       renderer.drawText(
         `${this.value}`,
-        this.pos.x,
-        this.pos.y + bob - 10,
+        drawX,
+        drawY - COIN_SIZE * 1.8,
         color,
         8,
         "center",

@@ -35,12 +35,15 @@ import {
   GAME_WIDTH,
   GAME_HEIGHT,
   SPAWN_RATE_BASE,
+  ROCK_BASE_HP,
+  ROCK_BASE_SPEED,
   COLORS,
 } from "../utils/Constants";
 import { HUD } from "../ui/HUD";
 import { UpgradeScreen } from "../ui/UpgradeScreen";
 import { AudioManager } from "../audio/AudioManager";
 import { IGame } from "./GameInterface";
+import { BgImages, imageReady } from "../utils/Assets";
 
 export type GameState = "menu" | "playing" | "upgradeScreen" | "gameover";
 
@@ -283,6 +286,18 @@ export class Game implements IGame {
     this.particles.clear();
     this.spawner.reset(this);
     this.state = "playing";
+
+    // Spawn initial small asteroids spread around the arena
+    const initialRockCount = 8;
+    for (let i = 0; i < initialRockCount; i++) {
+      const angle = ((Math.PI * 2 * i) / initialRockCount) + randomRange(-0.2, 0.2);
+      const dist = 180 + Math.random() * 100; // 180–280px from center
+      const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
+      const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
+      // 65% normal size, 1 HP, at base speed
+      const rock = new Rock(x, y, 1, ROCK_BASE_SPEED, false, 0.65);
+      this.enemies.push(rock);
+    }
 
     // Start the cone weapon music track — cone fires every beat
     this.coneBeatCount = 0;
@@ -700,14 +715,31 @@ export class Game implements IGame {
   }
 
   renderStarfield() {
-    for (const star of this.stars) {
-      const twinkle =
-        0.5 + 0.5 * Math.sin(this.gameTime * star.twinkleSpeed + star.x);
-      const alpha = star.brightness * twinkle;
-      this.renderer.ctx.globalAlpha = alpha;
-      this.renderer.drawCircle(vec2(star.x, star.y), star.size, "#aabbdd");
+    const ctx = this.renderer.ctx;
+
+    // Layer 1 — parallax nebula background (full bleed)
+    if (imageReady(BgImages.parallax)) {
+      ctx.drawImage(BgImages.parallax, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+    } else {
+      // Solid fallback while image loads
+      ctx.fillStyle = COLORS.bg;
+      ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
     }
-    this.renderer.ctx.globalAlpha = 1;
+
+    // Layer 2 — stars overlay (subtle, semi-transparent)
+    if (imageReady(BgImages.stars)) {
+      ctx.globalAlpha = 0.55;
+      ctx.drawImage(BgImages.stars, 0, 0, GAME_WIDTH, GAME_HEIGHT);
+      ctx.globalAlpha = 1;
+    }
+
+    // Layer 3 — procedural twinkle dots for animation (sparse, on top)
+    for (const star of this.stars) {
+      const twinkle = 0.5 + 0.5 * Math.sin(this.gameTime * star.twinkleSpeed + star.x);
+      ctx.globalAlpha = star.brightness * twinkle * 0.4; // dimmer since bg already has stars
+      this.renderer.drawCircle(vec2(star.x, star.y), star.size * 0.7, "#ffffff");
+    }
+    ctx.globalAlpha = 1;
   }
 
   renderMenu() {
@@ -841,7 +873,7 @@ export class Game implements IGame {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(
-        "Left side: Move joystick  •  Right side: Dash",
+        "Touch & drag to move  •  Right edge: Dash",
         cx,
         controlsY + 4,
       );
@@ -858,7 +890,7 @@ export class Game implements IGame {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(
-        "WASD to move  •  Mouse to aim  •  Shift to dash",
+        "Mouse to move  •  Shift to dash",
         cx,
         controlsY + 4,
       );
@@ -1034,8 +1066,6 @@ export class Game implements IGame {
       level: this.save.currentLevel,
       mothershipHp: this.mothership.hp,
       mothershipMaxHp: this.mothership.maxHp,
-      playerHp: this.player.hp,
-      playerMaxHp: this.player.maxHp,
       playerShields: this.player.shields,
       playerMaxShields: this.player.maxShields,
       streakCoinBonus: streakBonus,
@@ -1050,56 +1080,38 @@ export class Game implements IGame {
     }
   }
 
-  /** Render virtual joystick and dash zone indicators for mobile */
+  /** Render touch target indicator and dash button for mobile */
   renderMobileControls() {
     const ctx = this.renderer.ctx;
-    const joystickRadius = 40;
-    const thumbRadius = 14;
 
-    // Virtual joystick — hi-fi with gradient fills
-    if (this.input.joystickActive) {
-      const center = this.input.joystickCenter;
-      const thumb = this.input.joystickThumb;
-
-      // Outer ring with subtle fill
+    // Touch target indicator — small crosshair where the player is moving toward
+    if (this.input.touchTargetActive) {
+      const target = this.input.mousePos;
       ctx.save();
-      ctx.globalAlpha = 0.12;
-      const ringGrad = ctx.createRadialGradient(
-        center.x,
-        center.y,
-        0,
-        center.x,
-        center.y,
-        joystickRadius,
-      );
-      ringGrad.addColorStop(0, "rgba(0, 255, 204, 0.15)");
-      ringGrad.addColorStop(1, "rgba(0, 255, 204, 0)");
-      ctx.fillStyle = ringGrad;
-      ctx.beginPath();
-      ctx.arc(center.x, center.y, joystickRadius, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.globalAlpha = 0.25;
+      ctx.globalAlpha = 0.35;
       ctx.strokeStyle = COLORS.player;
-      ctx.lineWidth = 2;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 3]);
       ctx.beginPath();
-      ctx.arc(center.x, center.y, joystickRadius, 0, Math.PI * 2);
+      ctx.arc(target.x, target.y, 12, 0, Math.PI * 2);
       ctx.stroke();
-
-      // Thumb — glowing circle
+      ctx.setLineDash([]);
+      // Center dot
       ctx.globalAlpha = 0.5;
       ctx.fillStyle = COLORS.player;
       ctx.beginPath();
-      ctx.arc(thumb.x, thumb.y, thumbRadius, 0, Math.PI * 2);
+      ctx.arc(target.x, target.y, 2.5, 0, Math.PI * 2);
       ctx.fill();
-
-      ctx.globalAlpha = 0.3;
-      ctx.strokeStyle = "#fff";
-      ctx.lineWidth = 1.5;
+      // Draw line from player to target
+      ctx.globalAlpha = 0.12;
+      ctx.strokeStyle = COLORS.player;
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
       ctx.beginPath();
-      ctx.arc(thumb.x, thumb.y, thumbRadius, 0, Math.PI * 2);
+      ctx.moveTo(this.player.pos.x, this.player.pos.y);
+      ctx.lineTo(target.x, target.y);
       ctx.stroke();
-
+      ctx.setLineDash([]);
       ctx.restore();
     }
 

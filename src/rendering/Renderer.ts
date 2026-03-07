@@ -7,6 +7,9 @@ export class Renderer {
   private shakeAmount = 0;
   private shakeDecay = 0.9;
 
+  /** Device pixel ratio — set once at init, updated on resize */
+  private dpr = 1;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
@@ -15,10 +18,36 @@ export class Renderer {
   }
 
   resize() {
-    this.canvas.width = GAME_WIDTH;
-    this.canvas.height = GAME_HEIGHT;
-    this.canvas.style.width = `${window.innerWidth}px`;
-    this.canvas.style.height = `${window.innerHeight}px`;
+    const dpr = Math.min(window.devicePixelRatio || 1, 3); // cap at 3× to avoid VRAM issues
+    this.dpr = dpr;
+
+    // Compute the largest size that fits the viewport while keeping 900×600 aspect ratio
+    const container = this.canvas.parentElement;
+    const availW = container ? container.clientWidth : window.innerWidth;
+    const availH = container ? container.clientHeight : window.innerHeight;
+
+    const aspect = GAME_WIDTH / GAME_HEIGHT; // 900/600 = 1.5
+    let displayW = availW;
+    let displayH = availW / aspect;
+    if (displayH > availH) {
+      displayH = availH;
+      displayW = availH * aspect;
+    }
+
+    // Physical pixel buffer = display size × dpr (for sharpness on Retina / hi-DPI)
+    this.canvas.width  = Math.round(displayW * dpr);
+    this.canvas.height = Math.round(displayH * dpr);
+
+    // CSS display size — exact fit, centered by flex parent
+    this.canvas.style.width  = `${Math.round(displayW)}px`;
+    this.canvas.style.height = `${Math.round(displayH)}px`;
+
+    // Scale context so all game-coordinate drawing (0..GAME_WIDTH, 0..GAME_HEIGHT)
+    // maps correctly onto the hi-res physical buffer
+    const scaleX = (displayW * dpr) / GAME_WIDTH;
+    const scaleY = (displayH * dpr) / GAME_HEIGHT;
+    this.ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+
     this.ctx.imageSmoothingEnabled = false;
   }
 
@@ -426,7 +455,6 @@ export class Renderer {
 
   /** Utility: darken a color */
   private darkenColor(color: string, amount: number): string {
-    // Simple approach: just return a darker version
     if (color.startsWith("rgba")) {
       return color.replace(
         /rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/,

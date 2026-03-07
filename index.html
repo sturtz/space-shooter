@@ -4,100 +4,19 @@
     <meta charset="UTF-8" />
     <meta
       name="viewport"
-      content="width=device-width, initial-scale=1.0, user-scalable=no"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>Space Shooter</title>
-    <style>
-      * {
-        max-width: 1024px;
-        max-height: 768px;
-        aspect-ratio: 4 / 3;
-        margin: auto;
-        padding: 0;
-        box-sizing: border-box;
-      }
-      html,
-      body {
-        width: 100%;
-        height: 100%;
-        overflow: hidden;
-        background: #000;
-        font-family: ArcadeClassic, monospace;
-      }
-      canvas {
-        display: block;
-        margin: 0 auto;
-        image-rendering: pixelated;
-        image-rendering: crisp-edges;
-        cursor: crosshair;
-        touch-action: none;
-        -webkit-touch-callout: none;
-        -webkit-user-select: none;
-        user-select: none;
-      }
-
-      /* Portrait orientation overlay */
-      #rotate-overlay {
-        display: none;
-        position: fixed;
-        inset: 0;
-        z-index: 99999;
-        background: rgba(10, 10, 26, 0.95);
-        align-items: center;
-        justify-content: center;
-        flex-direction: column;
-        text-align: center;
-        font-family: monospace;
-        color: #00ffe7;
-        max-width: none;
-        max-height: none;
-        aspect-ratio: auto;
-        width: 100vw;
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-      }
-      #rotate-overlay *,
-      #rotate-overlay *::before,
-      #rotate-overlay *::after {
-        max-width: none;
-        max-height: none;
-        aspect-ratio: auto;
-        margin: 0;
-      }
-      #rotate-overlay .rotate-content {
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1.2rem;
-      }
-      #rotate-overlay .rotate-icon {
-        animation: rock 2s ease-in-out infinite;
-      }
-      #rotate-overlay p {
-        font-size: 1.1rem;
-        letter-spacing: 0.05em;
-        max-width: 260px;
-        line-height: 1.5;
-      }
-      @keyframes rock {
-        0%,
-        100% {
-          transform: rotate(0deg);
-        }
-        25% {
-          transform: rotate(-25deg);
-        }
-        75% {
-          transform: rotate(25deg);
-        }
-      }
-      @media screen and (orientation: portrait) and (max-width: 1024px) {
-        #rotate-overlay {
-          display: flex;
-        }
-      }
-    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
     <!-- Portrait orientation overlay -->
@@ -114,7 +33,6 @@
         >
           <rect x="25" y="10" width="50" height="80" rx="6" />
           <circle cx="50" cy="80" r="4" fill="#00ffe7" />
-          <!-- Rotation arrow -->
           <path
             d="M10 50 A40 40 0 0 1 50 10"
             stroke="#00ffe7"
@@ -128,7 +46,10 @@
       </div>
     </div>
 
-    <canvas id="game"></canvas>
+    <div id="game-container">
+      <canvas id="game"></canvas>
+    </div>
+
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>
