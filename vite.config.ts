@@ -1,12 +1,12 @@
 import { defineConfig } from "vite";
-import { resolve } from "path";
+import { fileURLToPath, URL } from "node:url";
 
 // use a relative base so the site works when hosted under a repo path
 export default defineConfig({
   base: "./",
   resolve: {
     alias: {
-      "@": resolve(__dirname, "src"),
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
     },
   },
   server: {

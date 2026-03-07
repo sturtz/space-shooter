@@ -19,6 +19,7 @@ import {
   PLAYER_COLLISION_RADIUS,
   COLORS,
 } from "../utils/Constants";
+import { PlayerImages, imageReady } from "../utils/Assets";
 
 export interface DashResult {
   dashed: boolean;
@@ -30,21 +31,26 @@ export class Player extends Entity {
   fireCooldown: number = 0;
   invincibleTimer: number = 0;
 
-  // HP system (base 1 HP)
-  hp: number = 1;
-  maxHp: number = 1;
-
   // Shield system (from health_core upgrade)
   shields: number = 0;
   maxShields: number = 0;
   shieldRegenTimer: number = 0;
 
-  // Dash ability (always available, upgrades enhance it)
+  // Dash ability
   dashCooldown: number = 0;
-  readonly DASH_COOLDOWN_TIME = 2.5; // seconds between dashes
-  readonly DASH_BASE_DISTANCE = 40; // pixels (short dash)
-  readonly DASH_BASE_INVINCIBILITY = 0.15; // base i-frame duration
-  readonly DASH_BASE_RING_RADIUS = 60; // base explosion ring radius
+  readonly DASH_COOLDOWN_TIME = 2.5;       // seconds between dashes
+  readonly DASH_BASE_DISTANCE = 110;       // pixels to cover per dash
+  readonly DASH_DURATION = 0.18;           // seconds the dash motion takes
+  readonly DASH_BASE_INVINCIBILITY = 0.25; // i-frame duration (at least DASH_DURATION)
+  readonly DASH_BASE_RING_RADIUS = 60;     // base explosion ring radius
+
+  // Smooth dash state
+  isDashing: boolean = false;
+  private dashTimer: number = 0;
+  private dashVelocity: Vec2 = vec2(0, 0);
+
+  /** True while the ship is actively moving toward the cursor/touch */
+  isMoving: boolean = false;
 
   constructor() {
     super(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 80, PLAYER_COLLISION_RADIUS);
@@ -52,8 +58,6 @@ export class Player extends Entity {
 
   updateStats(stats: PlayerStats) {
     this.stats = stats;
-    this.maxHp = stats.playerHp;
-    this.hp = this.maxHp;
     this.maxShields = stats.playerShields;
     this.shields = this.maxShields;
   }
@@ -69,6 +73,18 @@ export class Player extends Entity {
       this.dashCooldown -= dt;
     }
 
+    // Smooth dash motion — move at high speed for DASH_DURATION seconds
+    if (this.isDashing) {
+      this.dashTimer -= dt;
+      const margin = 20;
+      this.pos.x = clamp(this.pos.x + this.dashVelocity.x * dt, margin, GAME_WIDTH - margin);
+      this.pos.y = clamp(this.pos.y + this.dashVelocity.y * dt, margin, GAME_HEIGHT - margin);
+      if (this.dashTimer <= 0) {
+        this.isDashing = false;
+        this.dashTimer = 0;
+      }
+    }
+
     // Shield regen
     if (this.stats.shieldRegenInterval > 0 && this.shields < this.maxShields) {
       this.shieldRegenTimer += dt;
@@ -80,49 +96,68 @@ export class Player extends Entity {
   }
 
   move(input: InputManager, dt: number) {
-    const dir = input.moveDirection;
-    this.pos = vecAdd(this.pos, vecScale(dir, this.stats.moveSpeed * dt));
+    // Skip normal movement while dashing — dash controls movement directly
+    if (this.isDashing) return;
+
+    // Move toward mouse cursor (desktop) or touch position (mobile).
+    // On touch, only move when a finger is actively held down.
+    const canMove = !input.isTouchDevice || input.touchTargetActive;
+
+    const target = input.mousePos;
+    const dx = target.x - this.pos.x;
+    const dy = target.y - this.pos.y;
+    const dist = Math.sqrt(dx * dx + dy * dy);
+
+    const STOP_THRESHOLD = 3; // px — prevents jitter when already at cursor
+
+    this.isMoving = canMove && dist > STOP_THRESHOLD;
+
+    if (this.isMoving) {
+      const moveAmount = Math.min(this.stats.moveSpeed * dt, dist); // never overshoot
+      this.pos.x += (dx / dist) * moveAmount;
+      this.pos.y += (dy / dist) * moveAmount;
+    }
 
     // Clamp to screen
     const margin = 20;
     this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
     this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
 
-    // Face mouse (on desktop) — on mobile, Game.ts handles auto-aim
-    if (!input.isTouchDevice) {
-      const toMouse = vecSub(input.mousePos, this.pos);
-      this.angle = vecAngle(toMouse);
+    // Face toward mouse target (on desktop) — on mobile, Game.ts overrides with auto-aim
+    if (!input.isTouchDevice && dist > STOP_THRESHOLD) {
+      this.angle = Math.atan2(dy, dx);
     }
   }
 
-  /** Attempt to dash in current facing direction. Returns dash result with flashbang info. */
+  /** Attempt a smooth high-speed dash in current facing direction. */
   tryDash(): DashResult {
-    if (this.dashCooldown > 0) return { dashed: false, flashbangRadius: 0 };
+    if (this.dashCooldown > 0 || this.isDashing) return { dashed: false, flashbangRadius: 0 };
 
     this.dashCooldown = this.DASH_COOLDOWN_TIME;
+
     const dist = this.DASH_BASE_DISTANCE * this.stats.dashDistMult;
     const dashDir = vecFromAngle(this.angle);
-    this.pos = vecAdd(this.pos, vecScale(dashDir, dist));
+    const dashSpeed = dist / this.DASH_DURATION; // pixels per second
 
-    // Clamp
-    const margin = 20;
-    this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
-    this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
+    // Start smooth dash
+    this.isDashing = true;
+    this.dashTimer = this.DASH_DURATION;
+    this.dashVelocity = vecScale(dashDir, dashSpeed);
 
-    // Base i-frames + Phase Shift bonus
-    const totalInvincibility =
-      this.DASH_BASE_INVINCIBILITY + this.stats.dashInvincibility;
+    // I-frames cover at least the full dash duration
+    const totalInvincibility = Math.max(
+      this.DASH_DURATION + 0.08,
+      this.DASH_BASE_INVINCIBILITY + this.stats.dashInvincibility,
+    );
     this.invincibleTimer = Math.max(this.invincibleTimer, totalInvincibility);
 
-    // Ring radius = base + EMP Burst upgrade bonus
     const ringRadius = this.DASH_BASE_RING_RADIUS + this.stats.flashbangRadius;
     return { dashed: true, flashbangRadius: ringRadius };
   }
 
   /**
-   * Take damage from enemy bullet/collision.
-   * Returns actual damage dealt after armor, shields, and evasion.
-   * Also returns whether the player died.
+   * Take damage. Player has no HP — hits either absorb on shields
+   * or grant invincibility frames. Player never dies from combat.
    */
   takeDamage(amount: number): {
     actualDamage: number;
@@ -139,28 +174,25 @@ export class Player extends Entity {
       return { actualDamage: 0, evaded: true, playerDied: false };
     }
 
-    // Armor reduction
-    let dmg = amount * (1 - Math.min(0.8, this.stats.armorReduction));
-
     // Shield absorb
     if (this.shields > 0) {
       this.shields--;
-      this.invincibleTimer = 0.5; // brief invincibility after shield hit
+      this.invincibleTimer = 0.5;
       return { actualDamage: 0, evaded: false, playerDied: false };
     }
 
-    // No shields left — take HP damage
-    this.hp = Math.max(0, this.hp - 1);
-    this.invincibleTimer = 1.5; // longer invincibility on HP damage
-    return { actualDamage: dmg, evaded: false, playerDied: this.hp <= 0 };
+    // No shields — grant invincibility frames, player cannot die
+    this.invincibleTimer = 1.5;
+    return { actualDamage: 0, evaded: false, playerDied: false };
   }
 
   healShield(amount: number = 1) {
     this.shields = Math.min(this.maxShields, this.shields + amount);
   }
 
+  /** Player no longer has HP — always alive */
   get isDead(): boolean {
-    return this.hp <= 0;
+    return false;
   }
 
   get dashReady(): boolean {
@@ -181,10 +213,8 @@ export class Player extends Entity {
     this.fireCooldown = this.stats.fireRate;
 
     const directions: Vec2[] = [];
-    // Main shot
     directions.push(vecFromAngle(this.angle));
 
-    // Extra projectiles with dynamic spread angle
     const extraCount = this.stats.extraProjectiles;
     const spreadAngle = this.stats.spreadAngle;
     for (let i = 1; i <= extraCount; i++) {
@@ -198,73 +228,84 @@ export class Player extends Entity {
 
   render(renderer: Renderer) {
     const ctx = renderer.ctx;
+    const s = 0.55; // hull scale factor
 
-    // Blink when invincible
-    if (
-      this.invincibleTimer > 0 &&
-      Math.floor(this.invincibleTimer * 10) % 2 === 0
-    ) {
+    const SPRITE_SIZE = 22; // 70% of original 32px
+
+    // ── DASH FLASH ──────────────────────────────────────────────
+    // During a dash: rapidly alternate between bright cyan-tinted sprite and blank.
+    if (this.isDashing) {
+      const flashOn = Math.floor(this.dashTimer * 22) % 2 === 0;
+      if (flashOn) {
+        const sprite = imageReady(PlayerImages.moving) ? PlayerImages.moving : null;
+        ctx.save();
+        ctx.translate(this.pos.x, this.pos.y);
+        ctx.rotate(this.angle + Math.PI / 2); // flipped 180° from original up-facing sprite
+        if (sprite) {
+          ctx.shadowColor = COLORS.player;
+          ctx.shadowBlur = 22;
+          ctx.drawImage(sprite, -SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+          // Cyan overlay tint
+          ctx.globalCompositeOperation = "source-atop";
+          ctx.fillStyle = "rgba(0,255,204,0.7)";
+          ctx.fillRect(-SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+          ctx.globalCompositeOperation = "source-over";
+        } else {
+          // Fallback silhouette
+          ctx.fillStyle = COLORS.player;
+          ctx.globalAlpha = 0.9;
+          ctx.beginPath();
+          ctx.moveTo(10 * s, 0);
+          ctx.lineTo(-6 * s, -6 * s);
+          ctx.lineTo(-6 * s, 6 * s);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+      return; // skip normal hull and overlays during dash
+    }
+
+    // ── INVINCIBILITY BLINK ──────────────────────────────────────
+    if (this.invincibleTimer > 0 && Math.floor(this.invincibleTimer * 10) % 2 === 0) {
       return;
     }
 
+    // ── NORMAL SHIP RENDER (sprite) ───────────────────────────────
+    const sprite = this.isMoving
+      ? (imageReady(PlayerImages.moving) ? PlayerImages.moving : null)
+      : (imageReady(PlayerImages.still) ? PlayerImages.still : null);
+
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.angle);
+    ctx.rotate(this.angle + Math.PI / 2); // flipped 180° — sprite faces down in PNG
 
-    // Sleek minimal black/red ship — small, angular, no cartoon outlines
-    const s = 0.55; // scale factor (much smaller)
-
-    // Engine glow (dim red thruster)
-    const flickerLen = 2 + Math.random() * 3;
-    ctx.fillStyle = "#880000";
-    ctx.globalAlpha = 0.6;
-    ctx.beginPath();
-    ctx.moveTo(-6 * s, -2 * s);
-    ctx.lineTo(-6 * s - flickerLen * s, 0);
-    ctx.lineTo(-6 * s, 2 * s);
-    ctx.closePath();
-    ctx.fill();
-    ctx.globalAlpha = 1;
-
-    // Main hull (filled dark shape)
-    ctx.fillStyle = "#111111";
-    ctx.beginPath();
-    ctx.moveTo(10 * s, 0);           // nose tip
-    ctx.lineTo(2 * s, -3 * s);       // upper nose
-    ctx.lineTo(-3 * s, -5 * s);      // upper wing root
-    ctx.lineTo(-6 * s, -6 * s);      // wing tip
-    ctx.lineTo(-5 * s, -2.5 * s);    // wing inner
-    ctx.lineTo(-6 * s, -1.5 * s);    // rear notch
-    ctx.lineTo(-6 * s, 1.5 * s);     // rear notch
-    ctx.lineTo(-5 * s, 2.5 * s);     // wing inner
-    ctx.lineTo(-6 * s, 6 * s);       // wing tip
-    ctx.lineTo(-3 * s, 5 * s);       // lower wing root
-    ctx.lineTo(2 * s, 3 * s);        // lower nose
-    ctx.closePath();
-    ctx.fill();
-
-    // Red edge trim (thin lines for detail)
-    ctx.strokeStyle = "#cc2222";
-    ctx.lineWidth = 0.8;
-    ctx.stroke(); // outlines the hull path above
-
-    // Red center stripe (cockpit line)
-    ctx.strokeStyle = "#ff3333";
-    ctx.lineWidth = 0.6;
-    ctx.beginPath();
-    ctx.moveTo(8 * s, 0);
-    ctx.lineTo(-2 * s, 0);
-    ctx.stroke();
-
-    // Nose tip glow dot
-    ctx.fillStyle = "#ff2222";
-    ctx.beginPath();
-    ctx.arc(9 * s, 0, 0.8 * s, 0, Math.PI * 2);
-    ctx.fill();
+    if (sprite) {
+      ctx.drawImage(sprite, -SPRITE_SIZE / 2, -SPRITE_SIZE / 2, SPRITE_SIZE, SPRITE_SIZE);
+    } else {
+      // Canvas fallback while images load
+      ctx.fillStyle = "#111111";
+      ctx.beginPath();
+      ctx.moveTo(10 * s, 0);
+      ctx.lineTo(2 * s, -3 * s);
+      ctx.lineTo(-3 * s, -5 * s);
+      ctx.lineTo(-6 * s, -6 * s);
+      ctx.lineTo(-5 * s, -2.5 * s);
+      ctx.lineTo(-6 * s, 1.5 * s);
+      ctx.lineTo(-5 * s, 2.5 * s);
+      ctx.lineTo(-6 * s, 6 * s);
+      ctx.lineTo(-3 * s, 5 * s);
+      ctx.lineTo(2 * s, 3 * s);
+      ctx.closePath();
+      ctx.fill();
+      ctx.strokeStyle = "#cc2222";
+      ctx.lineWidth = 0.8;
+      ctx.stroke();
+    }
 
     ctx.restore();
 
-    // Shield indicator ring (drawn in screen space, not rotated)
+    // ── SHIELD RING ───────────────────────────────────────────────
     if (this.maxShields > 0 && this.shields > 0) {
       ctx.save();
       ctx.strokeStyle = COLORS.shield;
@@ -284,7 +325,7 @@ export class Player extends Entity {
       ctx.restore();
     }
 
-    // Dash cooldown indicator (small arc under player)
+    // ── DASH COOLDOWN ARC ─────────────────────────────────────────
     if (this.dashCooldown > 0) {
       ctx.save();
       ctx.strokeStyle = COLORS.dashCooldown;

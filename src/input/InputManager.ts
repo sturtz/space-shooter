@@ -24,15 +24,9 @@ export class InputManager {
   isTouchDevice: boolean = false;
   dashRequested: boolean = false;
 
-  // Virtual joystick state
-  private touchJoystickId: number | null = null;
-  private touchJoystickStartScreen: Vec2 = vec2(0, 0);
-  touchMoveDir: Vec2 = vec2(0, 0);
-
-  // Joystick rendering data (in game coordinates)
-  joystickActive: boolean = false;
-  joystickCenter: Vec2 = vec2(0, 0);
-  joystickThumb: Vec2 = vec2(0, 0);
+  // Touch follow: tracks the active touch position (player moves toward it)
+  touchTargetActive: boolean = false;
+  private touchMoveId: number | null = null;
 
   // Right side touch for dash
   private touchDashId: number | null = null;
@@ -84,33 +78,34 @@ export class InputManager {
     this.onContextMenu = (e: Event) => e.preventDefault();
 
     // === TOUCH HANDLERS ===
+    // Controls: touch anywhere (except dash zone) → player follows that position.
+    // Right 12% of the canvas (game-coord x > GAME_WIDTH * 0.88) → dash button.
+
     this.onTouchStart = (e: TouchEvent) => {
       this.isTouchDevice = true;
 
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
         const rect = canvas.getBoundingClientRect();
-        const screenX = touch.clientX - rect.left;
-        const screenY = touch.clientY - rect.top;
-        const halfWidth = rect.width * 0.45; // left 45% = joystick
-
         const scaleX = GAME_WIDTH / rect.width;
         const scaleY = GAME_HEIGHT / rect.height;
-        const gameX = screenX * scaleX;
-        const gameY = screenY * scaleY;
+        const gameX = (touch.clientX - rect.left) * scaleX;
+        const gameY = (touch.clientY - rect.top) * scaleY;
 
-        if (screenX < halfWidth && this.touchJoystickId === null) {
-          // Left side: joystick
-          this.touchJoystickId = touch.identifier;
-          this.touchJoystickStartScreen = vec2(screenX, screenY);
-          this.joystickCenter = vec2(gameX, gameY);
-          this.joystickThumb = vec2(gameX, gameY);
-          this.joystickActive = true;
-          this.touchMoveDir = vec2(0, 0);
-        } else if (screenX >= halfWidth) {
-          // Right side: dash (don't preventDefault — allow synthetic clicks for menu/upgrade navigation)
-          this.touchDashId = touch.identifier;
-          this.dashRequested = true;
+        const isDashArea = gameX > GAME_WIDTH * 0.88;
+
+        if (isDashArea) {
+          // Right-side tap = dash
+          if (this.touchDashId === null) {
+            this.touchDashId = touch.identifier;
+            this.dashRequested = true;
+          }
+        } else if (this.touchMoveId === null) {
+          // Primary movement touch — update mousePos so Player.move() can use it
+          this.touchMoveId = touch.identifier;
+          this.mousePos = vec2(gameX, gameY);
+          this.touchTargetActive = true;
+          e.preventDefault();
         }
       }
     };
@@ -119,37 +114,15 @@ export class InputManager {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
 
-        if (touch.identifier === this.touchJoystickId) {
+        if (touch.identifier === this.touchMoveId) {
           e.preventDefault();
           const rect = canvas.getBoundingClientRect();
-          const screenX = touch.clientX - rect.left;
-          const screenY = touch.clientY - rect.top;
-
-          const dx = screenX - this.touchJoystickStartScreen.x;
-          const dy = screenY - this.touchJoystickStartScreen.y;
-          const maxRadius = Math.min(rect.width, rect.height) * 0.08; // 8% of smaller dimension
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          if (dist > 0) {
-            const clampedDist = Math.min(dist, maxRadius);
-            const normX = dx / dist;
-            const normY = dy / dist;
-            this.touchMoveDir = vec2(
-              normX * (clampedDist / maxRadius),
-              normY * (clampedDist / maxRadius),
-            );
-
-            // Update thumb position for rendering (in game coords)
-            const scaleX = GAME_WIDTH / rect.width;
-            const scaleY = GAME_HEIGHT / rect.height;
-            this.joystickThumb = vec2(
-              (this.touchJoystickStartScreen.x + normX * clampedDist) * scaleX,
-              (this.touchJoystickStartScreen.y + normY * clampedDist) * scaleY,
-            );
-          } else {
-            this.touchMoveDir = vec2(0, 0);
-            this.joystickThumb = vec2(this.joystickCenter.x, this.joystickCenter.y);
-          }
+          const scaleX = GAME_WIDTH / rect.width;
+          const scaleY = GAME_HEIGHT / rect.height;
+          this.mousePos = vec2(
+            (touch.clientX - rect.left) * scaleX,
+            (touch.clientY - rect.top) * scaleY,
+          );
         }
       }
     };
@@ -158,10 +131,9 @@ export class InputManager {
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
 
-        if (touch.identifier === this.touchJoystickId) {
-          this.touchJoystickId = null;
-          this.touchMoveDir = vec2(0, 0);
-          this.joystickActive = false;
+        if (touch.identifier === this.touchMoveId) {
+          this.touchMoveId = null;
+          this.touchTargetActive = false;
         }
         if (touch.identifier === this.touchDashId) {
           this.touchDashId = null;
@@ -217,10 +189,6 @@ export class InputManager {
     if (this.isKeyDown("s") || this.isKeyDown("arrowdown")) y += 1;
     if (this.isKeyDown("a") || this.isKeyDown("arrowleft")) x -= 1;
     if (this.isKeyDown("d") || this.isKeyDown("arrowright")) x += 1;
-
-    // Add touch joystick input
-    x += this.touchMoveDir.x;
-    y += this.touchMoveDir.y;
 
     const len = Math.sqrt(x * x + y * y);
     if (len > 1) {
