@@ -36,7 +36,7 @@ export class Renderer {
       availH = window.innerHeight;
     }
 
-    const aspect = GAME_WIDTH / GAME_HEIGHT; // 900/600 = 1.5
+    const aspect = GAME_WIDTH / GAME_HEIGHT; // 1600/900 = 1.5
     let displayW = availW;
     let displayH = availW / aspect;
     if (displayH > availH) {

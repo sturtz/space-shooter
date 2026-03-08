@@ -170,7 +170,7 @@ export class Game implements IGame {
   readonly CONE_RANGE = 30; // pixels — circle radius around player
   readonly CONE_FIRE_EVERY = 1; // fire every beat
   coneTimeSinceLastFire: number = 0; // tracks loader progress
-  coneMeasuredInterval: number = 60 / 140; // measured actual beat interval (starts at 140 BPM estimate)
+  coneMeasuredInterval: number = 60 / 100; // measured actual beat interval (starts at 100 BPM estimate)
   coneLastFireTime: number = 0; // timestamp of last fire for measuring interval
 
   // Missile weapon state (dmg branch 2 — fires every 2 beats)
@@ -670,15 +670,6 @@ export class Game implements IGame {
     this.player.move(this.input, dt);
     this.player.update(dt);
 
-    // Mobile auto-aim: point player toward nearest enemy
-    if (this.input.isTouchDevice) {
-      const nearest = this.findNearestEnemy();
-      if (nearest) {
-        const toEnemy = vecSub(nearest.pos, this.player.pos);
-        this.player.angle = vecAngle(toEnemy);
-      }
-    }
-
     // Mobile dash (tap right side of screen)
     if (this.input.consumeDash() && this.state === "playing") {
       this.handleDash();
@@ -726,9 +717,9 @@ export class Game implements IGame {
       }
     }
 
-    // Boss spawn at 14 seconds into the round if not already spawned by timer expiry
+    // Boss spawn at 12 seconds into the round if not already spawned by timer expiry
     const elapsed = this.roundDuration - this.roundTimer;
-    if (!this.bossSpawned && elapsed >= 14) {
+    if (!this.bossSpawned && elapsed >= 12) {
       this.spawnMegaRock();
       this.bossSpawned = true;
     }
@@ -2167,24 +2158,6 @@ export class Game implements IGame {
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("DASH", dashBtnX, dashBtnY);
-      ctx.restore();
-
-      // Arrow pointing to dash button from center
-      const arrowT = (t * 0.6) % 1;
-      const arrowStartX = cx + 50;
-      const arrowStartY = GAME_HEIGHT / 2 + 60;
-      const arrowEndX = dashBtnX - 50;
-      const arrowEndY = dashBtnY - 30;
-      const arrowX = arrowStartX + (arrowEndX - arrowStartX) * arrowT;
-      const arrowY = arrowStartY + (arrowEndY - arrowStartY) * arrowT;
-      const arrowFade = arrowT < 0.8 ? 0.55 : 0.55 * (1 - (arrowT - 0.8) / 0.2);
-
-      ctx.save();
-      ctx.globalAlpha = arrowFade;
-      ctx.fillStyle = COLORS.dashReady;
-      ctx.beginPath();
-      ctx.arc(arrowX, arrowY, 5, 0, Math.PI * 2);
-      ctx.fill();
       ctx.restore();
 
       // EMP ring visual preview (pulsing ring emanating from button)
