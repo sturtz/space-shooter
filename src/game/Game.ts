@@ -1238,14 +1238,6 @@ export class Game implements IGame {
       const loaderArc = loaderProgress * Math.PI * 2;
       const loaderRadius = 18; // small, tight around the player
 
-      // Background ring (dim, shows full circle outline)
-      // ctx.globalAlpha = 0.12;
-      // ctx.strokeStyle = "#ffffff";
-      // ctx.lineWidth = 1.5;
-      // ctx.beginPath();
-      // ctx.arc(px, py, loaderRadius, 0, Math.PI * 2);
-      // ctx.stroke();
-
       // Progress arc (bright white, fills clockwise from top)
       ctx.globalAlpha = 0.5;
       ctx.strokeStyle = "#ffffff";

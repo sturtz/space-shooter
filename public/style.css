@@ -65,7 +65,7 @@ canvas {
   width: 100%;
   height: 100%;
   /* Crisp pixel rendering (good for sprite games) */
-  image-rendering: pixelated;
+  image-rendering: optimizeQuality;
   image-rendering: crisp-edges;
   /* Touch / selection prevention */
   touch-action: none;

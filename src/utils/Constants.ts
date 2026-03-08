@@ -1,8 +1,8 @@
 // === GAME CONSTANTS ===
 
 // Canvas
-export const GAME_WIDTH = 1600;
-export const GAME_HEIGHT = 900;
+export const GAME_WIDTH = 900;
+export const GAME_HEIGHT = 600;
 
 // Player
 export const PLAYER_BASE_SPEED = 50; // pixels/sec (slow, deliberate)
@@ -12,7 +12,7 @@ export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
 
 // Mothership
 export const MOTHERSHIP_COLLISION_RADIUS = 18;
-export const MOTHERSHIP_BASE_HP = 5;
+export const MOTHERSHIP_BASE_HP = 1;
 export const MOTHERSHIP_TIME_PENALTY = 2; // seconds lost per hit
 
 // Bullets

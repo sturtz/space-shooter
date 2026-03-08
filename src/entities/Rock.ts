@@ -60,7 +60,7 @@ export class Rock extends Enemy {
     const ctx = renderer.ctx;
     const isFlashing = this.flashTimer > 0;
     const isPoisoned = this.poisonTimer > 0;
-    const drawSize = this.radius * 2.4; // sprite draw size (slightly larger than collision radius)
+    const drawSize = this.radius * 5; // sprite draw size (slightly larger than collision radius)
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -70,40 +70,27 @@ export class Rock extends Enemy {
       // ── Glow halo behind sprite so rocks read against dark bg ──
       if (!isFlashing) {
         const glowColor = this.isElite
-          ? "rgba(255,200,0,0.18)"
+          ? "rgba(255,200,0,0.7)"
           : isPoisoned
-            ? "rgba(80,255,80,0.15)"
-            : "rgba(200,140,80,0.18)";
-        const glowGrad = ctx.createRadialGradient(
-          0,
-          0,
-          this.radius * 0.3,
-          0,
-          0,
-          this.radius * 1.35
-        );
+            ? "rgba(80,255,80,0.7)"
+            : "rgba(220,160,90,0.7)";
+        const glowGrad = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, this.radius * 1.7);
         glowGrad.addColorStop(0, glowColor);
         glowGrad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = glowGrad;
         ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 1.2, 0, Math.PI * 2);
         ctx.fill();
       }
 
       // ── SPRITE RENDER ──────────────────────────────────────────
-      if (isFlashing) {
-        ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255,255,255,0.85)";
-        ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.globalCompositeOperation = "source-over";
-      } else if (isPoisoned) {
-        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(1.3)";
+      if (isPoisoned) {
+        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(2)";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.filter = "none";
       } else {
         // Slightly brighten all rocks so they pop against the dark bg
-        ctx.filter = "brightness(1.35) contrast(1.1)";
+        ctx.filter =
+          "brightness(2) contrast(1.5) drop-shadow(1px 1px 5px rgba(255, 255, 255, 0.6))";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.filter = "none";
       }
