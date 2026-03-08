@@ -216,9 +216,9 @@ export class UpgradeManager {
     const turretLevel = this.getLevel("ms_turret");
 
     // ── ROUND DURATION ────────────────────────────────────────────────────
-    // econ_duration: +6s per level (max 3) → max +18s
+    // econ_duration: +50% per level (max 3)
     let roundDuration = BASE_ROUND_DURATION;
-    roundDuration += this.getLevel("econ_duration") * 6;
+    roundDuration = roundDuration * (1 + this.getLevel("econ_duration") * 0.5);
     roundDuration += starEndurance;
 
     // ── COIN MAGNET ───────────────────────────────────────────────────────

@@ -11,7 +11,7 @@ export const PLAYER_BASE_DAMAGE = 1;
 export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
 
 // Mothership
-export const MOTHERSHIP_COLLISION_RADIUS = 14;
+export const MOTHERSHIP_COLLISION_RADIUS = 18;
 export const MOTHERSHIP_BASE_HP = 5;
 export const MOTHERSHIP_TIME_PENALTY = 2; // seconds lost per hit
 
@@ -37,7 +37,7 @@ export const COIN_LIFETIME = 4; // seconds before despawn
 export const COIN_SPEED = 60; // speed when flying to player
 
 // Waves
-export const BASE_ROUND_DURATION = 15; // seconds
+export const BASE_ROUND_DURATION = 20; // seconds
 export const SPAWN_RATE_BASE = 4.0; // seconds between spawns (fewer enemies at start)
 export const SPAWN_DISTANCE = 500; // distance from center to spawn
 
@@ -62,7 +62,7 @@ export const COLORS = {
   enemyShipAccent: "#cc2244",
   coin: "#ffdd00",
   coinShine: "#ffffff",
-  hpBar: "#44ff44",
+  hpBar: "#00d4ff",
   hpBarDamage: "#ff4444",
   timerBar: "#4488ff",
   timerBarLow: "#ff4444",
@@ -71,7 +71,7 @@ export const COLORS = {
   textGold: "#ffdd00",
   textDamage: "#ff4444",
   upgradeDmg: "#ff4466",
-  upgradeSpeed: "#00ffcc",
+  upgradeSpeed: "#00aaff",
   upgradeDuration: "#4488ff",
   upgradeQuantity: "#ffdd00",
   panelBg: "rgba(10, 10, 30, 0.9)",
@@ -84,9 +84,19 @@ export const COLORS = {
   shield: "#4488ff",
   playerHp: "#ff4444",
   playerHpBg: "#441111",
-  dashReady: "#00ffcc",
+  dashReady: "#00d4ff",
   dashCooldown: "#334455",
   flashbang: "#ffffff",
   mobileControl: "rgba(255, 255, 255, 0.15)",
   mobileControlActive: "rgba(255, 255, 255, 0.3)",
+  poisoned: "#44ff44", // green — keep for poison status
+  engineGlow: "#ffcc00", // engine / thruster shadow glow
+  coinRare: "#ff44ff", // high-value coin (≥50)
+  elite: "#ffaa00", // elite enemy highlight
+  enemyBullet: "#ff6644", // enemy projectile body
+  enemyBulletFront: "#ffaa66", // enemy projectile highlight
+  timerGradA: "#2266ff", // timer gradient normal — start
+  timerGradB: "#44aaff", // timer gradient normal — end
+  timerLowA: "#ff2244", // timer gradient low — start
+  timerLowB: "#ff6644", // timer gradient low — end
 };

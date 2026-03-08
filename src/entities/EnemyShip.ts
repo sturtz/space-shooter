@@ -57,12 +57,12 @@ export class EnemyShip extends Enemy {
     ctx.lineJoin = "miter";
 
     const isPoisoned = this.poisonTimer > 0;
-    const mainColor = this.isElite ? "#ffaa00" : isPoisoned ? "#44ff44" : COLORS.enemyShip;
-    const accentColor = this.isElite ? "#ff6600" : COLORS.enemyShipAccent;
+    const mainColor = this.isElite ? COLORS.elite : isPoisoned ? COLORS.poisoned : COLORS.enemyShip;
+    const accentColor = this.isElite ? COLORS.explosion : COLORS.enemyShipAccent;
 
     // Engine exhaust flicker
     const flickerLen = 3 + Math.random() * 3;
-    ctx.strokeStyle = "#ff8800";
+    ctx.strokeStyle = COLORS.bulletTrail;
     ctx.beginPath();
     ctx.moveTo(-8, -2);
     ctx.lineTo(-8 - flickerLen, 0);
@@ -110,7 +110,7 @@ export class EnemyShip extends Enemy {
 
     // Elite marker - double outline
     if (this.isElite) {
-      ctx.strokeStyle = "#ffdd00";
+      ctx.strokeStyle = COLORS.coin;
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
@@ -127,7 +127,7 @@ export class EnemyShip extends Enemy {
       const barH = 2;
       const barX = this.pos.x - barW / 2;
       const barY = this.pos.y - ENEMY_SHIP_SIZE - 6;
-      renderer.drawRect(barX, barY, barW, barH, "#333");
+      renderer.drawRect(barX, barY, barW, barH, "#222");
       renderer.drawRect(barX, barY, barW * (this.hp / this.maxHp), barH, COLORS.hpBarDamage);
     }
   }

@@ -133,10 +133,10 @@ export class Rock extends Enemy {
       ctx.strokeStyle = isFlashing
         ? "#fff"
         : this.isElite
-          ? "#ffdd00"
+          ? COLORS.textGold
           : isPoisoned
             ? "#44ff44"
-            : "#9999bb";
+            : COLORS.rock;
       ctx.lineWidth = isFlashing ? 2 : 1.5;
       ctx.fillStyle = isFlashing ? "#445" : this.isElite ? "#554422" : "#2a2a3a";
       ctx.beginPath();
@@ -150,7 +150,7 @@ export class Rock extends Enemy {
 
     // Elite glow ring (always on top)
     if (this.isElite) {
-      ctx.strokeStyle = "#ffdd00";
+      ctx.strokeStyle = COLORS.textGold;
       ctx.lineWidth = 1;
       ctx.setLineDash([3, 3]);
       ctx.beginPath();
@@ -167,7 +167,7 @@ export class Rock extends Enemy {
       const barH = 2;
       const barX = this.pos.x - barW / 2;
       const barY = this.pos.y - this.radius - 5;
-      renderer.drawRect(barX, barY, barW, barH, "#222");
+      renderer.drawRect(barX, barY, barW, barH, "#1a1a2e");
       renderer.drawRect(barX, barY, barW * (this.hp / this.maxHp), barH, COLORS.hpBarDamage);
     }
   }

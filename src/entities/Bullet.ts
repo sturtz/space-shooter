@@ -67,15 +67,15 @@ export class Bullet extends Entity {
 
     if (this.isEnemy) {
       // Enemy bullet: red-orange style
-      ctx.fillStyle = "#ff6644";
+      ctx.fillStyle = COLORS.enemyBullet;
       ctx.fillRect(-2, -1.5, 4, 3);
-      ctx.fillStyle = "#ffaa66";
+      ctx.fillStyle = COLORS.enemyBulletFront;
       ctx.fillRect(1, -1, 2, 2);
       ctx.restore();
       return;
     }
 
-    const color = this.isCrit ? "#ff4444" : COLORS.bullet;
+    const color = this.isCrit ? COLORS.hpBarDamage : COLORS.bullet;
 
     // Galaga-style bullet: small bright pixel with trail dashes
     ctx.strokeStyle = COLORS.bulletTrail;
@@ -98,12 +98,12 @@ export class Bullet extends Entity {
     ctx.fillRect(-2, -1.5, 5, 3);
 
     // Bright leading edge
-    ctx.fillStyle = "#fff";
+    ctx.fillStyle = COLORS.textPrimary;
     ctx.fillRect(2, -1, 2, 2);
 
     // Crit glow outline
     if (this.isCrit) {
-      ctx.strokeStyle = "#ff6666";
+      ctx.strokeStyle = COLORS.playerHp;
       ctx.lineWidth = 1;
       ctx.strokeRect(-3, -2.5, 7, 5);
     }

@@ -24,18 +24,16 @@ export const BgImages = {
 
 // ─── Player sprites ───────────────────────────────────────────────────────────
 export const PlayerImages = {
-  still: img("./assets/ships/player-still.png"),
-  moving: img("./assets/ships/player-moving.png"),
-  glider: img("./assets/ships/spaceship.svg"),
+  glider: img("./assets/ships/starfighter-r2.svg"),
 };
 
 // ─── Ships / enemies ─────────────────────────────────────────────────────────
 export const ShipImages = {
-  enemy1: img("./assets/ships/enemy1.png"),
-  enemyMedium: img("./assets/ships/enemy-medium1.png"),
-  enemy03: img("./assets/ships/enemy-03.gif"),
-  enemyDeath: img("./assets/ships/enemy-ship-death.gif"),
+  enemyBee: img("./assets/ships/enemy-bee.svg"),
+  enemyButterfly: img("./assets/ships/enemy-butterfly.svg"),
+  enemyBoss: img("./assets/ships/enemy-boss.svg"),
   mothershipDeath: img("./assets/ships/mothership-death.gif"),
+  mothership: img("./assets/ships/mothership.svg"),
 };
 
 // ─── Asteroids ───────────────────────────────────────────────────────────────

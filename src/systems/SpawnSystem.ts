@@ -41,7 +41,9 @@ export class SpawnSystem {
     const level = game.save.currentLevel;
 
     // Determine enemy type based on level
-    if (level <= 3 || Math.random() < 0.5 / level) {
+    // Rock probability: 85% at level 2, decreasing by 10% per level, floor 30%
+    const rockChance = level <= 1 ? 1 : Math.max(0.3, 0.85 - (level - 2) * 0.1);
+    if (Math.random() < rockChance) {
       // Rocks — three sizes: small / medium / large.
       // Big + medium chances ramp up over the round.
       const elapsed = game.roundDuration - game.roundTimer;
@@ -65,7 +67,7 @@ export class SpawnSystem {
       rock.coinValue = isBig ? 3 : isMed ? 2 : 1;
 
       // Elite check
-      if (level >= 5 && Math.random() < 0.05) {
+      if (level >= 3 && Math.random() < 0.05) {
         rock.isElite = true;
         rock.hp *= 3;
         rock.maxHp = rock.hp;

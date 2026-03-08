@@ -14,7 +14,6 @@ export class Renderer {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
     this.resize();
-    window.addEventListener("resize", () => this.resize());
   }
 
   resize() {
@@ -127,7 +126,7 @@ export class Renderer {
     align: CanvasTextAlign = "left",
     baseline: CanvasTextBaseline = "top"
   ) {
-    this.ctx.font = `${size}px monospace`;
+    this.ctx.font = `${size}px Tektur`;
     this.ctx.fillStyle = color;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
@@ -144,7 +143,7 @@ export class Renderer {
     align: CanvasTextAlign = "left",
     baseline: CanvasTextBaseline = "top"
   ) {
-    this.ctx.font = `${size}px monospace`;
+    this.ctx.font = `${size}px Tektur`;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
     this.ctx.strokeStyle = outlineColor;
@@ -155,13 +154,13 @@ export class Renderer {
   }
 
   measureText(text: string, size: number = 14): number {
-    this.ctx.font = `${size}px monospace`;
+    this.ctx.font = `${size}px Tektur`;
     return this.ctx.measureText(text).width;
   }
 
   // ======= Hi-Fi Drawing Helpers =======
 
-  /** Draw text using Orbitron (title font loaded via Google Fonts) */
+  /** Draw text using Tektur (title font loaded via Google Fonts) */
   drawTitleText(
     text: string,
     x: number,
@@ -171,14 +170,14 @@ export class Renderer {
     align: CanvasTextAlign = "center",
     baseline: CanvasTextBaseline = "middle"
   ) {
-    this.ctx.font = `bold ${size}px 'Orbitron', monospace`;
+    this.ctx.font = `bold ${size}px Tektur`;
     this.ctx.fillStyle = color;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
     this.ctx.fillText(text, x, y);
   }
 
-  /** Draw text with Orbitron + outline */
+  /** Draw text with Tektur + outline */
   drawTitleTextOutline(
     text: string,
     x: number,
@@ -189,7 +188,7 @@ export class Renderer {
     align: CanvasTextAlign = "center",
     baseline: CanvasTextBaseline = "middle"
   ) {
-    this.ctx.font = `bold ${size}px 'Orbitron', monospace`;
+    this.ctx.font = `bold ${size}px Tektur`;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
     this.ctx.strokeStyle = outlineColor;
@@ -427,7 +426,7 @@ export class Renderer {
 
     // Label text
     const textX = icon ? x + w / 2 + 4 : x + w / 2;
-    this.ctx.font = `bold ${fontSize}px 'Orbitron', monospace`;
+    this.ctx.font = `bold ${fontSize}px Tektur`;
     this.ctx.fillStyle = textColor;
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";

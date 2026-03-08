@@ -150,8 +150,8 @@ export class Player extends Entity {
     // ship-glider.svg — nose points up (north) in SVG space.
     // rotate(angle + Math.PI/2) maps north → aim direction correctly.
     // spaceship.svg has a square viewBox — use equal W and H.
-    const SPRITE_W = 40; // display size in game-pixels
-    const SPRITE_H = 40; // square viewBox → equal dimensions
+    const SPRITE_W = 10; // display size in game-pixels
+    const SPRITE_H = 14.75; // starfighter-r2 viewBox is 208×304 → 40×59
 
     // ── DASH FLASH ──────────────────────────────────────────────
     // During a dash: rapidly alternate between bright cyan-tinted sprite and blank.
@@ -161,14 +161,14 @@ export class Player extends Entity {
         const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
         ctx.save();
         ctx.translate(this.pos.x, this.pos.y);
-        ctx.rotate(this.angle);
+        ctx.rotate(this.angle + Math.PI / 2); // rotate sprite to face aim direction
         if (sprite) {
           ctx.shadowColor = COLORS.player;
           ctx.shadowBlur = 22;
           ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
           // Cyan overlay tint
           ctx.globalCompositeOperation = "source-atop";
-          ctx.fillStyle = "rgba(0,255,204,0.7)";
+          ctx.fillStyle = "rgba(0,212,255,0.7)";
           ctx.fillRect(-SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
           ctx.globalCompositeOperation = "source-over";
         } else {
@@ -192,12 +192,12 @@ export class Player extends Entity {
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
-    ctx.rotate(this.angle); // nose-up SVG → faces aim direction
+    ctx.rotate(this.angle + Math.PI / 2); // rotate sprite to face aim direction
 
     if (sprite) {
       // Add a subtle engine-glow halo when moving
       if (this.isMoving) {
-        ctx.shadowColor = "#ffcc00";
+        ctx.shadowColor = COLORS.engineGlow;
         ctx.shadowBlur = 10;
       }
       ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);

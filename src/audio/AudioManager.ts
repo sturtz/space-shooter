@@ -15,6 +15,9 @@ export class AudioManager {
   private menuMusic: HTMLAudioElement;
   private menuMusicStarted = false;
 
+  private muted = false;
+  private volumeBeforeMute = 0.2;
+
   // Cone-attack music track state
   private coneTrackPlaying = false;
   private coneTrackTimer: number | null = null;
@@ -26,7 +29,11 @@ export class AudioManager {
     // Pre-create audio element — won't play until init() is called on first interaction
     this.menuMusic = new Audio("./assets/sounds/fire.mp3");
     this.menuMusic.loop = true;
-    this.menuMusic.volume = 0.1;
+    this.menuMusic.volume = 0.2;
+
+    // Wire mute toggle immediately — available before first interaction
+    const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
+    if (icon) icon.addEventListener("click", () => this.toggleMute());
   }
 
   init() {
@@ -34,7 +41,7 @@ export class AudioManager {
     try {
       this.ctx = new AudioContext();
       this.masterGain = this.ctx.createGain();
-      this.masterGain.gain.value = 0.1;
+      this.masterGain.gain.value = 0.2;
       this.masterGain.connect(this.ctx.destination);
 
       // Cone synth sub-gain (silent — fire.mp3 provides the music)
@@ -59,6 +66,9 @@ export class AudioManager {
     if (slider) {
       slider.value = String(this.menuMusic.volume);
       slider.addEventListener("input", () => {
+        if (this.muted) this.muted = false;
+        const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
+        if (icon) icon.src = "./assets/items/volume-on.svg";
         this.setMusicVolume(parseFloat(slider.value));
       });
     }
@@ -79,6 +89,25 @@ export class AudioManager {
   /** Set music volume (0–1). */
   setMusicVolume(v: number) {
     this.menuMusic.volume = Math.max(0, Math.min(1, v));
+    if (v > 0) this.volumeBeforeMute = v;
+  }
+
+  toggleMute() {
+    this.muted = !this.muted;
+    const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
+    const slider = document.getElementById("music-volume") as HTMLInputElement | null;
+    if (this.muted) {
+      this.volumeBeforeMute = this.menuMusic.volume;
+      this.menuMusic.volume = 0;
+      if (this.masterGain) this.masterGain.gain.value = 0;
+      if (icon) icon.src = "./assets/items/volume-off.svg";
+      if (slider) slider.value = "0";
+    } else {
+      this.menuMusic.volume = this.volumeBeforeMute;
+      if (this.masterGain) this.masterGain.gain.value = this.volumeBeforeMute;
+      if (icon) icon.src = "./assets/items/volume-on.svg";
+      if (slider) slider.value = String(this.volumeBeforeMute);
+    }
   }
 
   private get ready(): boolean {
@@ -94,7 +123,7 @@ export class AudioManager {
     osc.type = "square";
     osc.frequency.setValueAtTime(880, ctx.currentTime);
     osc.frequency.exponentialRampToValueAtTime(220, ctx.currentTime + 0.08);
-    gain.gain.setValueAtTime(0.1, ctx.currentTime);
+    gain.gain.setValueAtTime(0.2, ctx.currentTime);
     gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.08);
     osc.connect(gain);
     gain.connect(this.masterGain!);

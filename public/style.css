@@ -3,7 +3,7 @@
   --primary: #00ffe7;
   --accent: #ff2d55;
   --bg: #0a0a1a;
-  --font-main: "Orbitron", "Roboto", Arial, sans-serif;
+  --font-main: "Tektur", "Roboto", Arial, sans-serif;
 }
 
 /* Reset */
@@ -61,6 +61,7 @@ body {
 /* ── Canvas — sized by JS, displayed centered ── */
 canvas {
   display: block;
+  /* width/height set by Renderer.resize() via inline styles — do not override here */
   width: 100%;
   height: 100%;
   /* Crisp pixel rendering (good for sprite games) */
@@ -71,7 +72,9 @@ canvas {
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
-  cursor: crosshair;
+  cursor:
+    url("assets/cursor.svg") 11 11,
+    crosshair;
   /* Drop shadow to float the canvas over the dark bg */
   box-shadow:
     0 0 60px rgba(0, 255, 231, 0.08),

@@ -229,9 +229,9 @@ export class UpgradeScreen {
     // Title panel
     renderer.drawPanel(GAME_WIDTH / 2 - 130, 4, 260, 28, {
       bg: "rgba(6, 6, 20, 0.85)",
-      border: "rgba(0, 255, 204, 0.2)",
+      border: "rgba(0, 212, 255, 0.2)",
       radius: 6,
-      glow: "rgba(0, 255, 204, 0.1)",
+      glow: "rgba(0, 212, 255, 0.1)",
       glowBlur: 8,
     });
 
@@ -255,7 +255,7 @@ export class UpgradeScreen {
     });
 
     ctx.save();
-    ctx.font = `bold 9px 'Orbitron', monospace`;
+    ctx.font = `bold 9px Tektur`;
     ctx.fillStyle = COLORS.textGold;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -300,8 +300,8 @@ export class UpgradeScreen {
         radius: 6,
       });
 
-      ctx.font = `bold 12px 'Orbitron', monospace`;
-      ctx.fillStyle = "#ff4444";
+      ctx.font = `bold 12px Tektur`;
+      ctx.fillStyle = COLORS.hpBarDamage;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(this.cantAffordMessage.text, GAME_WIDTH / 2, msgY + msgH / 2);
@@ -346,7 +346,7 @@ export class UpgradeScreen {
         ctx.stroke();
       } else {
         // Locked — muted grey, still visible
-        ctx.strokeStyle = "#445566";
+        ctx.strokeStyle = COLORS.panelBorder;
         ctx.lineWidth = 1;
         ctx.globalAlpha = 0.28;
         ctx.beginPath();
@@ -359,7 +359,7 @@ export class UpgradeScreen {
 
     // Depth rings
     ctx.globalAlpha = 0.07;
-    ctx.strokeStyle = "#334466";
+    ctx.strokeStyle = COLORS.panelBorder;
     ctx.lineWidth = 0.5;
     for (let d = 1; d <= 3; d++) {
       ctx.beginPath();
@@ -388,7 +388,7 @@ export class UpgradeScreen {
 
       // Label with subtle bg pill
       ctx.save();
-      ctx.font = `bold 8px 'Orbitron', monospace`;
+      ctx.font = `bold 8px Tektur`;
 
       ctx.globalAlpha = 1;
 
@@ -495,14 +495,14 @@ export class UpgradeScreen {
           const iconSize = isRoot ? 28 : 22;
           ctx.drawImage(img, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
         } else {
-          ctx.font = `${isRoot ? 16 : 13}px monospace`;
+          ctx.font = `${isRoot ? 16 : 13}px Tektur`;
           ctx.fillStyle = isRoot ? "#111" : "#fff";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(node.icon, nx, ny);
         }
       } else {
-        ctx.font = `${isRoot ? 16 : 13}px monospace`;
+        ctx.font = `${isRoot ? 16 : 13}px Tektur`;
         ctx.fillStyle = isRoot ? "#111" : "#fff";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -515,8 +515,8 @@ export class UpgradeScreen {
       if (level > 0 && !isRoot) {
         const lvlText = maxed ? "MAX" : `${level}/${node.maxLevel}`;
         ctx.save();
-        ctx.font = `bold 7px 'Orbitron', monospace`;
-        ctx.fillStyle = maxed ? "#44ff44" : BRANCH_COLORS[node.branch];
+        ctx.font = `bold 7px Tektur`;
+        ctx.fillStyle = maxed ? COLORS.player : BRANCH_COLORS[node.branch];
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillText(lvlText, nx, ny + r + 4);
@@ -577,7 +577,7 @@ export class UpgradeScreen {
 
     // Name + icon
     ctx.save();
-    ctx.font = `bold 14px 'Orbitron', monospace`;
+    ctx.font = `bold 14px  Tektur`;
     ctx.fillStyle = BRANCH_COLORS[closest.branch];
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -586,8 +586,8 @@ export class UpgradeScreen {
 
     // Level badge
     ctx.save();
-    ctx.font = `bold 12px 'Orbitron', monospace`;
-    ctx.fillStyle = maxed ? "#44ff44" : "#aaa";
+    ctx.font = `bold 12px  Tektur`;
+    ctx.fillStyle = maxed ? COLORS.player : COLORS.textSecondary;
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
     ctx.fillText(`Lv ${level}/${closest.maxLevel}`, panelX + panelW - 10, panelY + 8);
@@ -595,7 +595,7 @@ export class UpgradeScreen {
 
     // Description
     ctx.save();
-    ctx.font = `10px monospace`;
+    ctx.font = `10px Tektur`;
     ctx.fillStyle = COLORS.textSecondary;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -604,7 +604,7 @@ export class UpgradeScreen {
 
     // Status line
     ctx.save();
-    ctx.font = `bold 9px 'Orbitron', monospace`;
+    ctx.font = `bold 9px  Tektur`;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     if (!unlocked) {
@@ -612,7 +612,7 @@ export class UpgradeScreen {
       ctx.fillStyle = "#664444";
       ctx.fillText(`🔒 ${reqText}`, panelX + 10, panelY + 40);
     } else if (maxed) {
-      ctx.fillStyle = "#44ff44";
+      ctx.fillStyle = COLORS.player;
       ctx.fillText("✓ MAXED", panelX + 10, panelY + 40);
     } else {
       const canBuy = this.upgrades.canAfford(cost);
@@ -632,12 +632,12 @@ export class UpgradeScreen {
     const playBtnX = GAME_WIDTH / 2 - playBtnW / 2;
 
     renderer.drawButton(playBtnX, barY, playBtnW, btnH, "▶  START RUN", {
-      bg: "rgba(10, 50, 25, 0.9)",
-      border: "rgba(68, 255, 68, 0.5)",
-      textColor: "#44ff44",
+      bg: "rgba(0, 55, 120, 0.9)",
+      border: "rgba(0, 25, 90, 0.5)",
+      textColor: COLORS.player,
       fontSize: 13,
       radius: 8,
-      glow: "rgba(68, 255, 68, 0.15)",
+      glow: "rgba(0, 170, 255, 0.15)",
     });
 
     this.clickables.push({
@@ -657,7 +657,7 @@ export class UpgradeScreen {
     renderer.drawButton(resetBtnX, resetBtnY, resetBtnW, resetBtnH, "⟲ RESET", {
       bg: "rgba(35, 8, 8, 0.85)",
       border: "rgba(255, 68, 68, 0.4)",
-      textColor: "#ff4444",
+      textColor: COLORS.hpBarDamage,
       fontSize: 8,
       radius: 5,
     });
@@ -741,7 +741,7 @@ export class UpgradeScreen {
 
       // Hint text
       ctx.save();
-      ctx.font = `7px monospace`;
+      ctx.font = `7px Tektur`;
       ctx.fillStyle = "#555";
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";

@@ -44,18 +44,13 @@ requestAnimationFrame((timestamp) => {
 });
 
 function handleResize() {
-  const container = document.getElementById("game-container");
-  if (container) {
-    // Temporarily collapse to force a clean reflow
-    container.style.width = "100vw";
-    container.style.height = "100vh";
-  }
+  game.renderer.resize();
 }
 
 window.addEventListener("resize", handleResize);
 
 // orientationchange fires BEFORE resize on most mobile browsers
-// — wait a frame for dimensions to settle
+// — wait for dimensions to settle before recalculating
 window.addEventListener("orientationchange", () => {
   setTimeout(handleResize, 150);
 });

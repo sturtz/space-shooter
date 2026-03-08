@@ -145,16 +145,16 @@ export class Game implements IGame {
   enemyBullets: Bullet[] = [];
 
   roundTimer: number = 0;
-  roundDuration: number = 0;
+  roundDuration: number = 20;
   spawnTimer: number = 0;
   spawnRate: number = SPAWN_RATE_BASE;
   roundCoins: number = 0;
   roundKills: number = 0;
   killStreak: number = 0;
   streakTimer: number = 0;
-  bossSpawned: boolean = false;
   bossDefeated: boolean = false;
   bossEnemy: Rock | null = null;
+  nextBossElapsed: number = 12; // elapsed seconds when next boss rock spawns
   gameTime: number = 0;
   menuPulse: number = 0;
   paused: boolean = false;
@@ -470,7 +470,7 @@ export class Game implements IGame {
     this.roundKills = 0;
     this.killStreak = 0;
     this.streakTimer = 0;
-    this.bossSpawned = false;
+    this.nextBossElapsed = 12;
     this.bossDefeated = false;
     this.bossEnemy = null;
     this.dashRings = [];
@@ -484,10 +484,11 @@ export class Game implements IGame {
     this.state = "playing";
 
     // Spawn initial small asteroids spread around the arena
-    const initialRockCount = 8;
+    const level = this.save.currentLevel;
+    const initialRockCount = 5 + Math.floor(level * 0.5);
     for (let i = 0; i < initialRockCount; i++) {
       const angle = (Math.PI * 2 * i) / initialRockCount + randomRange(-0.2, 0.2);
-      const dist = 180 + Math.random() * 100; // 180–280px from center
+      const dist = 180 + Math.random() * 120; // 180–280px from center
       const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
       const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
       // 65% normal size, 1 HP, at base speed
@@ -717,11 +718,12 @@ export class Game implements IGame {
       }
     }
 
-    // Boss spawn at 12 seconds into the round if not already spawned by timer expiry
+    // Boss rocks spawn at intervals — first at 12s, then every 15–30s (shorter at higher levels)
     const elapsed = this.roundDuration - this.roundTimer;
-    if (!this.bossSpawned && elapsed >= 12) {
+    if (elapsed >= this.nextBossElapsed) {
       this.spawnMegaRock();
-      this.bossSpawned = true;
+      const interval = randomRange(15, 30) - this.save.currentLevel * 0.5; // reduce interval by 0.5s per level
+      this.nextBossElapsed += interval;
     }
 
     // Special ability: targeting laser fires every 2.5s
@@ -746,9 +748,12 @@ export class Game implements IGame {
       }
     }
 
-    // Spawn rate ramps within a round
-    const rampFactor = 1 - (elapsed / this.roundDuration) * 0.4; // speeds up to 60% of base by end
-    const currentSpawnRate = this.spawnRate * Math.max(0.4, rampFactor);
+    // Spawn rate ramps within a round — exponential curve: starts slow, accelerates continuously
+    // progress 0→1 maps interval from spawnRate → spawnRate*0.25 (4× faster by end)
+    const progress = this.roundDuration > 0 ? Math.min(1, elapsed / this.roundDuration) : 0;
+    const rampFactor = Math.pow(0.25, progress); // exponential: 1.0 → 0.25
+    const levelMult = this.save.currentLevel >= 2 ? 0.5 : 1; // level 2+ spawns twice as fast
+    const currentSpawnRate = Math.max(0.8, this.spawnRate * rampFactor * levelMult);
 
     // Spawning
     this.spawnTimer -= dt;
@@ -810,7 +815,7 @@ export class Game implements IGame {
     const dist = 350;
     const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
     const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
-    const bossHP = 15 + this.save.currentLevel * 5; // scales with level
+    const bossHP = 5 + this.save.currentLevel * 5; // scales with level
     const boss = new Rock(x, y, bossHP, 15, true); // slow speed, big rock
     boss.radius = 30; // extra large
     boss.coinValue = 10;
@@ -1083,8 +1088,6 @@ export class Game implements IGame {
     ctx.beginPath();
     ctx.arc(cx, cy + 180, 80 * pulse, 0, Math.PI * 2);
     ctx.fill();
-    ctx.globalAlpha = 0.3;
-    this.renderer.drawCircle(vec2(cx, cy + 180), 20, COLORS.mothership);
     ctx.globalAlpha = 1;
     ctx.restore();
 
@@ -1125,7 +1128,7 @@ export class Game implements IGame {
     });
 
     ctx.save();
-    ctx.font = `bold 12px 'Orbitron', monospace`;
+    ctx.font = `bold 12px Tektur`;
     ctx.fillStyle = COLORS.textGold;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1145,20 +1148,21 @@ export class Game implements IGame {
 
     if (blink) {
       this.renderer.drawButton(startBtnX, startBtnY, startBtnW, startBtnH, "TAP TO START", {
-        bg: "rgba(0, 40, 30, 0.9)",
-        border: "rgba(0, 255, 204, 0.5)",
+        bg: "rgba(14, 185, 211, 0.9)",
+        border: "rgba(5, 78, 81, 0.5)",
         textColor: "#fff",
         fontSize: 16,
         radius: 10,
-        glow: "rgba(0, 255, 204, 0.2)",
+        glow: "rgba(0, 234, 255, 0.2)",
       });
     } else {
       this.renderer.drawButton(startBtnX, startBtnY, startBtnW, startBtnH, "TAP TO START", {
-        bg: "rgba(0, 30, 20, 0.8)",
-        border: "rgba(0, 255, 204, 0.25)",
-        textColor: "rgba(255,255,255,0.6)",
+        bg: "rgba(14, 185, 211, 0.9)",
+        border: "rgba(5, 78, 81, 0.5)",
+        textColor: "#fff",
         fontSize: 16,
         radius: 10,
+        glow: "rgba(0, 234, 255, 0.2)",
       });
     }
 
@@ -1172,7 +1176,7 @@ export class Game implements IGame {
 
     if (this.input.isTouchDevice) {
       ctx.save();
-      ctx.font = `10px monospace`;
+      ctx.font = `10px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1181,7 +1185,7 @@ export class Game implements IGame {
       ctx.restore();
     } else {
       ctx.save();
-      ctx.font = `10px monospace`;
+      ctx.font = `10px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1289,9 +1293,9 @@ export class Game implements IGame {
         ctx.save();
         ctx.globalAlpha = alpha;
         // Outer glow stroke
-        ctx.strokeStyle = "#ff6666";
+        ctx.strokeStyle = COLORS.mothershipDamaged;
         ctx.lineWidth = 3 + alpha * 3;
-        ctx.shadowColor = "#ff2222";
+        ctx.shadowColor = COLORS.mothershipDamaged;
         ctx.shadowBlur = 10;
         ctx.beginPath();
         ctx.moveTo(beam.x1, beam.y1);
@@ -1337,7 +1341,7 @@ export class Game implements IGame {
         ctx.fill();
         // Countdown arc (orange ring, fills clockwise from top)
         ctx.globalAlpha = 0.9;
-        ctx.strokeStyle = "#ffcc00";
+        ctx.strokeStyle = COLORS.engineGlow;
         ctx.lineWidth = 2.5;
         const countArc = progress * Math.PI * 2;
         ctx.beginPath();
@@ -1431,7 +1435,7 @@ export class Game implements IGame {
         const ctx = this.renderer.ctx;
         ctx.save();
         ctx.globalAlpha = 0.55;
-        ctx.font = `bold 8px 'Orbitron', monospace`;
+        ctx.font = `bold 8px Tektur`;
         ctx.fillStyle = choice.color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -1506,7 +1510,7 @@ export class Game implements IGame {
       ctx.stroke();
 
       ctx.globalAlpha = 0.35;
-      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.font = `bold 9px Tektur`;
       ctx.fillStyle = COLORS.dashReady;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1531,7 +1535,7 @@ export class Game implements IGame {
 
       const pct = Math.floor(this.player.dashCooldownRatio * 100);
       ctx.globalAlpha = 0.2;
-      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.font = `bold 9px Tektur`;
       ctx.fillStyle = COLORS.dashCooldown;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1576,7 +1580,7 @@ export class Game implements IGame {
     ctx.restore();
 
     ctx.save();
-    ctx.font = `9px monospace`;
+    ctx.font = `9px Tektur`;
     ctx.fillStyle = COLORS.textSecondary;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1624,7 +1628,7 @@ export class Game implements IGame {
         const bombDmg = this.stats.damage * 5;
         const bPos = vec2(bomb.x, bomb.y);
         this.particles.emit(bPos, 45, "#ff8800", 200, 0.65, 6);
-        this.particles.emit(bPos, 25, "#ffcc00", 150, 0.45, 4);
+        this.particles.emit(bPos, 25, COLORS.engineGlow, 150, 0.45, 4);
         this.particles.emit(bPos, 15, "#ffffff", 110, 0.25, 2.5);
         this.renderer.shake(7);
         this.screenFlashTimer = 0.12;
@@ -1695,13 +1699,13 @@ export class Game implements IGame {
 
     // Title
     ctx.save();
-    ctx.shadowColor = "#ffcc00";
+    ctx.shadowColor = COLORS.engineGlow;
     ctx.shadowBlur = 22;
     this.renderer.drawTitleTextOutline(
       "BOSS DEFEATED!",
       cx,
       180,
-      "#ffcc00",
+      COLORS.engineGlow,
       "#000",
       24,
       "center",
@@ -1724,7 +1728,7 @@ export class Game implements IGame {
       const existing = BOSS_REWARD_CHOICES.find((c) => c.id === this.save.specialAbility);
       if (existing) {
         ctx.save();
-        ctx.font = `8px monospace`;
+        ctx.font = `8px Tektur`;
         ctx.fillStyle = existing.color;
         ctx.globalAlpha = 0.7;
         ctx.textAlign = "center";
@@ -1755,7 +1759,7 @@ export class Game implements IGame {
 
       // Name
       ctx.save();
-      ctx.font = `bold 12px 'Orbitron', monospace`;
+      ctx.font = `bold 12px Tektur`;
       ctx.fillStyle = choice.color;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1766,7 +1770,7 @@ export class Game implements IGame {
 
       // Description lines
       ctx.save();
-      ctx.font = `8.5px monospace`;
+      ctx.font = `8.5px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -1790,7 +1794,7 @@ export class Game implements IGame {
 
     // Hint text below cards
     ctx.save();
-    ctx.font = `8px monospace`;
+    ctx.font = `8px Tektur`;
     ctx.fillStyle = "rgba(150,150,180,0.55)";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -1867,7 +1871,7 @@ export class Game implements IGame {
       ctx.quadraticCurveTo(cx + 16, cy - 16, cx + 11, cy - 22);
       ctx.stroke();
       // Spark
-      ctx.fillStyle = "#ffcc00";
+      ctx.fillStyle = COLORS.engineGlow;
       ctx.globalAlpha = 1;
       ctx.beginPath();
       ctx.arc(cx + 11, cy - 22, 3, 0, Math.PI * 2);
@@ -1971,21 +1975,21 @@ export class Game implements IGame {
       // Instruction panel
       this.renderer.drawPanel(cx - 180, 128, 360, 90, {
         bg: "rgba(8, 8, 24, 0.88)",
-        border: "rgba(0, 255, 204, 0.25)",
+        border: "rgba(0, 212, 255, 0.25)",
         radius: 10,
       });
 
       ctx.save();
-      ctx.font = `bold 13px 'Orbitron', monospace`;
+      ctx.font = `bold 13px Tektur`;
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("TAP & DRAG anywhere", cx, 152);
-      ctx.font = `11px monospace`;
+      ctx.font = `11px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.fillText("to move your ship", cx, 172);
-      ctx.font = `10px monospace`;
-      ctx.fillStyle = "rgba(0,255,204,0.6)";
+      ctx.font = `10px Tektur`;
+      ctx.fillStyle = "rgba(0,212,255,0.6)";
       ctx.fillText("Auto-shoots to the music beat", cx, 196);
       ctx.restore();
 
@@ -2039,7 +2043,7 @@ export class Game implements IGame {
       ctx.save();
       ctx.globalAlpha = arrowAlpha;
       ctx.fillStyle = COLORS.player;
-      ctx.font = `20px monospace`;
+      ctx.font = `20px Tektur`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("→", dragCX + dragLen / 2 + 24, dragCY);
@@ -2061,11 +2065,11 @@ export class Game implements IGame {
       // Bottom hint
       this.renderer.drawPanel(cx - 170, GAME_HEIGHT - 140, 340, 50, {
         bg: "rgba(4, 4, 14, 0.85)",
-        border: "rgba(0,255,204,0.2)",
+        border: "rgba(0,212,255,0.2)",
         radius: 8,
       });
       ctx.save();
-      ctx.font = `9px monospace`;
+      ctx.font = `9px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -2113,15 +2117,15 @@ export class Game implements IGame {
       });
 
       ctx.save();
-      ctx.font = `bold 13px 'Orbitron', monospace`;
+      ctx.font = `bold 13px Tektur`;
       ctx.fillStyle = "#ffffff";
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText("TAP the DASH button", cx, 152);
-      ctx.font = `11px monospace`;
+      ctx.font = `11px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.fillText("bottom-right corner", cx, 172);
-      ctx.font = `10px monospace`;
+      ctx.font = `10px Tektur`;
       ctx.fillStyle = "rgba(100,220,255,0.6)";
       ctx.fillText("Teleport + clear nearby bullets", cx, 196);
       ctx.restore();
@@ -2153,7 +2157,7 @@ export class Game implements IGame {
       ctx.arc(dashBtnX, dashBtnY, dashR * ringScale, 0, Math.PI * 2);
       ctx.stroke();
       ctx.globalAlpha = 0.55;
-      ctx.font = `bold 9px 'Orbitron', monospace`;
+      ctx.font = `bold 9px Tektur`;
       ctx.fillStyle = COLORS.dashReady;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -2180,7 +2184,7 @@ export class Game implements IGame {
         radius: 8,
       });
       ctx.save();
-      ctx.font = `9px monospace`;
+      ctx.font = `9px Tektur`;
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -2192,7 +2196,7 @@ export class Game implements IGame {
     // "TAP TO CONTINUE" button at very bottom
     const blink = Math.sin(t * 3) > 0;
     const btnLabel = this.tutorialStep === 2 ? "GOT IT — LET'S GO!" : "TAP TO CONTINUE";
-    const btnColor = this.tutorialStep === 2 ? "rgba(100, 220, 255," : "rgba(0, 255, 204,";
+    const btnColor = this.tutorialStep === 2 ? "rgba(0, 212, 255," : "rgba(0, 212, 255,";
     const btnW = 240;
     const btnH = 36;
     const btnX = cx - btnW / 2;
@@ -2230,7 +2234,7 @@ export class Game implements IGame {
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     const title = "ROUND COMPLETE";
-    const titleColor = "#44ff88";
+    const titleColor = "#00d4ff";
 
     // Results panel
     const panelW = 320;
@@ -2285,7 +2289,7 @@ export class Game implements IGame {
     const lineH = 22;
 
     ctx.save();
-    ctx.font = `bold 11px 'Orbitron', monospace`;
+    ctx.font = `bold 11px Tektur`;
     ctx.textBaseline = "middle";
 
     // Coins earned
@@ -2323,12 +2327,12 @@ export class Game implements IGame {
 
     if (blink) {
       this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
-        bg: "rgba(10, 30, 20, 0.9)",
-        border: "rgba(100, 200, 150, 0.4)",
+        bg: "rgba(61, 180, 150, 0.9)",
+        border: "rgba(38, 180, 180, 0.4)",
         textColor: "#fff",
         fontSize: 12,
         radius: 8,
-        glow: "rgba(100, 200, 150, 0.15)",
+        glow: "rgba(15, 210, 228, 0.15)",
       });
     } else {
       this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
