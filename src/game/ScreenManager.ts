@@ -47,6 +47,12 @@ export class ScreenManager {
     // Shared resources
     this.save = loadGame();
     this.audio = new AudioManager();
+    this.audio.applyPreferences(this.save.musicTrack, this.save.musicVolume);
+    // Persist volume changes from HTML slider to localStorage
+    this.audio.onVolumeChange = (vol: number) => {
+      this.save.musicVolume = vol;
+      saveGame(this.save);
+    };
     this.upgrades = new UpgradeManager(this.save);
 
     // Each canvas gets its own Renderer

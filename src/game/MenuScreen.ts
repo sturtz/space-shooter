@@ -15,7 +15,6 @@ export class MenuScreen {
 
   // Tutorial state
   private showTutorial: boolean;
-  private tutorialStep: 1 | 2 = 1;
 
   constructor(renderer: Renderer, manager: ScreenManager) {
     this.renderer = renderer;
@@ -26,12 +25,9 @@ export class MenuScreen {
     const canvas = renderer.canvas;
 
     const getScaledCoords = (clientX: number, clientY: number) => {
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = GAME_WIDTH / rect.width;
-      const scaleY = GAME_HEIGHT / rect.height;
       return {
-        mx: (clientX - rect.left) * scaleX,
-        my: (clientY - rect.top) * scaleY,
+        mx: (clientX - this.renderer.gameOffsetX) / this.renderer.gameScale,
+        my: (clientY - this.renderer.gameOffsetY) / this.renderer.gameScale,
       };
     };
 
@@ -61,13 +57,9 @@ export class MenuScreen {
   }
 
   private advanceTutorial() {
-    if (this.tutorialStep === 1) {
-      this.tutorialStep = 2;
-    } else {
-      this.showTutorial = false;
-      this.manager.save.tutorialSeen = true;
-      import("../utils/SaveManager").then(({ saveGame }) => saveGame(this.manager.save));
-    }
+    this.showTutorial = false;
+    this.manager.save.tutorialSeen = true;
+    import("../utils/SaveManager").then(({ saveGame }) => saveGame(this.manager.save));
   }
 
   update(dt: number) {
@@ -212,243 +204,219 @@ export class MenuScreen {
   private renderTutorial() {
     const ctx = this.renderer.ctx;
     const cx = GAME_WIDTH / 2;
+    const cy = GAME_HEIGHT / 2;
     const t = this.time;
 
-    ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+    // Dim overlay
+    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Step indicator dots
+    // Title
     ctx.save();
-    for (let i = 0; i < 2; i++) {
-      const active = i + 1 === this.tutorialStep;
-      ctx.globalAlpha = active ? 1 : 0.3;
-      ctx.fillStyle = active ? COLORS.player : "#ffffff";
-      ctx.beginPath();
-      ctx.arc(cx - 8 + i * 16, 30, active ? 4 : 3, 0, Math.PI * 2);
-      ctx.fill();
-    }
+    ctx.shadowColor = COLORS.player;
+    ctx.shadowBlur = 16;
+    this.renderer.drawTitleTextOutline(
+      "CONTROLS",
+      cx,
+      60,
+      COLORS.player,
+      "#000",
+      24,
+      "center",
+      "middle"
+    );
     ctx.restore();
 
-    if (this.tutorialStep === 1) {
-      ctx.save();
-      ctx.shadowColor = COLORS.player;
-      ctx.shadowBlur = 14;
-      this.renderer.drawTitleTextOutline(
-        "HOW TO PLAY",
-        cx,
-        70,
-        COLORS.player,
-        "#000",
-        22,
-        "center",
-        "middle"
-      );
-      ctx.restore();
+    // ── Player ship in center (simulated) ──
+    const playerX = cx;
+    const playerY = cy - 20;
 
-      this.renderer.drawTitleText(
-        "1 / 2  —  MOVEMENT",
-        cx,
-        100,
-        COLORS.textSecondary,
-        10,
-        "center",
-        "middle"
-      );
+    // Player ship triangle
+    ctx.save();
+    ctx.globalAlpha = 0.85;
+    ctx.fillStyle = COLORS.player;
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(playerX, playerY - 14);
+    ctx.lineTo(playerX - 10, playerY + 10);
+    ctx.lineTo(playerX + 10, playerY + 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    // Engine glow
+    ctx.globalAlpha = 0.15;
+    const engGlow = ctx.createRadialGradient(playerX, playerY, 0, playerX, playerY, 30);
+    engGlow.addColorStop(0, COLORS.player);
+    engGlow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = engGlow;
+    ctx.beginPath();
+    ctx.arc(playerX, playerY, 30, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 
-      this.renderer.drawPanel(cx - 180, 128, 360, 90, {
-        bg: "rgba(8, 8, 24, 0.88)",
-        border: "rgba(0, 212, 255, 0.25)",
-        radius: 10,
-      });
+    // "YOU" label above player
+    ctx.save();
+    ctx.font = `bold 10px Tektur`;
+    ctx.fillStyle = COLORS.player;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.globalAlpha = 0.7;
+    ctx.fillText("YOU", playerX, playerY - 30);
+    ctx.restore();
 
-      ctx.save();
-      ctx.font = `bold 13px Tektur`;
-      ctx.fillStyle = "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("TAP & DRAG anywhere", cx, 152);
-      ctx.font = `11px Tektur`;
-      ctx.fillStyle = COLORS.textSecondary;
-      ctx.fillText("to move your ship", cx, 172);
-      ctx.font = `10px Tektur`;
-      ctx.fillStyle = "rgba(0,212,255,0.6)";
-      ctx.fillText("Auto-shoots to the music beat", cx, 196);
-      ctx.restore();
+    // Pulse ring around player (cone weapon range indicator)
+    const pulseR = 18;
+    const pulseAlpha = 0.2 + 0.1 * Math.sin(t * 4);
+    ctx.save();
+    ctx.globalAlpha = pulseAlpha;
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(playerX, playerY, pulseR, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
-      // Animated drag illustration
-      const dragCX = cx;
-      const dragCY = 330;
-      const dragLen = 80;
-      const dragPhase = (t * 0.7) % 1;
-      const fingerX = dragCX - dragLen / 2 + dragPhase * dragLen;
+    // ── Joystick area (left side) ──
+    const joyX = 180;
+    const joyY = cy + 100;
+    const joyR = 50;
+    const thumbPhase = (t * 0.5) % 1;
+    const thumbOffX = Math.sin(thumbPhase * Math.PI * 2) * 25;
+    const thumbOffY = Math.cos(thumbPhase * Math.PI * 2) * 15;
 
-      ctx.save();
-      ctx.globalAlpha = 0.18;
-      ctx.strokeStyle = COLORS.player;
-      ctx.lineWidth = 2;
-      ctx.setLineDash([5, 6]);
-      ctx.beginPath();
-      ctx.moveTo(dragCX - dragLen / 2, dragCY);
-      ctx.lineTo(dragCX + dragLen / 2, dragCY);
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
+    // Outer ring
+    ctx.save();
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = COLORS.player;
+    ctx.beginPath();
+    ctx.arc(joyX, joyY, joyR, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.25;
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(joyX, joyY, joyR, 0, Math.PI * 2);
+    ctx.stroke();
+    // Inner thumb
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = COLORS.player;
+    ctx.beginPath();
+    ctx.arc(joyX + thumbOffX, joyY + thumbOffY, 14, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = 0.55;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(joyX + thumbOffX, joyY + thumbOffY, 14, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
-      const trailAlpha = dragPhase < 0.85 ? 0.75 : 0.75 * (1 - (dragPhase - 0.85) / 0.15);
-      ctx.save();
-      ctx.globalAlpha = trailAlpha;
-      ctx.strokeStyle = COLORS.player;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(fingerX, dragCY, 16, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.fillStyle = COLORS.player;
-      ctx.globalAlpha = trailAlpha * 0.25;
-      ctx.beginPath();
-      ctx.arc(fingerX, dragCY, 16, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = trailAlpha;
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(fingerX, dragCY, 4, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+    // Joystick label
+    ctx.save();
+    ctx.font = `bold 12px Tektur`;
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("DRAG TO MOVE", joyX, joyY - joyR - 18);
+    ctx.font = `10px Tektur`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Touch anywhere on left", joyX, joyY - joyR - 4);
+    ctx.restore();
 
-      this.renderer.drawPanel(cx - 170, GAME_HEIGHT - 140, 340, 50, {
-        bg: "rgba(4, 4, 14, 0.85)",
-        border: "rgba(0,212,255,0.2)",
-        radius: 8,
-      });
-      ctx.save();
-      ctx.font = `9px Tektur`;
-      ctx.fillStyle = COLORS.textSecondary;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("Your ship follows your finger.", cx, GAME_HEIGHT - 122);
-      ctx.fillText(
-        "Enemies fly toward the Mothership — don't let them reach it!",
-        cx,
-        GAME_HEIGHT - 106
-      );
-      ctx.restore();
-    } else {
-      // Step 2: Dash
-      ctx.save();
-      ctx.shadowColor = COLORS.dashReady;
-      ctx.shadowBlur = 14;
-      this.renderer.drawTitleTextOutline(
-        "DASH",
-        cx,
-        70,
-        COLORS.dashReady,
-        "#000",
-        22,
-        "center",
-        "middle"
-      );
-      ctx.restore();
+    // Arrow from joystick → player
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(joyX + joyR + 10, joyY - 30);
+    ctx.lineTo(playerX - 30, playerY + 10);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.restore();
 
-      this.renderer.drawTitleText(
-        "2 / 2  —  DASH",
-        cx,
-        100,
-        COLORS.textSecondary,
-        10,
-        "center",
-        "middle"
-      );
+    // ── Dash button (right side) ──
+    const dashX = GAME_WIDTH - 120;
+    const dashY = GAME_HEIGHT - 120;
+    const dashR = 48;
+    const ringScale = 1 + 0.15 * Math.sin(t * 4);
 
-      this.renderer.drawPanel(cx - 180, 128, 360, 90, {
-        bg: "rgba(8, 8, 24, 0.88)",
-        border: "rgba(100, 220, 255, 0.25)",
-        radius: 10,
-      });
+    // Glow
+    ctx.save();
+    ctx.globalAlpha = 0.2 + 0.1 * Math.sin(t * 4);
+    const dashGlow = ctx.createRadialGradient(dashX, dashY, 0, dashX, dashY, dashR * 1.8);
+    dashGlow.addColorStop(0, COLORS.dashReady);
+    dashGlow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = dashGlow;
+    ctx.beginPath();
+    ctx.arc(dashX, dashY, dashR * 1.8, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
 
-      ctx.save();
-      ctx.font = `bold 13px Tektur`;
-      ctx.fillStyle = "#ffffff";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("TAP the DASH button", cx, 152);
-      ctx.font = `11px Tektur`;
-      ctx.fillStyle = COLORS.textSecondary;
-      ctx.fillText("bottom-right corner", cx, 172);
-      ctx.font = `10px Tektur`;
-      ctx.fillStyle = "rgba(100,220,255,0.6)";
-      ctx.fillText("Teleport + clear nearby bullets", cx, 196);
-      ctx.restore();
+    // Ring
+    ctx.save();
+    ctx.globalAlpha = 0.6;
+    ctx.strokeStyle = COLORS.dashReady;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(dashX, dashY, dashR * ringScale, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 0.5;
+    ctx.font = `bold 14px Tektur`;
+    ctx.fillStyle = COLORS.dashReady;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("DASH", dashX, dashY);
+    ctx.restore();
 
-      const dashBtnX = GAME_WIDTH - 60;
-      const dashBtnY = GAME_HEIGHT - 80;
-      const dashR = 30;
-      const ringScale = 1 + 0.2 * Math.sin(t * 4);
+    // Dash label
+    ctx.save();
+    ctx.font = `bold 12px Tektur`;
+    ctx.fillStyle = "#ffffff";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("TELEPORT + EMP", dashX, dashY - dashR - 18);
+    ctx.font = `10px Tektur`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Clears bullets nearby", dashX, dashY - dashR - 4);
+    ctx.restore();
 
-      ctx.save();
-      ctx.globalAlpha = 0.25 + 0.15 * Math.sin(t * 4);
-      const glow = ctx.createRadialGradient(dashBtnX, dashBtnY, 0, dashBtnX, dashBtnY, dashR * 2);
-      glow.addColorStop(0, COLORS.dashReady);
-      glow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = glow;
-      ctx.beginPath();
-      ctx.arc(dashBtnX, dashBtnY, dashR * 2, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.restore();
+    // EMP ripple animation
+    const empProgress = (t * 0.6) % 1;
+    const empRadius = empProgress * 70;
+    const empAlpha = (1 - empProgress) * 0.25;
+    ctx.save();
+    ctx.globalAlpha = empAlpha;
+    ctx.strokeStyle = "#44ccff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(dashX, dashY, empRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
 
-      ctx.save();
-      ctx.globalAlpha = 0.7;
-      ctx.strokeStyle = COLORS.dashReady;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(dashBtnX, dashBtnY, dashR * ringScale, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.55;
-      ctx.font = `bold 9px Tektur`;
-      ctx.fillStyle = COLORS.dashReady;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("DASH", dashBtnX, dashBtnY);
-      ctx.restore();
+    // ── Bottom info strip ──
+    ctx.save();
+    ctx.font = `11px Tektur`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText("Auto-fires to the beat  •  Destroy enemies → Coins → Upgrade", cx, GAME_HEIGHT - 85);
+    ctx.restore();
 
-      const empProgress = (t * 0.7) % 1;
-      const empRadius = empProgress * 90;
-      const empAlpha = (1 - empProgress) * 0.35;
-      ctx.save();
-      ctx.globalAlpha = empAlpha;
-      ctx.strokeStyle = "#44ccff";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(dashBtnX, dashBtnY, empRadius, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      this.renderer.drawPanel(cx - 170, GAME_HEIGHT - 140, 340, 50, {
-        bg: "rgba(4, 4, 14, 0.85)",
-        border: "rgba(100,220,255,0.2)",
-        radius: 8,
-      });
-      ctx.save();
-      ctx.font = `9px Tektur`;
-      ctx.fillStyle = COLORS.textSecondary;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("Dash teleports you & fires an EMP ring.", cx, GAME_HEIGHT - 122);
-      ctx.fillText("Clears enemy bullets • damages nearby enemies.", cx, GAME_HEIGHT - 106);
-      ctx.restore();
-    }
-
-    // Continue button
+    // ── Continue button ──
     const blink = Math.sin(t * 3) > 0;
-    const btnLabel = this.tutorialStep === 2 ? "GOT IT — LET'S GO!" : "TAP TO CONTINUE";
-    const btnW = 240;
-    const btnH = 36;
+    const btnW = 280;
+    const btnH = 44;
     const btnX = cx - btnW / 2;
     const btnY = GAME_HEIGHT - 52;
 
-    this.renderer.drawButton(btnX, btnY, btnW, btnH, btnLabel, {
+    this.renderer.drawButton(btnX, btnY, btnW, btnH, "GOT IT — LET'S GO!", {
       bg: blink ? "rgba(4, 20, 16, 0.9)" : "rgba(4, 14, 10, 0.8)",
       border: blink ? "rgba(0, 212, 255, 0.5)" : "rgba(0, 212, 255, 0.22)",
       textColor: blink ? "#fff" : "rgba(255,255,255,0.55)",
-      fontSize: 13,
+      fontSize: 15,
       radius: 10,
       glow: blink ? "rgba(0, 212, 255, 0.18)" : undefined,
     });

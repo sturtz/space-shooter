@@ -77,14 +77,20 @@ export class SpawnSystem {
 
       game.enemies.push(rock);
     } else {
-      // Enemy ship
-      const hp = ENEMY_SHIP_BASE_HP + level;
-      const speed = ENEMY_SHIP_BASE_SPEED + level * 2;
-      const canShoot = level >= 4;
-      const ship = new EnemyShip(x, y, hp, speed, canShoot);
-      ship.coinValue = 2 + Math.floor(level * 0.3);
+      // Enemy ship — level 3+ can spawn "pulse" variant (fast, uses pulse-enemy-ship.svg)
+      const isPulseShip = level >= 3 && Math.random() < 0.35; // 35% chance at lvl 3+
+      const hp = isPulseShip
+        ? Math.max(1, ENEMY_SHIP_BASE_HP - 1) // pulse ships are fragile
+        : ENEMY_SHIP_BASE_HP + level;
+      const speed = isPulseShip
+        ? ENEMY_SHIP_BASE_SPEED * 3 + level * 4 // really fast!
+        : ENEMY_SHIP_BASE_SPEED + level * 2;
+      const canShoot = isPulseShip ? false : level >= 4; // pulse ships are melee-only
+      const variant = isPulseShip ? "pulse" as const : "normal" as const;
+      const ship = new EnemyShip(x, y, hp, speed, canShoot, variant);
+      ship.coinValue = isPulseShip ? 1 : 2 + Math.floor(level * 0.3);
 
-      if (level >= 5 && Math.random() < 0.05) {
+      if (!isPulseShip && level >= 5 && Math.random() < 0.05) {
         ship.isElite = true;
         ship.hp *= 3;
         ship.maxHp = ship.hp;

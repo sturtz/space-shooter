@@ -11,7 +11,7 @@ export const PLAYER_BASE_DAMAGE = 1;
 export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
 
 // Mothership
-export const MOTHERSHIP_COLLISION_RADIUS = 18;
+export const MOTHERSHIP_COLLISION_RADIUS = 12;
 export const MOTHERSHIP_BASE_HP = 1;
 export const MOTHERSHIP_TIME_PENALTY = 2; // seconds lost per hit
 
@@ -25,7 +25,7 @@ export const ROCK_BASE_HP = 2; // small rocks: 2 hits (was 3, rebalanced for ear
 export const ROCK_BIG_HP = 5; // big rocks: 5 hits
 export const ROCK_BASE_SPEED = 15;
 export const ROCK_SIZE = 10;
-export const ROCK_BIG_SIZE = 16;
+export const ROCK_BIG_SIZE = 22;
 export const ENEMY_SHIP_BASE_HP = 4;
 export const ENEMY_SHIP_BASE_SPEED = 25;
 export const ENEMY_SHIP_SIZE = 12;
@@ -40,6 +40,25 @@ export const COIN_SPEED = 60; // speed when flying to player
 export const BASE_ROUND_DURATION = 20; // seconds
 export const SPAWN_RATE_BASE = 4.0; // seconds between spawns (fewer enemies at start)
 export const SPAWN_DISTANCE = 500; // distance from center to spawn
+
+// Weapons — formerly hardcoded in Game.ts
+export const CONE_RANGE = 18; // circle weapon radius (matches loader ring visual)
+export const CONE_FIRE_EVERY = 1; // fire every N beats
+export const CONE_FLASH_DURATION = 0.12; // seconds of flash after cone fires
+export const MISSILE_SPEED = 180;
+export const MISSILE_FIRE_EVERY = 2; // fire missiles every N beats
+export const LASER_INTERVAL = 2.5; // seconds between laser shots
+export const LASER_DAMAGE_MULT = 3; // laser deals N× weapon damage
+export const BOMB_FUSE = 1.5; // seconds before bomb detonates
+export const BOMB_RADIUS = 80; // blast radius in px
+export const BOMB_DAMAGE_MULT = 5; // bomb deals N× weapon damage
+export const DASH_RING_LIFE = 0.3; // visual ring duration (seconds)
+export const DASH_DAMAGE_MULT = 0.5; // dash ring deals fraction of weapon damage
+export const STUN_DURATION = 2.0; // flashbang stun seconds
+export const STUN_EXTRA_RADIUS = 20; // extra EMP range beyond flashbang
+export const FIRST_BOSS_ELAPSED = 12; // seconds into round before first mega rock
+export const CHAIN_RANGE = 120; // max chain lightning jump distance
+export const SPLASH_DAMAGE_MULT = 0.5; // splash deals fraction of bullet damage
 
 // Upgrades
 export const UPGRADE_BASE_COST = 10;
@@ -90,7 +109,7 @@ export const COLORS = {
   mobileControl: "rgba(255, 255, 255, 0.15)",
   mobileControlActive: "rgba(255, 255, 255, 0.3)",
   poisoned: "#44ff44", // green — keep for poison status
-  engineGlow: "#ffcc00", // engine / thruster shadow glow
+  engineGlow: "#00ccff", // engine / thruster shadow glow (cyan — matches player theme)
   coinRare: "#ff44ff", // high-value coin (≥50)
   elite: "#ffaa00", // elite enemy highlight
   enemyBullet: "#ff6644", // enemy projectile body

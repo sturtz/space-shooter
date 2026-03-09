@@ -256,9 +256,8 @@ All tuning values live here — base stats, sizes, speeds, colors, etc. Key ones
 
 ### 🔴 Bugs (Likely Gameplay Impact)
 
-1. **Barrier system is defined but never wired into collisions**
-   - `SpawnSystem.barrierAbsorb()` exists and tracks `msBarrierHitsRemaining`, but `CollisionSystem.checkEnemyMothershipCollisions()` never calls it. The barrier upgrade (`ms_barrier`) does nothing.
-   - **Fix**: In `CollisionSystem`, before `game.mothership.takeDamage()`, call `game.spawner.barrierAbsorb()` — if it returns `true`, skip the damage and play a barrier-hit effect instead.
+1. ~~**Barrier system is defined but never wired into collisions**~~ ✅ **FIXED 2026-03-09**
+   - `CollisionSystem.checkEnemyMothershipCollisions()` now calls `game.spawner.barrierAbsorb()` before applying damage. If the barrier absorbs the hit, a shield-colored particle burst plays and no HP/time penalty is applied. `IGame` updated to expose `spawner`.
 
 2. **Menu render: blink branch does nothing different**
    - In `Game.renderMenu()`, both the `if (blink)` and `else` branches render the exact same "TAP TO START" button with identical parameters. The blinking effect is broken — the button is always fully visible.
@@ -268,13 +267,14 @@ All tuning values live here — base stats, sizes, speeds, colors, etc. Key ones
    - In `Mothership.render()`, `ctx.globalCompositeOperation = "source-atop"` is used to tint the sprite red on damage. But this composite mode applies to the whole canvas, not just the sprite. If other entities overlap the mothership area, their rendering may be affected.
    - **Fix**: Draw the mothership sprite to an offscreen canvas, apply the tint there, then draw the result to the main canvas. Or use `ctx.filter` / `ctx.globalCompositeOperation` within a clipped region.
 
-4. **`coinValueMultiplier` and `coinDropMultiplier` are the same value**
-   - In `UpgradeManager.computeStats()`, both are set to `coinValueMult`. This means `econ_value` upgrade double-dips if any code uses them separately. Currently `CollisionSystem` uses `coinDropMultiplier` only, so the `coinValueMultiplier` field is dead code — but it's confusing and could cause bugs if someone uses the wrong one.
-   - **Fix**: Decide on one field or differentiate them (value = worth per coin, drop = number of coins dropped).
+4. ~~**`coinValueMultiplier` and `coinDropMultiplier` are the same value**~~ ✅ **FIXED 2026-03-09**
+   - Unified into single `coinMultiplier` field in `PlayerStats`. Removed duplicate `coinValueMultiplier` / `coinDropMultiplier`. All code now references `stats.coinMultiplier`.
 
-5. **`IGame` interface is stale / missing fields**
-   - `IGame` doesn't include `spawner` (needed for barrier), `gameTime`, `bossEnemy`, `bossDefeated`, `dashRings`, `laserBeams`, `pendingBombs`, or several other fields that systems reference via `game.` casting. The interface compiles only because subsystems cast through `IGame` but `Game` implements more.
-   - **Fix**: Extend `IGame` with missing fields, or use a different pattern (e.g., pass specific dependencies to each system instead of the whole game).
+5. ~~**`IGame` interface is stale / missing fields**~~ ✅ **FIXED 2026-03-09**
+   - `IGame` now includes `spawner: SpawnSystem`, `gameTime`, `bossEnemy`, `bossDefeated`. All fields that subsystems actually reference are present.
+
+6. **`medium sized asteroids not droping 3 coins (start value)`**
+   - medium asteroids should drop 3 coins 
 
 ### 🟡 Potential Issues
 
@@ -286,33 +286,29 @@ All tuning values live here — base stats, sizes, speeds, colors, etc. Key ones
    - Space, Escape, and P all toggle pause. Space is typically "fire" in shooters. While the cone weapon fires automatically on beat, if bullet firing is re-enabled (commented out), Space would both fire and pause.
    - **Fix**: Remove Space from pause keys, or use a separate key mapping system.
 
-8. **`damageNumbers` alpha assumes `maxLife = 0.8` but "DODGE" text uses `life = 0.6`**
-   - In `renderPlaying()`, damage number alpha is `dn.life / 0.8`, but dodge numbers start with `life = 0.6`. This means dodge text starts at alpha 0.75 instead of 1.0.
-   - **Fix**: Store `maxLife` on each `DamageNumber` and use `dn.life / dn.maxLife`.
+8. ~~**`damageNumbers` alpha assumes `maxLife = 0.8` but "DODGE" text uses `life = 0.6`**~~ ✅ **FIXED 2026-03-09**
+   - `DamageNumber` interface now has `maxLife` field. `spawnDamageNumber()` sets it alongside `life`. Render loop uses `dn.life / dn.maxLife` so DODGE text starts at full alpha.
 
-9. **`onEnemyKilled` can be called multiple times for the same enemy**
-   - If an enemy is killed by poison tick in `updatePlaying()`, `onEnemyKilled` is called. But if splash damage or chain lightning in `CollisionSystem` also processes that enemy in the same frame (before it's filtered), it could be called again. The `enemy.alive` checks prevent double-damage but `onEnemyKilled` side effects (coins, particles, kill count) could double.
-   - **Fix**: Check `enemy.alive` at the start of `onEnemyKilled` and return early if already dead.
+9. ~~**`onEnemyKilled` can be called multiple times for the same enemy**~~ ✅ **FIXED 2026-03-09**
+   - Added `if (!enemy.alive) return;` guard at the top of `onEnemyKilled()`. Prevents double coins/particles/kill count from splash/chain/poison triggers in the same frame.
 
-10. **Boss reward always goes to `gameover` — should go to `upgradeScreen`**
-    - `selectSpecialAbility()` sets `this.state = "gameover"`. But `gameover` click handler sends to `upgradeScreen`. So the player sees a "round complete" screen after selecting their boss ability, then has to click again to upgrade. This feels like an extra unnecessary step.
-    - **Fix**: Consider going directly to `upgradeScreen` from `selectSpecialAbility()`.
+10. ~~**Boss reward always goes to `gameover` — should go to `upgradeScreen`**~~ ✅ **FIXED 2026-03-09**
+    - Both `selectSpecialAbility()` (boss 4+ choice) and auto-granted boss rewards (bosses 1-3) now go directly to `manager.goToUpgradeScreen()`. No more extra "Round Complete" click.
 
 ### 🟢 Improvements
 
 11. **Game.ts is ~1200 lines — extract render methods**
     - `renderMenu()`, `renderPlaying()`, `renderGameOver()`, `renderTutorial()`, `renderBossReward()` are each 50–200 lines. Extract them into a `GameRenderer.ts` or individual state renderer files.
 
-12. **Hardcoded magic numbers scattered throughout**
-    - Many values like `30` (cone range), `180` (missile speed), `2.5` (laser interval), `0.3` (ring life), `80` (bomb radius), `12` (first boss elapsed), etc. are defined as `readonly` or literals in `Game.ts` but not in `Constants.ts`.
-    - **Fix**: Move all tuning constants to `Constants.ts` for centralized balance tweaking.
+12. ~~**Hardcoded magic numbers scattered throughout**~~ ✅ **FIXED 2026-03-09**
+    - Extracted 17 weapon/gameplay constants from Game.ts into Constants.ts: `CONE_RANGE`, `CONE_FIRE_EVERY`, `CONE_FLASH_DURATION`, `MISSILE_SPEED`, `MISSILE_FIRE_EVERY`, `LASER_INTERVAL`, `LASER_DAMAGE_MULT`, `BOMB_FUSE`, `BOMB_RADIUS`, `BOMB_DAMAGE_MULT`, `DASH_RING_LIFE`, `DASH_DAMAGE_MULT`, `STUN_DURATION`, `STUN_EXTRA_RADIUS`, `FIRST_BOSS_ELAPSED`, `CHAIN_RANGE`, `SPLASH_DAMAGE_MULT`. Game.ts imports and references these.
 
 13. **No object pooling for bullets/enemies/coins**
     - Every bullet, enemy, and coin is `new`'d and then filtered out when dead. For a game that fires on every music beat and spawns continuously, this creates GC pressure.
     - **Fix**: Implement object pooling (like `ParticleSystem` already does for particles).
 
-14. **Splash damage has no damage number display**
-    - In `CollisionSystem.checkBulletEnemyCollisions()`, splash damage hits nearby enemies but doesn't call `spawnDamageNumber` for them — only for the primary hit.
+14. ~~**Splash damage has no damage number display**~~ ✅ **FIXED 2026-03-09**
+    - `CollisionSystem` now calls `game.spawnDamageNumber()` for each splash-hit enemy, not just the primary target.
 
 15. **`PlayerStats` has ~20 unused "compat stub" fields**
     - Fields like `playerHp`, `playerShields`, `evasionChance`, `reflectFraction`, `lifestealChance`, `armorReduction`, `shieldRegenInterval`, etc. are set to defaults and never read. They clutter the interface.
@@ -425,13 +421,230 @@ All tuning values live here — base stats, sizes, speeds, colors, etc. Key ones
 
 ## TODO — Next Batch (from playtesting feedback 2026-03-09)
 
-- [ ] **fire.mp3 is 100 BPM, not 120** — `AudioManager` `TRACK_INFO.fire.bpm` is wrong. Fix to 100. Redo beat-sync math so cone weapon fires correctly on beat.
-- [ ] **Lock chill track** — Chill should be gated behind the "faster cone damage" upgrade (player must unlock it first).
-- [ ] **Lock trap track** — Trap should stay locked even longer (decide gate: level, upgrade tier, or star prestige).
-- [ ] **Scale up everything for mobile** — Player model bigger, enemies bigger, coins bigger, bullets bigger. Currently tuned for desktop at 1200×800; mobile needs beefier visuals.
-- [ ] **Dash button: bigger + more central** — Currently bottom-right corner (GAME_WIDTH-60, GAME_HEIGHT-80, radius 30). Move more central and increase radius for fat-finger usability.
-- [ ] **Dim p5.js ribbons during gameplay** — The aurora ribbons in the Deep Field background are too bright/distracting during active gameplay. Reduce opacity or brightness when `active === "game"` and `state === "playing"`.
-- [ ] **Mothership hitbox too big** — `MOTHERSHIP_COLLISION_RADIUS` is 18px but sprite is 60px. Hitbox feels too generous — enemies reach the mothership too easily. Consider shrinking the collision radius or adjusting the sprite size.
-- [ ] **Movement speed as a first/early upgrade** — Players should feel slow at start and upgrade into speed. Make movement speed a prominent early-game upgrade node.
-- [ ] **Enemies drop extra coin by default** — Increase base coin drop or add guaranteed +1 coin per enemy kill.
-- [ ] **Upgrade cost curve: 10 → 15 → 25** — Rework `costBase`/`costGrowth` in `UpgradeTree.ts` so early upgrades cost 10, then 15, then 25 (rather than current exponential formula).
+- [x] **fire.mp3 is 100 BPM, not 120** — Fixed BPM to 100, beatOffset to 0.0, cone measured interval to 1.2s.
+- [x] **Lock chill track** — Gated behind `dmg_overclock` (Scythe) upgrade. Shows 🔒 with "Req: Scythe" hint.
+- [x] **Lock trap track** — Gated behind first prestige (`prestigeCount >= 1`). Shows 🔒 with "Req: Prestige" hint.
+- [x] **Scale up everything for mobile** — Player sprite 10→16px W, rocks drawSize `radius*3.5`, coins `COIN_SIZE*3.5/4.5`, bullets core rect 5→8px.
+- [x] **Dash button: bigger + more central** — Moved from (W-60, H-80, r=30) to (W-120, H-120, r=48) with 14px font.
+- [x] **Dim p5.js ribbons during gameplay** — Aurora intensity multiplied by 0.25 when game-canvas is visible.
+- [x] **Mothership hitbox too big** — `MOTHERSHIP_COLLISION_RADIUS` reduced from 18px to 12px.
+- [x] **Movement speed as a first/early upgrade** — `move_speed` (Thrusters) now depth 1, requires only `root`, costs [10, 15, 25].
+- [x] **Enemies drop extra coin by default** — `+1` added to base coin value in `onEnemyKilled`.
+- [x] **Upgrade cost curve: 10 → 15 → 25** — T1 upgrades (dmg_core, econ_duration, move_speed) now cost [10, 15, 25].
+
+### 2026-03-09 — Playtesting Batch: BPM Fix, Track Locking, Mobile Scaling, Balance
+
+1. **Fixed fire.mp3 BPM** — Changed from 120 to 100 BPM in `TRACK_INFO`. Reset `beatOffset` to 0.0. Updated `coneMeasuredInterval` default from `(60/120)*2=1.0s` to `(60/100)*2=1.2s`. Beat-synced weapon now fires correctly on fire.mp3 beats.
+
+2. **Locked chill & trap music tracks** — Added `isTrackUnlocked()` to `AudioManager`. Chill requires `dmg_overclock >= 1` (Scythe upgrade), Trap requires `prestigeCount >= 1`. Pause menu shows 🔒 icons with requirement hints for locked tracks. Clicking a locked track plays an error buzz.
+
+3. **Scaled up mobile visuals** — Player sprite: 10×14.75 → 16×23.6px. Rock drawSize: `radius*2.5` → `radius*3.5`. Coin drawSize: `COIN_SIZE*2.5/3` → `COIN_SIZE*3.5/4.5`. Bullet core rect: 5×3px → 8×5px. All entities now read better on small screens.
+
+4. **Bigger + more central dash button** — Position moved from (W-60, H-80) to (W-120, H-120). Radius increased 30→48px. Font 9→14px. Much easier to hit on mobile.
+
+5. **Dimmed aurora ribbons during gameplay** — p5.js `bgDrawAuroras()` checks if `game-canvas` is visible; if so, multiplies aurora intensity by 0.25 (75% dimmer). Auroras return to full brightness on menu/upgrade screens.
+
+6. **Shrunk mothership hitbox** — `MOTHERSHIP_COLLISION_RADIUS` reduced from 18px to 12px in Constants.ts. Enemies and bullets must get closer before dealing damage. Sprite remains 60px for visual presence.
+
+7. **Movement speed as first/early upgrade** — `move_speed` (Thrusters) moved from depth 2 (requires `dmg_core`) to depth 1 (requires only `root`). Cost curve set to [10, 15, 25]. Players can now buy movement speed immediately after round 1.
+
+8. **Extra coin drops by default** — Added `+1` to base coin value in `onEnemyKilled()`. All enemies now drop at least 2 coins worth of value (base coinValue + 1), improving early-game economy.
+
+9. **Upgrade cost curve: 10 → 15 → 25** — T1 upgrades (`dmg_core`, `econ_duration`, `move_speed`) now all use explicit `costs: [10, 15, 25]` arrays instead of exponential growth formula. Provides a clean, predictable early-game progression.
+
+*Last updated by agent — 2026-03-09. Playtesting batch: BPM, track locking, mobile scaling, balance.*
+
+### 2026-03-09 — Mothership Spin, Music Auto-Switch, Icon Fix, Pause Menu Mobile Scale-Up
+
+1. **Mothership spin animation** — Added `spinAngle` field to `Mothership.ts`. The mothership sprite now rotates slowly (~0.5 rad/s) via `ctx.translate`/`ctx.rotate` in the render loop, giving it a constant gentle spin. Damage flash tint coordinates updated to local space.
+
+2. **Auto-switch music to chill on Scythe purchase** — In `UpgradeScreen.tryPurchaseNode()`, when the player buys `dmg_overclock` (Scythe), the music automatically switches to the `chill` track via `audio.switchTrack("chill")` and the preference is saved to localStorage.
+
+3. **Fixed upgrade node icons** — Restored SVG icon rendering in `UpgradeScreen.renderNodes()`. Nodes now draw their preloaded SVG icon (`node.iconPath`) at `r * 1.3` size on top of the colored gradient fill, falling back to emoji text only if the SVG hasn't loaded. The `preloadIcons()` method was already loading these images — they just weren't being drawn.
+
+4. **Scaled up pause menu for mobile** — Complete overhaul of pause menu dimensions for fat-finger usability:
+   - Panel: 300×320 → 380×420
+   - Track buttons: 72×28 → 90×38, gap 10→14, fontSize 9→11
+   - Volume slider: 14px tall → 30px tall (more than 2× thicker), label fontSize 9→11
+   - Resume button: 28px → 40px tall, fontSize 11→14
+   - Forfeit button: 28px → 40px tall, fontSize 9→12
+   - Button spacing: resume at +280, forfeit at +340 (was +230/+268) — 60px gap between buttons (was 38px)
+   - All rounded corners bumped from radius 6–7 → 8
+
+5. **Scaled up mobile tutorial** — Both tutorial steps (Movement + Dash) updated for mobile readability:
+   - Instruction panels: 360×90 → 400×110, font sizes 13/11/10 → 16/13/12
+   - Bottom info panels: 340×50 → 400×60, font 9→11
+   - Dash button illustration: moved from (W-60, H-80, r=30) to (W-120, H-120, r=48) matching actual in-game position
+   - Dash label font: 9→14px
+   - Continue button: 240×36 → 280×44, font 13→15
+
+*Last updated by agent — 2026-03-09. Mothership spin, music auto-switch, icon fix, pause menu + tutorial mobile scale-up.*
+
+### 2026-03-09 — Bug Fix Batch: Barrier, Double-Kill, Interface, Constants Cleanup
+
+1. **Wired barrier into CollisionSystem (Bug #1)** — `CollisionSystem.checkEnemyMothershipCollisions()` now checks `game.spawner.barrierAbsorb()` before applying damage. If the barrier absorbs the hit, a blue shield-colored particle burst plays, the screen shakes lightly, and no HP loss or time penalty occurs. Both enemy body collisions and enemy bullet collisions check the barrier.
+
+2. **Prevented double `onEnemyKilled` calls (Bug #9)** — Added `if (!enemy.alive) return;` guard at the top of `Game.onEnemyKilled()`. This prevents splash damage, chain lightning, and poison ticks from triggering duplicate coins, kill count increments, and particle bursts for the same enemy in a single frame.
+
+3. **Updated `IGame` interface (Bug #5)** — Added missing fields: `spawner: SpawnSystem`, `gameTime: number`, `bossEnemy: Rock | null`, `bossDefeated: boolean`. CollisionSystem now accesses `game.spawner` through the typed interface instead of implicit casting.
+
+4. **Fixed damage number alpha (Bug #8)** — `DamageNumber` interface now has a `maxLife` field set at spawn time. The render loop computes alpha as `dn.life / dn.maxLife` instead of hardcoded `dn.life / 0.8`. DODGE text (life=0.6) now starts at full alpha instead of 0.75.
+
+5. **Unified coin multiplier (Bug #4)** — Removed duplicate `coinValueMultiplier` and `coinDropMultiplier` fields from `PlayerStats`. Both were set to the same value from `econ_value`. Replaced with single `coinMultiplier` field. All references updated.
+
+6. **Extracted 17 weapon constants to Constants.ts (Improvement #12)** — Moved hardcoded magic numbers from Game.ts and CollisionSystem.ts to centralized `Constants.ts`: `CONE_RANGE`, `CONE_FIRE_EVERY`, `CONE_FLASH_DURATION`, `MISSILE_SPEED`, `MISSILE_FIRE_EVERY`, `LASER_INTERVAL`, `LASER_DAMAGE_MULT`, `BOMB_FUSE`, `BOMB_RADIUS`, `BOMB_DAMAGE_MULT`, `DASH_RING_LIFE`, `DASH_DAMAGE_MULT`, `STUN_DURATION`, `STUN_EXTRA_RADIUS`, `FIRST_BOSS_ELAPSED`, `CHAIN_RANGE`, `SPLASH_DAMAGE_MULT`. All game balance values are now in one file.
+
+7. **Added splash damage numbers (Bug #14)** — `CollisionSystem` now calls `game.spawnDamageNumber()` for each enemy hit by splash AoE, not just the primary target. Players can now see damage feedback for area-of-effect hits.
+
+*Last updated by agent — 2026-03-09. Bug fix batch: barrier wiring, double-kill guard, interface sync, alpha fix, coin multiplier cleanup, constants extraction, splash damage numbers.*
+
+### 2026-03-09 — Playtesting Feedback: Visuals, Balance, Dash Overhaul
+
+1. **Player engine glow changed from gold to cyan** — `COLORS.engineGlow` changed from `#ffcc00` to `#00ccff` to match the player's cyan theme. Affects engine shadow, bomb countdown ring, and boss defeat title glow.
+
+2. **Swarm Attractor moved to early game** — `econ_swarm` upgrade changed from depth 3 (requires econ_magnet level 2, costs [100, 250]) to depth 1 (requires root, costs [15, 35]). Players can now buy +40% enemy spawn rate immediately for faster coin farming.
+
+3. **First boss auto-grants Dash Bomb** — When the level-1 boss is defeated and the player has no special ability yet, `bomb_dash` is auto-equipped instead of showing the 3-card selection screen. Subsequent boss kills still show the choice screen so players can switch.
+
+4. **Shooting stars more random in background** — p5.js shooting star spawner now uses wider position range (2–98% of screen vs 10–90%), wider angle range (−27° to +99° vs 14°–68°, allowing left-angled and more horizontal trajectories), wider speed range (7–20 vs 9–16), and wider tail lengths (60–250 vs 80–200).
+
+5. **Dash thruster animation** — Dashing now emits a directional particle burst behind the player (opposite of facing direction): 8 cyan engine-glow particles + 4 white core particles, creating a visible thruster flame trail at dash start.
+
+6. **Dash ripple ring restored** — Expanding cyan ring visual at dash origin point now renders again (was disabled). Ring fades out over 0.3s with decreasing line width for a clean ripple effect.
+
+7. **Dash fires cone weapon** — Dashing now triggers one free `fireConeWeapon()` hit, dealing normal pulse weapon damage to any enemies within CONE_RANGE at the player's current position. This makes dash offensive even without upgrades.
+
+*Last updated by agent — 2026-03-09. Playtesting feedback: visuals, balance, dash overhaul.*
+
+### 2026-03-09 — Upgrade Screen Visual Overhaul ("Constellation Map")
+
+Complete redesign of the upgrade screen UI from a flat programmer layout to a polished constellation-style skill map:
+
+1. **Backdrop: vignette over cosmic bg** — Replaced opaque dark overlay with a subtle `rgba(4,4,14,0.45)` wash + radial vignette (transparent center, darker edges). The p5.js Deep Field background now shows prominently through the upgrade tree.
+
+2. **Frosted header strip** — Replaced blocky panel title with a gradient-faded top strip (`rgba(6,8,22,0.8)` → transparent). Title "UPGRADE STATION" rendered with cyan text glow (`shadowBlur: 12`). Thin accent line at strip bottom.
+
+3. **Currency chips** — Replaced single text line with three pill-shaped chips (coins 💰, stars ⭐, level LV) using `drawChip()` — rounded rect with tinted bg and border per currency type.
+
+4. **Constellation connections** — Purchased paths: solid luminous lines with branch-colored glow (`shadowBlur: 6`) + wider faint core line. Unpurchased paths: animated dashed lines (`setLineDash([4,6])` with `lineDashOffset` cycling at 12px/s).
+
+5. **Node auras** — Each node state has a distinct radial gradient aura:
+   - Maxed: gold breathing aura (`rgba(255,210,0)`)
+   - Purchasable: white breathing aura
+   - Partially purchased: branch-colored soft aura
+   - Locked/unaffordable: no aura
+
+6. **Node bodies** — Dark disc with inner radial gradient (slightly lighter center). Three tint variants: warm dark for maxed, blue-dark for purchased, deep dark for unpurchased.
+
+7. **Ring states** — Clear visual hierarchy:
+   - Maxed: gold hexagonal border with shadowBlur
+   - In progress: branch-colored progress arc (partial circle, rounded lineCap)
+   - Purchasable: pulsing white ring
+   - Unlocked but can't afford: dim red ring
+   - Locked: very dim white ring
+
+8. **Root node** — Player sprite with rotating cyan ring segments (3 arcs, 120° apart, spinning at 0.5 rad/s). Cyan energy aura radiates outward.
+
+9. **Sparkle particles** — New particle system: maxed nodes emit ambient gold sparkles (rising, fading). Purchase triggers a 12-particle burst from the bought node.
+
+10. **Purchase flash** — Branch-colored expanding circle overlay that fades over 0.6s on successful purchase.
+
+11. **Contextual tooltips** — Repositioned from fixed bottom bar to floating panel near the hovered node. Features left accent bar in branch color, name, level badge, description, and status line. Auto-clamps to screen bounds.
+
+12. **Frosted bottom bar** — Gradient-faded bottom strip with pulsing START RUN button (cyan glow oscillates), styled MENU and PRESTIGE buttons.
+
+13. **Cost badges** — Affordable unpurchased nodes show coin cost below the node (`10💰`).
+
+14. **Node radius increased** — `NODE_RADIUS` from 20 → 22 for better tap targets and visual presence.
+
+*Last updated by agent — 2026-03-09. Upgrade screen constellation map overhaul.*
+
+### 2026-03-09 — Cone Attack Overhaul, Boss Variants, Pulse Enemy Ships
+
+1. **Cone attack made more prominent — visual splash + reverb SFX**
+   - **Visual overhaul**: Replaced the subtle white flash with a full shockwave system:
+     - Expanding cyan shockwave ring with `shadowBlur` glow, fading out over 0.18s
+     - Inner white ring for depth
+     - Central radial gradient splash fill (cyan → transparent)
+     - 12 radial spike lines that rotate during expansion for a "splash" feel
+     - Loader ring changed from white to cyan (`COLORS.player`), now gets brighter as it fills
+     - Pre-fire glow: subtle ambient radial gradient appears when loader is >75% full
+   - **Particle upgrade**: Each hit now emits 5 cyan + 2 white particles (was 3 white). 16 directional ring particles expand outward from player on every fire. 6 white inner burst particles.
+   - **Screen shake**: 1.5px shake on every cone hit (not just kills)
+   - **SFX reverb**: `playConeBlast()` completely rebuilt with 4 audio layers:
+     - Punchy sawtooth thump (220→60 Hz, lowpass filtered 600→100 Hz)
+     - Sub bass thud (80→25 Hz sine)
+     - Noise burst reverb tail (bandpass 300 Hz, exponential decay over 0.35s)
+     - High shimmer ring (1200→400 Hz sine, 0.18s)
+
+2. **Boss variants for levels 2–4 (bee → butterfly → cycling)**
+   - `spawnMegaRock()` renamed to `spawnBoss()` with level-based variant selection:
+     - **Level 1**: Mega asteroid boss (unchanged)
+     - **Level 2**: Bee boss (`enemy-bee.svg`) — fast (35 speed), shoots, radius 20, 15 coins
+     - **Level 3**: Butterfly boss (`enemy-butterfly.svg`) — tanky (1.5× HP), shoots, radius 24, 20 coins
+     - **Level 4+**: Alternating bee/butterfly with scaling HP (2×), speed (30 + level×2), radius (22 + level)
+   - `EnemyShip` now has `variant` field (`"normal" | "pulse" | "bee" | "butterfly" | "boss"`)
+   - Sprite-based rendering for non-normal variants using `ShipImages.enemyBee`, `enemyButterfly`, `enemy` (pulse)
+   - Each variant has unique glow color (bee=gold, butterfly=purple, boss=red, pulse=cyan)
+   - Boss ships render a pulsing aura ring in their variant color
+   - `isBoss` flag added to `Enemy` base class for shared boss logic
+   - `bossEnemy` type widened from `Rock | null` to `Rock | EnemyShip | null` in both `Game.ts` and `IGame`
+
+3. **Pulse-enemy-ships introduced at level 3**
+   - 35% chance to spawn as "pulse" variant when level ≥ 3 (instead of normal enemy ship)
+   - **Really fast**: speed = `ENEMY_SHIP_BASE_SPEED × 3 + level × 4` (~75+ px/s at lvl 3)
+   - **Fragile**: HP = `ENEMY_SHIP_BASE_HP - 1` (3 HP) — glass cannon
+   - **Melee only**: `canShoot = false` — they ram toward the mothership
+   - Uses `pulse-enemy-ship.svg` sprite with cyan glow halo
+   - Coin value = 1 (low reward for low threat individually, but dangerous in swarms)
+   - Cannot be elite (elite check skipped for pulse variants)
+
+*Last updated by agent — 2026-03-09. Cone attack overhaul + boss variants + pulse enemy ships.*
+
+### 2026-03-09 — Playtesting Fixes: Ribbons, Hitbox, Boss Rewards, Joystick
+
+1. **Background aurora ribbons fade much slower** — `auroraPulse` cycle changed from `PI/120` (2s full cycle) to `PI/600` (10s full cycle) with softer exponent (1.6→1.2). Ribbons now breathe slowly instead of visibly flickering on/off.
+
+2. **Big rock hitbox increased** — `ROCK_BIG_SIZE` increased from 16px to 22px in Constants.ts. Big rocks now have a collision radius that better matches their visual sprite (drawn at `radius * 3.5 = 77px`). Players should no longer feel like bullets pass through visible rock.
+
+3. **Boss rewards auto-granted per level** — Boss defeat no longer only triggers on level 1. All boss kills now advance `currentLevel`, grant a star coin, and transition to the boss reward screen:
+   - **Boss 1** (mega asteroid): Auto-grants **Dash Bomb** (unchanged)
+   - **Boss 2** (bee): Auto-grants **Targeting Laser**
+   - **Boss 3** (butterfly): Auto-grants **Dash Bomb** (bomb at end of dash)
+   - **Boss 4+**: Shows the 3-card choice screen so players can switch abilities
+
+4. **Joystick clamped to screen bounds** — Virtual joystick base position is now clamped with `JOYSTICK_RADIUS + 16px` padding from all screen edges. Touching near the far left, right, top, or bottom of the screen no longer creates a joystick base that's partially or fully off-screen.
+
+5. **Dash bomb now spawns at landing point** — `bomb_dash` ability previously placed the bomb at the dash origin (where you started). Now calculates the dash landing position (`origin + dashDir × dashDist`, clamped to screen bounds) and spawns the bomb there, matching the card description "Dash drops a bomb at landing point".
+
+*Last updated by agent — 2026-03-09. Playtesting fixes: ribbons, hitbox, boss rewards, joystick.*
+
+---
+
+### 2026-03-09 — Mobile Settings Cog Scale-Up
+
+1. **Bigger settings cog icon** — Gear inner radius increased from 7→11px, tooth outer radius from 10→16px, center hole from 3.5→5.5px. The cog is now ~60% larger and much easier to see on mobile screens.
+
+2. **Moved further right** — Button position shifted from `GAME_WIDTH - 44` to `GAME_WIDTH - 52` with increased hit area (36×32 → 48×44px). Sits closer to the screen edge for easier thumb access.
+
+*Last updated by agent — 2026-03-09. Mobile settings cog scale-up.*
+
+### 2026-03-09 — Boss Reward Flow + Tutorial Overhaul
+
+1. **Boss reward shows actual ability card** — Bosses 1-3 now show a single centered reward card with the auto-granted ability (icon, name, description, "✓ EQUIPPED" badge) instead of the confusing 3-card choice screen. Boss 4+ still shows the 3-card choice.
+
+2. **Boss reward → upgrades directly (Bug #10 fix)** — Both auto-granted rewards and manual choice now go straight to the upgrade screen via `manager.goToUpgradeScreen()`. Eliminated the unnecessary "Round Complete" gameover screen between boss defeat and upgrades.
+
+3. **Tutorial condensed to single screen** — Replaced the old 2-step text-heavy tutorial with a single visual "CONTROLS" screen showing:
+   - Simulated player ship in center with pulse ring
+   - Animated joystick on left (thumb circling) with "DRAG TO MOVE" label
+   - Animated dash button on right with EMP ripple and "TELEPORT + EMP" label  
+   - Dashed arrow connecting joystick to player
+   - Bottom info strip: "Auto-fires to the beat • Destroy enemies → Coins → Upgrade"
+   - Single "GOT IT — LET'S GO!" button (no more 2-step progression)
+
+*Last updated by agent — 2026-03-09. Boss reward flow + tutorial overhaul.*
+
+## TODO — Deferred
+
+- [ ] **Interactive tutorial demo** — Let the user practice movement with the real joystick and dash on a safe target before starting. Lower priority now that the visual tutorial shows the actual controls layout.

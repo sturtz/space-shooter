@@ -159,8 +159,8 @@ export class Player extends Entity {
     // ship-glider.svg — nose points up (north) in SVG space.
     // rotate(angle + Math.PI/2) maps north → aim direction correctly.
     // spaceship.svg has a square viewBox — use equal W and H.
-    const SPRITE_W = 10; // display size in game-pixels
-    const SPRITE_H = 14.75; // starfighter-r2 viewBox is 208×304 → 40×59
+    const SPRITE_W = 16; // display size in game-pixels (scaled up for mobile)
+    const SPRITE_H = 23.6; // starfighter-r2 viewBox is 208×304 → aspect preserved
 
     // ── DASH (no flash — just render with cyan glow) ────────────
     if (this.isDashing) {
@@ -193,10 +193,15 @@ export class Player extends Entity {
     ctx.rotate(this.angle + Math.PI / 2); // rotate sprite to face aim direction
 
     if (sprite) {
-      // Add a subtle engine-glow halo when moving
-      if (this.isMoving) {
+      // Dash-ready pulsing glow — ship breathes bright when dash is available
+      if (this.dashReady) {
+        const pulse = (Math.sin((performance.now() / 1000) * 3) + 1) / 2;
+        ctx.shadowColor = COLORS.player;
+        ctx.shadowBlur = 12 + pulse * 14;
+      } else if (this.isMoving) {
+        // Subtle engine-glow halo when moving (dash on cooldown)
         ctx.shadowColor = COLORS.engineGlow;
-        ctx.shadowBlur = 10;
+        ctx.shadowBlur = 6;
       }
       ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
       ctx.shadowBlur = 0;

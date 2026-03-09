@@ -228,8 +228,13 @@
       function bgDrawAuroras() {
         let intensity = bgParams.auroraIntensity;
         if (intensity < 0.01) return;
+        // Dim aurora during active gameplay so it doesn't distract
+        let gameCanvas = document.getElementById("game-canvas");
+        if (gameCanvas && gameCanvas.style.display !== "none") {
+          intensity *= 0.25; // 75% dimmer during gameplay
+        }
         let t = bgTicker * 0.001;
-        let auroraPulse = 0.22 + 0.78 * pow(abs(sin((bgTicker * PI) / 120)), 1.6);
+        let auroraPulse = 0.22 + 0.78 * pow(abs(sin((bgTicker * PI) / 600)), 1.2);
 
         for (let ribbon of bgAuroraRibbons) {
           let col = bgHexRGB(bgParams["color" + ribbon.colorKey]);
@@ -291,11 +296,12 @@
       }
 
       function bgSpawnShootingStar() {
-        let startX = random(BG_CW * 0.1, BG_CW * 0.9);
-        let startY = random(BG_CH * 0.05, BG_CH * 0.55);
-        let angle = random(PI * 0.08, PI * 0.38);
-        let speed = random(9, 16);
-        let len = random(80, 200);
+        let startX = random(BG_CW * 0.02, BG_CW * 0.98);
+        let startY = random(BG_CH * 0.02, BG_CH * 0.65);
+        // Wider angle range: can go down-left, down-right, or nearly horizontal
+        let angle = random(-PI * 0.15, PI * 0.55);
+        let speed = random(7, 20);
+        let len = random(60, 250);
         bgShootingStars.push({
           x: startX,
           y: startY,

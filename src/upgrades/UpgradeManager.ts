@@ -40,8 +40,10 @@ export interface PlayerStats {
   // === Economy ===
   roundDuration: number;
   coinMagnetRange: number;
-  coinValueMultiplier: number;
-  coinDropMultiplier: number;
+  /** Flat extra coins per kill from econ_value upgrade */
+  extraCoinPerKill: number;
+  /** Round-end bonus: multiply total round coins by (1 + this) */
+  roundCoinBonus: number;
   enemySpawnMultiplier: number;
   // === Kept for compatibility (unused since player is invincible) ===
   bulletSpeed: number;
@@ -137,9 +139,10 @@ export class UpgradeManager {
     const starArmor = Math.max(0.1, 1 - this.getStarLevel("star_armor") * 0.15);
 
     // ── DAMAGE ────────────────────────────────────────────────────────────
-    // dmg_core: +30% per level (max 3)
-    let damage = PLAYER_BASE_DAMAGE;
-    damage *= 1 + this.getLevel("dmg_core") * 0.3;
+    // dmg_core: explicit progression 1→2→3→5
+    const dmgCoreLevel = this.getLevel("dmg_core");
+    const DMG_TABLE = [1, 2, 3, 5]; // level 0,1,2,3
+    let damage = DMG_TABLE[Math.min(dmgCoreLevel, DMG_TABLE.length - 1)];
     damage *= starPower;
 
     // ── CRIT ─────────────────────────────────────────────────────────────
@@ -227,9 +230,13 @@ export class UpgradeManager {
     coinMagnetRange += this.getLevel("econ_magnet") * 20;
 
     // ── COIN VALUE ────────────────────────────────────────────────────────
-    // econ_value: +25% per level (max 3) → max +75%
-    let coinValueMult = 1 + this.getLevel("econ_value") * 0.25;
-    coinValueMult *= starFortune;
+    // econ_value: +1 extra coin per kill per level (max 3)
+    const extraCoinPerKill = this.getLevel("econ_value");
+
+    // ── ROUND COIN BONUS ──────────────────────────────────────────────────
+    // econ_combo: +10% round-end coin bonus per level (max 3) → max +30%
+    // Star fortune multiplies the bonus
+    const roundCoinBonus = this.getLevel("econ_combo") * 0.1 * starFortune;
 
     // ── ENEMY SPAWN ───────────────────────────────────────────────────────
     // Natural level scaling: +50% per game level
@@ -271,8 +278,8 @@ export class UpgradeManager {
       // Economy
       roundDuration,
       coinMagnetRange,
-      coinValueMultiplier: coinValueMult,
-      coinDropMultiplier: coinValueMult,
+      extraCoinPerKill,
+      roundCoinBonus,
       enemySpawnMultiplier: enemySpawnMult,
       timePenaltyPerHit: timePenalty,
       // Compat stubs (player is invincible — these are all inactive)

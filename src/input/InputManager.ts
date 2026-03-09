@@ -36,6 +36,18 @@ export class InputManager {
   mouseDown: boolean = false;
   private canvas: HTMLCanvasElement;
 
+  /** Coordinate transform — set by Game from Renderer.gameOffsetX/Y/gameScale */
+  private _gameOffsetX = 0;
+  private _gameOffsetY = 0;
+  private _gameScale = 1;
+
+  /** Call after renderer.resize() to keep input mapping in sync */
+  setCoordTransform(offsetX: number, offsetY: number, scale: number) {
+    this._gameOffsetX = offsetX;
+    this._gameOffsetY = offsetY;
+    this._gameScale = scale;
+  }
+
   // Touch / Mobile support
   isTouchDevice: boolean = false;
   dashRequested: boolean = false;
@@ -88,10 +100,10 @@ export class InputManager {
     };
 
     this.onMouseMove = (e: MouseEvent) => {
-      const rect = canvas.getBoundingClientRect();
-      const scaleX = GAME_WIDTH / rect.width;
-      const scaleY = GAME_HEIGHT / rect.height;
-      this.mousePos = vec2((e.clientX - rect.left) * scaleX, (e.clientY - rect.top) * scaleY);
+      this.mousePos = vec2(
+        (e.clientX - this._gameOffsetX) / this._gameScale,
+        (e.clientY - this._gameOffsetY) / this._gameScale
+      );
     };
 
     this.onMouseDown = (e: MouseEvent) => {
@@ -125,15 +137,18 @@ export class InputManager {
             this.touchDashId = touch.identifier;
             this.dashRequested = true;
           }
-        } else if (gameX < GAME_WIDTH * 0.5) {
-          // Left half → joystick
+        } else if (gameX < GAME_WIDTH * 0.75 || gameY < GAME_HEIGHT * 0.6) {
+          // Most of screen → joystick (excludes only dash zone)
           if (this.touchMoveId === null) {
             this.touchMoveId = touch.identifier;
             this.touchTargetActive = true;
-            // Place joystick base at touch point
+            // Place joystick base at touch point, clamped so it doesn't go off-screen
+            const pad = this.JOYSTICK_RADIUS + 16; // extra padding for thumb visual
+            const clampedX = Math.max(pad, Math.min(GAME_WIDTH - pad, gameX));
+            const clampedY = Math.max(pad, Math.min(GAME_HEIGHT - pad, gameY));
             this.joystick.active = true;
-            this.joystick.baseX = gameX;
-            this.joystick.baseY = gameY;
+            this.joystick.baseX = clampedX;
+            this.joystick.baseY = clampedY;
             this.joystick.thumbX = gameX;
             this.joystick.thumbY = gameY;
             this.joystick.dirX = 0;
@@ -216,14 +231,17 @@ export class InputManager {
     canvas.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
   }
 
-  /** Convert a Touch event to game coordinates */
+  /** Convert a Touch event to game coordinates (clamped to game area) */
   private touchToGame(touch: Touch): { gameX: number; gameY: number } {
-    const rect = this.canvas.getBoundingClientRect();
-    const scaleX = GAME_WIDTH / rect.width;
-    const scaleY = GAME_HEIGHT / rect.height;
     return {
-      gameX: (touch.clientX - rect.left) * scaleX,
-      gameY: (touch.clientY - rect.top) * scaleY,
+      gameX: Math.max(
+        0,
+        Math.min(GAME_WIDTH, (touch.clientX - this._gameOffsetX) / this._gameScale)
+      ),
+      gameY: Math.max(
+        0,
+        Math.min(GAME_HEIGHT, (touch.clientY - this._gameOffsetY) / this._gameScale)
+      ),
     };
   }
 

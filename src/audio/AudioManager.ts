@@ -4,7 +4,7 @@ import type { MusicTrack } from "../utils/SaveManager";
 
 /** Track metadata: file path + BPM for beat sync */
 const TRACK_INFO: Record<MusicTrack, { src: string; bpm: number; beatOffset: number }> = {
-  fire: { src: "./assets/sounds/fire.mp3", bpm: 100, beatOffset: 1.2 },
+  fire: { src: "./assets/sounds/fire.mp3", bpm: 100, beatOffset: 0.0 },
   chill: { src: "./assets/sounds/chill.mp3", bpm: 130, beatOffset: 0.0 },
   trap: { src: "./assets/sounds/trap.mp3", bpm: 130, beatOffset: 0.0 },
 };
@@ -25,6 +25,9 @@ export class AudioManager {
   private muted = false;
   private volumeBeforeMute = 0.07;
 
+  /** Optional callback when volume changes from HTML slider — used to persist to save */
+  onVolumeChange: ((volume: number) => void) | null = null;
+
   // Cone-attack music track state — synced to music currentTime
   private coneTrackPlaying = false;
   private coneTrackTimer: number | null = null;
@@ -33,7 +36,7 @@ export class AudioManager {
   private coneBeatIndex = 0;
 
   // Music-synced beat tracking (updated on track switch)
-  private musicBPM = 100;
+  private musicBPM = 100; // fire.mp3 = 100 BPM
   private beatOffset = 0;
   private lastMusicBeat = -1;
 
@@ -78,6 +81,7 @@ export class AudioManager {
         const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
         if (icon) icon.src = "./assets/items/volume-on.svg";
         this.setMusicVolume(parseFloat(slider.value));
+        if (this.onVolumeChange) this.onVolumeChange(this.musicEl.volume);
       });
     }
   }
@@ -89,9 +93,31 @@ export class AudioManager {
     return this.currentTrack;
   }
 
-  /** Get available track names */
+  /** Get available track names (always returns all three — UI decides which are locked) */
   get availableTracks(): MusicTrack[] {
     return ["fire", "chill", "trap"];
+  }
+
+  /** Check if a track is unlocked based on upgrade levels.
+   *  - fire: always unlocked
+   *  - chill: requires dmg_overclock >= 1 ("faster cone damage" / Scythe)
+   *  - trap: requires star prestige (prestigeCount >= 1)
+   */
+  isTrackUnlocked(
+    track: MusicTrack,
+    upgradeLevels: Record<string, number>,
+    prestigeCount: number
+  ): boolean {
+    switch (track) {
+      case "fire":
+        return true;
+      case "chill":
+        return (upgradeLevels["dmg_overclock"] ?? 0) >= 1;
+      case "trap":
+        return prestigeCount >= 1;
+      default:
+        return false;
+    }
   }
 
   /** Switch to a different music track. Preserves volume and playback state. */
@@ -154,6 +180,9 @@ export class AudioManager {
   setMusicVolume(v: number) {
     this.musicEl.volume = Math.max(0, Math.min(1, v));
     if (v > 0) this.volumeBeforeMute = v;
+    // Sync HTML slider if present
+    const slider = document.getElementById("music-volume") as HTMLInputElement | null;
+    if (slider) slider.value = String(this.musicEl.volume);
   }
 
   /** Get current music volume */
@@ -445,36 +474,76 @@ export class AudioManager {
     this.coneTrackTimer = requestAnimationFrame(() => this.scheduleMusicSyncLoop());
   }
 
-  /** One-shot cone blast SFX */
+  /** One-shot cone blast SFX with reverb splash — punchy synth hit + convolver tail */
   playConeBlast() {
     if (!this.ready) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
+
+    // ── Dry hit: punchy sawtooth thump ──
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
     osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(50, t + 0.2);
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.exponentialRampToValueAtTime(60, t + 0.15);
     filter.type = "lowpass";
-    filter.frequency.setValueAtTime(400, t);
-    gain.gain.setValueAtTime(0.18, t);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    filter.frequency.setValueAtTime(600, t);
+    filter.frequency.exponentialRampToValueAtTime(100, t + 0.2);
+    gain.gain.setValueAtTime(0.22, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(this.masterGain!);
     osc.start(t);
-    osc.stop(t + 0.28);
+    osc.stop(t + 0.22);
+
+    // ── Sub bass thud ──
     const sub = ctx.createOscillator();
     const subGain = ctx.createGain();
     sub.type = "sine";
-    sub.frequency.setValueAtTime(60, t);
-    sub.frequency.exponentialRampToValueAtTime(25, t + 0.2);
-    subGain.gain.setValueAtTime(0.2, t);
-    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.25);
+    sub.frequency.setValueAtTime(80, t);
+    sub.frequency.exponentialRampToValueAtTime(25, t + 0.18);
+    subGain.gain.setValueAtTime(0.28, t);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.2);
     sub.connect(subGain);
     subGain.connect(this.masterGain!);
     sub.start(t);
-    sub.stop(t + 0.28);
+    sub.stop(t + 0.22);
+
+    // ── Splash/reverb tail: noise burst through bandpass + delay feedback ──
+    const bufferSize = ctx.sampleRate * 0.35;
+    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const noiseData = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.08));
+    }
+    const noiseSrc = ctx.createBufferSource();
+    noiseSrc.buffer = noiseBuffer;
+    const noiseBand = ctx.createBiquadFilter();
+    noiseBand.type = "bandpass";
+    noiseBand.frequency.setValueAtTime(300, t);
+    noiseBand.Q.setValueAtTime(1.5, t);
+    const noiseGain = ctx.createGain();
+    noiseGain.gain.setValueAtTime(0.12, t);
+    noiseGain.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
+    noiseSrc.connect(noiseBand);
+    noiseBand.connect(noiseGain);
+    noiseGain.connect(this.masterGain!);
+    noiseSrc.start(t);
+    noiseSrc.stop(t + 0.35);
+
+    // ── High shimmer (metallic ring) ──
+    const shimmer = ctx.createOscillator();
+    const shimmerGain = ctx.createGain();
+    shimmer.type = "sine";
+    shimmer.frequency.setValueAtTime(1200, t);
+    shimmer.frequency.exponentialRampToValueAtTime(400, t + 0.15);
+    shimmerGain.gain.setValueAtTime(0.06, t);
+    shimmerGain.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
+    shimmer.connect(shimmerGain);
+    shimmerGain.connect(this.masterGain!);
+    shimmer.start(t);
+    shimmer.stop(t + 0.2);
   }
 }

@@ -82,8 +82,8 @@ export class Coin extends Entity {
     ctx.globalAlpha = baseAlpha;
 
     if (coinSprite) {
-      // Draw sprite — scale high-value coins slightly bigger
-      const drawSize = this.value >= 5 ? COIN_SIZE * 3 : COIN_SIZE * 2.5;
+      // Draw sprite — scaled up for mobile readability; high-value coins slightly bigger
+      const drawSize = this.value >= 5 ? COIN_SIZE * 4.5 : COIN_SIZE * 3.5;
       ctx.drawImage(coinSprite, drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
 
       // Gold/purple tint overlay for high-value coins

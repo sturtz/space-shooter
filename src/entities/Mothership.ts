@@ -8,6 +8,7 @@ export class Mothership extends Entity {
   hp: number;
   damageFlash: number = 0;
   pulseTimer: number = 0;
+  spinAngle: number = 0;
   /** True once HP hits 0 — plays the death gif overlay */
   isDestroyed: boolean = false;
   deathAnimTimer: number = 0;
@@ -37,6 +38,7 @@ export class Mothership extends Entity {
 
   update(dt: number) {
     this.pulseTimer += dt;
+    this.spinAngle += dt * 0.5; // slow continuous spin (~0.5 rad/s)
     if (this.damageFlash > 0) {
       this.damageFlash -= dt;
     }
@@ -55,7 +57,7 @@ export class Mothership extends Entity {
 
     ctx.save();
 
-    // Draw sprite
+    // Draw sprite with spin
     const sprite = ShipImages.mothership;
     if (imageReady(sprite)) {
       const size = SPRITE_SIZE * pulseScale;
@@ -66,14 +68,18 @@ export class Mothership extends Entity {
         ctx.shadowColor = COLORS.mothership;
         ctx.shadowBlur = 10;
       }
-      ctx.drawImage(sprite, cx - size / 2, cy - size / 2, size, size);
+      ctx.translate(cx, cy);
+      ctx.rotate(this.spinAngle);
+      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
       if (this.damageFlash > 0) {
         ctx.globalCompositeOperation = "source-atop";
         ctx.fillStyle = "rgba(255,68,68,0.5)";
-        ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
+        ctx.fillRect(-size / 2, -size / 2, size, size);
         ctx.globalCompositeOperation = "source-over";
       }
       ctx.shadowBlur = 0;
+      ctx.rotate(-this.spinAngle);
+      ctx.translate(-cx, -cy);
     } else {
       // Fallback: simple circle
       ctx.strokeStyle = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;

@@ -1,7 +1,7 @@
 import { IGame } from "../game/GameInterface";
 import { Enemy } from "../entities/Enemy";
 import { Vec2, vecDist, circleCollision, randomAngle } from "../utils/Math";
-import { COIN_SIZE, COLORS } from "../utils/Constants";
+import { COIN_SIZE, COLORS, CHAIN_RANGE, SPLASH_DAMAGE_MULT } from "../utils/Constants";
 
 /**
  * Handles all collision detection and resolution, extracted from Game.ts.
@@ -20,7 +20,7 @@ export class CollisionSystem {
         if (circleCollision(bullet.pos, bullet.radius, enemy.pos, enemy.radius)) {
           const killed = enemy.takeDamage(bullet.damage);
 
-          // Always show damage number (Bug #3 fix — show on killing hit too)
+          // Always show damage number
           game.spawnDamageNumber(bullet.pos.x, bullet.pos.y, bullet.damage, bullet.isCrit);
 
           // Apply poison debuff
@@ -40,13 +40,16 @@ export class CollisionSystem {
             game.particles.emit(bullet.pos, 3, COLORS.bullet, 40, 0.2, 1);
           }
 
-          // Splash damage — triggers on every hit, not just kills (Issue #16 fix)
+          // Splash damage — triggers on every hit, not just kills
           if (game.stats.splashRadius > 0) {
+            const splashDmg = bullet.damage * SPLASH_DAMAGE_MULT;
             for (const other of game.enemies) {
               if (!other.alive || other === enemy) continue;
               if (vecDist(enemy.pos, other.pos) < game.stats.splashRadius) {
-                const splashDmg = bullet.damage * 0.5;
-                if (other.takeDamage(splashDmg)) {
+                const splashKilled = other.takeDamage(splashDmg);
+                // Bug #14 fix: show damage numbers for splash hits too
+                game.spawnDamageNumber(other.pos.x, other.pos.y, splashDmg, false);
+                if (splashKilled) {
                   game.onEnemyKilled(other);
                 }
               }
@@ -58,7 +61,7 @@ export class CollisionSystem {
             this.chainLightning(
               game,
               enemy.pos,
-              bullet.damage * 0.5,
+              bullet.damage * SPLASH_DAMAGE_MULT,
               game.stats.chainTargets,
               enemy
             );
@@ -88,7 +91,7 @@ export class CollisionSystem {
 
     while (remaining > 0) {
       let closest: Enemy | null = null;
-      let closestDist = 120; // max chain range
+      let closestDist = CHAIN_RANGE;
 
       for (const enemy of game.enemies) {
         if (!enemy.alive || hit.has(enemy)) continue;
@@ -124,13 +127,24 @@ export class CollisionSystem {
     }
   }
 
-  /** Enemies colliding with mothership */
+  /**
+   * Enemies colliding with mothership.
+   * Bug #1 fix: barrier is checked before applying damage — if the barrier
+   * absorbs the hit, no HP is lost and no time penalty is applied.
+   */
   checkEnemyMothershipCollisions(game: IGame): boolean {
     for (const enemy of game.enemies) {
       if (!enemy.alive) continue;
       if (circleCollision(enemy.pos, enemy.radius, game.mothership.pos, game.mothership.radius)) {
         enemy.destroy();
         game.particles.emit(enemy.pos, 8, COLORS.mothershipDamaged, 80, 0.3, 2);
+
+        // Barrier absorbs the hit if active
+        if (game.spawner.barrierAbsorb()) {
+          game.particles.emit(enemy.pos, 6, COLORS.shield, 60, 0.2, 1.5);
+          game.renderer.shake(2);
+          continue; // hit absorbed — no damage, no time penalty
+        }
 
         const destroyed = game.mothership.takeDamage(1);
         game.roundTimer -= game.stats.timePenaltyPerHit;
@@ -150,6 +164,14 @@ export class CollisionSystem {
       if (circleCollision(bullet.pos, bullet.radius, game.mothership.pos, game.mothership.radius)) {
         bullet.destroy();
         game.particles.emit(bullet.pos, 5, COLORS.mothershipDamaged, 60, 0.2, 1.5);
+
+        // Barrier absorbs the hit if active
+        if (game.spawner.barrierAbsorb()) {
+          game.particles.emit(bullet.pos, 4, COLORS.shield, 40, 0.15, 1);
+          game.renderer.shake(2);
+          continue; // hit absorbed
+        }
+
         const destroyed = game.mothership.takeDamage(1);
         game.roundTimer -= game.stats.timePenaltyPerHit;
         game.renderer.shake(4);
@@ -179,7 +201,15 @@ export class CollisionSystem {
         game.roundCoins += value;
         game.save.coins += value;
         game.save.lifetimeCoins += value;
-        game.particles.emit(coin.pos, 4, COLORS.coin, 30, 0.2, 1);
+
+        // Juicy coin pickup feedback — more particles, bigger burst, rising "+N" text
+        const isRare = coin.value >= 5;
+        const particleColor = isRare ? COLORS.coinRare : COLORS.coin;
+        game.particles.emit(coin.pos, isRare ? 12 : 8, particleColor, isRare ? 60 : 45, 0.3, 1.5);
+        // Extra white sparkle ring
+        game.particles.emit(coin.pos, 4, "#ffffff", 35, 0.15, 0.8);
+        // Show coin value as floating number
+        game.spawnDamageNumber(coin.pos.x, coin.pos.y - 5, value, isRare);
         game.audio.playCoinPickup();
       }
     }

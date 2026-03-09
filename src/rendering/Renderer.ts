@@ -10,6 +10,12 @@ export class Renderer {
   /** Device pixel ratio — set once at init, updated on resize */
   private dpr = 1;
 
+  /** Pixel offset of the game area within the full-viewport canvas (for input mapping) */
+  gameOffsetX = 0;
+  gameOffsetY = 0;
+  /** CSS display scale of the game area (game-coords → CSS pixels) */
+  gameScale = 1;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
@@ -20,42 +26,42 @@ export class Renderer {
     const dpr = Math.min(window.devicePixelRatio || 1, 3); // cap at 3× to avoid VRAM issues
     this.dpr = dpr;
 
-    // Compute the largest size that fits the viewport while keeping 1200x800 aspect ratio
-    const container = this.canvas.parentElement;
-    let availW: number;
-    let availH: number;
-    if (container) {
-      const style = window.getComputedStyle(container);
-      availW =
-        container.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
-      availH =
-        container.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom);
-    } else {
-      availW = window.innerWidth;
-      availH = window.innerHeight;
+    // Canvas fills the entire viewport for edge-to-edge touch
+    const vpW = window.innerWidth;
+    const vpH = window.innerHeight;
+
+    // Physical pixel buffer = full viewport × dpr
+    this.canvas.width = Math.round(vpW * dpr);
+    this.canvas.height = Math.round(vpH * dpr);
+
+    // CSS display size = full viewport
+    this.canvas.style.width = `${vpW}px`;
+    this.canvas.style.height = `${vpH}px`;
+
+    // Compute the largest 1200×800 area that fits, centered within the viewport
+    const aspect = GAME_WIDTH / GAME_HEIGHT; // 1.5
+    let gameW = vpW;
+    let gameH = vpW / aspect;
+    if (gameH > vpH) {
+      gameH = vpH;
+      gameW = vpH * aspect;
     }
 
-    const aspect = GAME_WIDTH / GAME_HEIGHT; // 1200/800 = 1.5
-    let displayW = availW;
-    let displayH = availW / aspect;
-    if (displayH > availH) {
-      displayH = availH;
-      displayW = availH * aspect;
-    }
+    // Offset to center the game area
+    const offsetX = (vpW - gameW) / 2;
+    const offsetY = (vpH - gameH) / 2;
 
-    // Physical pixel buffer = display size × dpr (for sharpness on Retina / hi-DPI)
-    this.canvas.width = Math.round(displayW * dpr);
-    this.canvas.height = Math.round(displayH * dpr);
+    // Store for input coordinate mapping
+    this.gameOffsetX = offsetX;
+    this.gameOffsetY = offsetY;
+    this.gameScale = gameW / GAME_WIDTH;
 
-    // CSS display size — exact fit, centered by flex parent
-    this.canvas.style.width = `${Math.round(displayW)}px`;
-    this.canvas.style.height = `${Math.round(displayH)}px`;
-
-    // Scale context so all game-coordinate drawing (0..GAME_WIDTH, 0..GAME_HEIGHT)
-    // maps correctly onto the hi-res physical buffer
-    const scaleX = (displayW * dpr) / GAME_WIDTH;
-    const scaleY = (displayH * dpr) / GAME_HEIGHT;
-    this.ctx.setTransform(scaleX, 0, 0, scaleY, 0, 0);
+    // Scale context: translate to center, then scale game coords → physical pixels
+    const scaleX = (gameW * dpr) / GAME_WIDTH;
+    const scaleY = (gameH * dpr) / GAME_HEIGHT;
+    const txPx = offsetX * dpr;
+    const tyPx = offsetY * dpr;
+    this.ctx.setTransform(scaleX, 0, 0, scaleY, txPx, tyPx);
 
     this.ctx.imageSmoothingEnabled = false;
   }

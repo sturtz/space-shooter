@@ -26,7 +26,8 @@ export class HUD {
     // TOP BAR — Timer + Level + Coins
     // ═══════════════════════════════════════════════════════════
     const topBarH = 32;
-    renderer.drawPanel(pad, pad, GAME_WIDTH - pad * 2, topBarH, {
+    const pauseSpace = 80; // leave room for pause button on right
+    renderer.drawPanel(pad, pad, GAME_WIDTH - pad * 2 - pauseSpace, topBarH, {
       bg: "rgba(6, 6, 18, 0.82)",
       border: "rgba(40, 60, 100, 0.35)",
       radius: 6,
@@ -57,7 +58,7 @@ export class HUD {
     // Timer bar (center)
     const timerRatio = Math.max(0, data.roundTimer / data.roundDuration);
     const timerBarX = pad + lvlW + 14;
-    const timerBarW = GAME_WIDTH - pad * 2 - lvlW - 14 - 100;
+    const timerBarW = GAME_WIDTH - pad * 2 - pauseSpace - lvlW - 14 - 100;
     const timerBarY = pad + 9;
     const timerBarH = 14;
     const timerColorStart = timerRatio > 0.3 ? COLORS.timerGradA : COLORS.timerLowA;
@@ -86,7 +87,7 @@ export class HUD {
     ctx.restore();
 
     // Coins (right)
-    const coinX = GAME_WIDTH - pad - 6;
+    const coinX = GAME_WIDTH - pad - pauseSpace - 6;
     ctx.save();
     ctx.font = `bold 11px Tektur`;
     ctx.fillStyle = COLORS.textGold;
@@ -98,74 +99,7 @@ export class HUD {
     ctx.fillText(`+${data.roundCoins}`, coinX, pad + topBarH / 2 + 10);
     ctx.restore();
 
-    // ═══════════════════════════════════════════════════════════
-    // LEFT PANEL — Dash indicator
-    // ═══════════════════════════════════════════════════════════
-    const leftPanelX = pad;
-    const leftPanelY = pad + topBarH + 6;
-    const leftPanelW = 140;
-    const leftPanelH = 30;
-
-    renderer.drawPanel(leftPanelX, leftPanelY, leftPanelW, leftPanelH, {
-      bg: "rgba(6, 6, 18, 0.75)",
-      border: "rgba(50, 30, 30, 0.3)",
-      radius: 6,
-    });
-
-    // Dash indicator
-    const dashSize = 8;
-    const dashCenterX = leftPanelX + 14;
-    const dashCenterY = leftPanelY + 6 + dashSize;
-
-    if (data.dashReady) {
-      ctx.save();
-      ctx.globalAlpha = 0.4;
-      ctx.fillStyle = COLORS.dashReady;
-      ctx.beginPath();
-      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-      ctx.strokeStyle = COLORS.dashReady;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.save();
-      ctx.font = `bold 8px Tektur`;
-      ctx.fillStyle = COLORS.dashReady;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText("DASH", dashCenterX + dashSize + 5, dashCenterY);
-      ctx.restore();
-    } else {
-      ctx.save();
-      ctx.globalAlpha = 0.2;
-      ctx.strokeStyle = "#555";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(dashCenterX, dashCenterY, dashSize, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.7;
-      ctx.strokeStyle = COLORS.dashReady;
-      ctx.lineWidth = 2;
-      const arc = data.dashCooldownRatio * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(dashCenterX, dashCenterY, dashSize, -Math.PI / 2, -Math.PI / 2 + arc);
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.restore();
-
-      const pct = Math.floor(data.dashCooldownRatio * 100);
-      ctx.save();
-      ctx.font = `bold 8px Tektur`;
-      ctx.fillStyle = COLORS.dashCooldown;
-      ctx.textAlign = "left";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${pct}%`, dashCenterX + dashSize + 5, dashCenterY);
-      ctx.restore();
-    }
+    // Dash indicator removed — ship glow/pulse communicates dash readiness
 
     // ═══════════════════════════════════════════════════════════
     // BOTTOM AREA — Streak + Kills

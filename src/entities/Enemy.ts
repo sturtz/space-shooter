@@ -13,6 +13,7 @@ export abstract class Enemy extends Entity {
   targetPos: Vec2;
   coinValue: number;
   isElite: boolean = false;
+  isBoss: boolean = false;
 
   // Debuff state
   poisonTimer: number = 0;

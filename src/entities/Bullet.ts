@@ -93,13 +93,13 @@ export class Bullet extends Entity {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Bullet core - crisp pixel rectangle
+    // Bullet core - scaled up pixel rectangle for mobile
     ctx.fillStyle = color;
-    ctx.fillRect(-2, -1.5, 5, 3);
+    ctx.fillRect(-3, -2.5, 8, 5);
 
     // Bright leading edge
     ctx.fillStyle = COLORS.textPrimary;
-    ctx.fillRect(2, -1, 2, 2);
+    ctx.fillRect(3, -1.5, 3, 3);
 
     // Crit glow outline
     if (this.isCrit) {
