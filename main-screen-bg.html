@@ -1,0 +1,977 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deep Field — Space Shooter BG</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600&family=Lora:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+    <style>
+      :root {
+        --ao: #d97757;
+        --ab: #6a9bcc;
+        --ag: #788c5d;
+        --ad: #141413;
+        --al: #faf9f5;
+        --am: #b0aea5;
+        --alg: #e8e6dc;
+      }
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+      body {
+        font-family: "Tektur", sans-serif;
+        background: linear-gradient(135deg, var(--al) 0%, #f5f3ee 100%);
+        min-height: 100vh;
+        color: var(--ad);
+      }
+      .container {
+        display: flex;
+        min-height: 100vh;
+        padding: 20px;
+        gap: 20px;
+      }
+      .sidebar {
+        width: 286px;
+        flex-shrink: 0;
+        background: rgba(255, 255, 255, 0.95);
+        backdrop-filter: blur(10px);
+        padding: 22px;
+        border-radius: 12px;
+        box-shadow: 0 10px 30px rgba(20, 20, 19, 0.1);
+        overflow-y: auto;
+        overflow-x: hidden;
+      }
+      .sidebar h1 {
+        font-family: "Lora", serif;
+        font-size: 20px;
+        font-weight: 500;
+        margin-bottom: 5px;
+      }
+      .subtitle {
+        color: var(--am);
+        font-size: 12px;
+        margin-bottom: 24px;
+        line-height: 1.55;
+      }
+      .cs {
+        margin-bottom: 22px;
+      }
+      .cs h3 {
+        font-size: 13px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        display: flex;
+        align-items: center;
+        gap: 6px;
+      }
+      .cs h3::before {
+        content: "•";
+        color: var(--ao);
+      }
+      .seed-input {
+        width: 100%;
+        background: var(--al);
+        padding: 9px;
+        border-radius: 7px;
+        font-family: "Tektur", "Courier New", monospace;
+        font-size: 13px;
+        margin-bottom: 9px;
+        border: 1px solid var(--alg);
+        text-align: center;
+      }
+      .seed-input:focus {
+        outline: none;
+        border-color: var(--ao);
+      }
+      .sc {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 7px;
+        margin-bottom: 7px;
+      }
+      .cg {
+        margin-bottom: 15px;
+      }
+      .cg label {
+        display: block;
+        font-size: 12px;
+        font-weight: 500;
+        margin-bottom: 5px;
+      }
+      .slc {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+      }
+      .slc input[type="range"] {
+        flex: 1;
+        height: 4px;
+        background: var(--alg);
+        border-radius: 2px;
+        outline: none;
+        -webkit-appearance: none;
+        appearance: none;
+      }
+      .slc input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 14px;
+        height: 14px;
+        background: var(--ao);
+        border-radius: 50%;
+        cursor: pointer;
+      }
+      .slc input[type="range"]::-moz-range-thumb {
+        width: 14px;
+        height: 14px;
+        background: var(--ao);
+        border-radius: 50%;
+        border: none;
+        cursor: pointer;
+      }
+      .vd {
+        font-family: "Tektur", "Courier New", monospace;
+        font-size: 11px;
+        color: var(--am);
+        min-width: 40px;
+        text-align: right;
+      }
+      .colg {
+        margin-bottom: 12px;
+      }
+      .colg label {
+        display: block;
+        font-size: 11px;
+        color: var(--am);
+        margin-bottom: 3px;
+      }
+      .colp {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+      }
+      .colp input[type="color"] {
+        width: 28px;
+        height: 28px;
+        border: none;
+        border-radius: 5px;
+        cursor: pointer;
+        background: none;
+        padding: 0;
+      }
+      .colv {
+        font-family: "Tektur", "Courier New", monospace;
+        font-size: 11px;
+        color: var(--am);
+      }
+      .btn {
+        background: var(--ao);
+        color: white;
+        border: none;
+        padding: 8px 12px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: background 0.18s;
+        width: 100%;
+      }
+      .btn:hover {
+        background: #c86641;
+      }
+      .btn.b {
+        background: var(--ab);
+      }
+      .btn.b:hover {
+        background: #5a8bb8;
+      }
+      .btn.g {
+        background: var(--ag);
+      }
+      .btn.g:hover {
+        background: #6b7b52;
+      }
+      .br {
+        display: flex;
+        gap: 7px;
+      }
+      .br .btn {
+        flex: 1;
+      }
+      .canvas-area {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 0;
+      }
+      #cc {
+        width: 100%;
+        max-width: 960px;
+        border-radius: 12px;
+        overflow: hidden;
+        box-shadow: 0 20px 40px rgba(20, 20, 19, 0.2);
+        background: black;
+      }
+      #cc canvas {
+        display: block;
+        width: 100% !important;
+        height: auto !important;
+      }
+      .loading {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 14px;
+        color: #999;
+        padding: 50px;
+      }
+      @media (max-width: 700px) {
+        .container {
+          flex-direction: column;
+        }
+        .sidebar {
+          width: 100%;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="sidebar">
+        <h1>Deep Field</h1>
+        <div class="subtitle">
+          Ambient space art for the main menu. No enemies — just the cosmos.
+        </div>
+
+        <div class="cs">
+          <h3>Seed</h3>
+          <input
+            type="number"
+            id="seed-input"
+            class="seed-input"
+            value="42"
+            onchange="updateSeed()"
+          />
+          <div class="sc">
+            <button class="btn b" onclick="previousSeed()">&#8592; Prev</button>
+            <button class="btn b" onclick="nextSeed()">Next &#8594;</button>
+          </div>
+          <button class="btn g" onclick="randomSeedAndUpdate()">&#8635; Random</button>
+        </div>
+
+        <div class="cs">
+          <h3>Parameters</h3>
+          <div class="cg">
+            <label>Star Density</label>
+            <div class="slc">
+              <input
+                type="range"
+                id="starCount"
+                min="80"
+                max="600"
+                step="20"
+                value="320"
+                oninput="updateParam('starCount', parseInt(this.value), true)"
+              />
+              <span class="vd" id="starCount-value">320</span>
+            </div>
+          </div>
+          <div class="cg">
+            <label>Scroll Speed</label>
+            <div class="slc">
+              <input
+                type="range"
+                id="scrollSpeed"
+                min="0"
+                max="2"
+                step="0.05"
+                value="0.5"
+                oninput="updateParam('scrollSpeed', parseFloat(this.value))"
+              />
+              <span class="vd" id="scrollSpeed-value">0.5</span>
+            </div>
+          </div>
+          <div class="cg">
+            <label>Nebula Intensity</label>
+            <div class="slc">
+              <input
+                type="range"
+                id="nebulaIntensity"
+                min="0"
+                max="2"
+                step="0.05"
+                value="1.0"
+                oninput="updateParam('nebulaIntensity', parseFloat(this.value))"
+              />
+              <span class="vd" id="nebulaIntensity-value">1.0</span>
+            </div>
+          </div>
+          <div class="cg">
+            <label>Aurora Intensity</label>
+            <div class="slc">
+              <input
+                type="range"
+                id="auroraIntensity"
+                min="0"
+                max="2"
+                step="0.05"
+                value="0.85"
+                oninput="updateParam('auroraIntensity', parseFloat(this.value))"
+              />
+              <span class="vd" id="auroraIntensity-value">0.85</span>
+            </div>
+          </div>
+          <div class="cg">
+            <label>Scanline Opacity</label>
+            <div class="slc">
+              <input
+                type="range"
+                id="scanlineOpacity"
+                min="0"
+                max="0.5"
+                step="0.02"
+                value="0.1"
+                oninput="updateParam('scanlineOpacity', parseFloat(this.value))"
+              />
+              <span class="vd" id="scanlineOpacity-value">0.1</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cs">
+          <h3>Nebula Colors</h3>
+          <div class="colg">
+            <label>Cyan field</label>
+            <div class="colp">
+              <input
+                type="color"
+                id="colorA"
+                value="#00d4ff"
+                onchange="updateColor('colorA', this.value)"
+              />
+              <span class="colv" id="colorA-value">#00d4ff</span>
+            </div>
+          </div>
+          <div class="colg">
+            <label>Blue field</label>
+            <div class="colp">
+              <input
+                type="color"
+                id="colorB"
+                value="#4488ff"
+                onchange="updateColor('colorB', this.value)"
+              />
+              <span class="colv" id="colorB-value">#4488ff</span>
+            </div>
+          </div>
+          <div class="colg">
+            <label>Purple field</label>
+            <div class="colp">
+              <input
+                type="color"
+                id="colorC"
+                value="#aa44ff"
+                onchange="updateColor('colorC', this.value)"
+              />
+              <span class="colv" id="colorC-value">#aa44ff</span>
+            </div>
+          </div>
+          <div class="colg">
+            <label>Accent / title</label>
+            <div class="colp">
+              <input
+                type="color"
+                id="colorD"
+                value="#00d4ff"
+                onchange="updateColor('colorD', this.value)"
+              />
+              <span class="colv" id="colorD-value">#00d4ff</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="cs">
+          <h3>Actions</h3>
+          <div class="br">
+            <button class="btn" onclick="resetParameters()">Reset</button>
+            <button class="btn b" onclick="saveCanvas('deep-field-' + params.seed, 'png')">
+              Save PNG
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="canvas-area">
+        <div id="cc"><div class="loading">Initializing...</div></div>
+      </div>
+    </div>
+
+    <script>
+      // ─── PARAMS ───────────────────────────────────────────────────────────────────
+      let params = {
+        seed: 42,
+        starCount: 320,
+        scrollSpeed: 0.5,
+        nebulaIntensity: 1.0,
+        auroraIntensity: 0.85,
+        scanlineOpacity: 0.1,
+        colorA: "#00d4ff", // cyan
+        colorB: "#4488ff", // blue
+        colorC: "#aa44ff", // purple
+        colorD: "#00d4ff", // title/accent
+      };
+      const defaultParams = { ...params };
+      const CW = 1200,
+        CH = 800;
+
+      // ─── STATE ────────────────────────────────────────────────────────────────────
+      let stars = [];
+      let nebulaBlobs = [];
+      let auroraRibbons = [];
+      let shootingStars = [];
+      let dustMotes = [];
+      let ticker = 0;
+      let shootTimer = 0,
+        nextShoot = 300;
+
+      // ─── SETUP ───────────────────────────────────────────────────────────────────
+      function setup() {
+        let canvas = createCanvas(CW, CH);
+        canvas.parent("cc");
+        document.querySelector(".loading").style.display = "none";
+        frameRate(60);
+        initializeSystem();
+      }
+
+      function initializeSystem() {
+        randomSeed(params.seed);
+        noiseSeed(params.seed);
+        stars = [];
+        nebulaBlobs = [];
+        auroraRibbons = [];
+        shootingStars = [];
+        dustMotes = [];
+        ticker = 0;
+        shootTimer = 0;
+        nextShoot = floor(random(200, 420));
+
+        // Stars — 3 parallax layers
+        for (let i = 0; i < params.starCount; i++) {
+          let layer = i < params.starCount * 0.52 ? 0 : i < params.starCount * 0.82 ? 1 : 2;
+          stars.push(new Star(layer, true));
+        }
+
+        // Nebula blob layout — seeded positions, 6-8 blobs
+        let blobDefs = [
+          // [xFrac, yFrac, radiusFrac, colorKey, peakAlpha]
+          [0.22, 0.32, 0.42, "A", 38],
+          [0.68, 0.28, 0.38, "B", 34],
+          [0.82, 0.7, 0.3, "C", 28],
+          [0.1, 0.78, 0.28, "B", 22],
+          [0.5, 0.52, 0.32, "A", 20],
+          [0.4, 0.15, 0.22, "C", 18],
+        ];
+        // Add 1-2 random extra blobs from seed
+        let extras = floor(random(1, 3));
+        for (let i = 0; i < extras; i++) {
+          blobDefs.push([
+            random(0.1, 0.9),
+            random(0.1, 0.9),
+            random(0.18, 0.28),
+            random() < 0.5 ? "A" : "C",
+            floor(random(12, 22)),
+          ]);
+        }
+        nebulaBlobs = blobDefs.map((b) => ({
+          xFrac: b[0] + random(-0.08, 0.08),
+          yFrac: b[1] + random(-0.06, 0.06),
+          rFrac: b[2] + random(-0.05, 0.05),
+          colorKey: b[3],
+          alpha: b[4],
+          phase: random(TWO_PI),
+        }));
+
+        // Aurora ribbons — 3 bands across different screen heights
+        let ribbonDefs = [
+          { yFrac: 0.28, colorKey: "A", amp: 55, width: 18, spd: 0.8 },
+          { yFrac: 0.46, colorKey: "B", amp: 70, width: 28, spd: 0.55 },
+          { yFrac: 0.62, colorKey: "C", amp: 45, width: 14, spd: 1.1 },
+          { yFrac: 0.38, colorKey: "B", amp: 35, width: 10, spd: 1.4 },
+        ];
+        auroraRibbons = ribbonDefs.map((r) => ({
+          ...r,
+          phase: random(TWO_PI),
+          noiseOff: random(100),
+        }));
+
+        // Dust motes — very slow drifting micro-particles
+        let dustCount = floor(params.starCount * 0.4);
+        for (let i = 0; i < dustCount; i++) {
+          dustMotes.push({
+            x: random(CW),
+            y: random(CH),
+            vx: random(-0.08, 0.08),
+            vy: random(0.04, 0.18),
+            size: random(0.5, 1.4),
+            alpha: random(20, 60),
+            phase: random(TWO_PI),
+          });
+        }
+      }
+
+      // ─── DRAW ────────────────────────────────────────────────────────────────────
+      function draw() {
+        background(10, 10, 26);
+
+        // 1. Large nebula blobs (radial gradients)
+        drawNebulaBlobs();
+
+        // 2. Noise-based nebula texture (fine cloud detail)
+        drawNebulaTexture();
+
+        // 3. Far + mid stars
+        for (let s of stars) {
+          if (s.layer < 2) {
+            s.update();
+            s.display();
+          }
+        }
+
+        // 4. Aurora ribbons
+        drawAuroras();
+
+        // 5. Near stars (brightest — pierce through aurora)
+        for (let s of stars) {
+          if (s.layer === 2) {
+            s.update();
+            s.display();
+          }
+        }
+
+        // 6. Dust motes
+        drawDust();
+
+        // 7. Shooting stars
+        updateShootingStars();
+
+        // 8. Title text
+        drawTitle();
+
+        // 9. Post-process
+        drawScanlines();
+        drawVignette();
+
+        ticker++;
+        shootTimer++;
+        if (shootTimer > nextShoot) {
+          spawnShootingStar();
+          shootTimer = 0;
+          nextShoot = floor(random(240, 500));
+        }
+      }
+
+      // ─── NEBULA BLOBS (large soft radial gradients) ───────────────────────────────
+      function drawNebulaBlobs() {
+        let intensity = params.nebulaIntensity;
+        if (intensity < 0.01) return;
+
+        for (let b of nebulaBlobs) {
+          let col = hexRGB(params[`color${b.colorKey}`]);
+          let x = b.xFrac * CW;
+          let y = b.yFrac * CH;
+          let r = b.rFrac * CW;
+          // Gentle pulse
+          let pulse = 1 + 0.04 * sin(ticker * 0.012 + b.phase);
+          let rr = r * pulse;
+          let peakAlpha = (b.alpha * intensity) / 255;
+
+          let grad = drawingContext.createRadialGradient(x, y, 0, x, y, rr);
+          grad.addColorStop(0, `rgba(${col.r},${col.g},${col.b},${peakAlpha})`);
+          grad.addColorStop(0.4, `rgba(${col.r},${col.g},${col.b},${peakAlpha * 0.45})`);
+          grad.addColorStop(1, "rgba(0,0,0,0)");
+          drawingContext.fillStyle = grad;
+          drawingContext.fillRect(0, 0, CW, CH);
+        }
+      }
+
+      // ─── NEBULA TEXTURE (fine Perlin cloud detail) ────────────────────────────────
+      function drawNebulaTexture() {
+        let intensity = params.nebulaIntensity;
+        if (intensity < 0.01) return;
+        let t = ticker * 0.00014;
+        noStroke();
+        let step = 38;
+        for (let x = 0; x < CW; x += step) {
+          for (let y = 0; y < CH; y += step) {
+            // Layer 1: cyan cloud
+            let n1 = noise(x * 0.0038 + t, y * 0.0038 + 10);
+            if (n1 > 0.595) {
+              let a = map(n1, 0.595, 0.82, 0, 22 * intensity);
+              let col = hexRGB(params.colorA);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+            // Layer 2: purple/blue cloud (offset noise)
+            let n2 = noise(x * 0.003 + 80 + t * 0.7, y * 0.003 + 40);
+            if (n2 > 0.61) {
+              let a = map(n2, 0.61, 0.84, 0, 16 * intensity);
+              let col = hexRGB(params.colorC);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+            // Layer 3: very faint warm blue (adds richness)
+            let n3 = noise(x * 0.005 + 200, y * 0.005 + t * 0.5);
+            if (n3 > 0.64) {
+              let a = map(n3, 0.64, 0.86, 0, 10 * intensity);
+              let col = hexRGB(params.colorB);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+          }
+        }
+      }
+
+      // ─── AURORA RIBBONS ───────────────────────────────────────────────────────────
+      function drawAuroras() {
+        let intensity = params.auroraIntensity;
+        if (intensity < 0.01) return;
+        let t = ticker * 0.001;
+
+        // Pulse every other second (~120 frames): dim baseline → bright flash → repeat
+        let auroraPulse = 0.22 + 0.78 * pow(abs(sin((ticker * PI) / 120)), 1.6);
+
+        for (let ribbon of auroraRibbons) {
+          let col = hexRGB(params[`color${ribbon.colorKey}`]);
+          let baseY = ribbon.yFrac * CH;
+          let step = 12;
+          let pts = [];
+
+          // Build center-line points
+          for (let x = -step; x <= CW + step; x += step) {
+            let n = noise(x * 0.0028 + ribbon.noiseOff, t * ribbon.spd + ribbon.phase);
+            let y = baseY + (n - 0.5) * ribbon.amp * 2;
+            let w =
+              ribbon.width *
+              (0.6 + 0.4 * noise(x * 0.006 + ribbon.noiseOff + 50, t * ribbon.spd * 0.7));
+            pts.push({ x, y, w });
+          }
+
+          // Draw outer soft glow
+          noStroke();
+          fill(col.r, col.g, col.b, 18 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 2.8);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 2.8);
+          endShape(CLOSE);
+
+          // Draw mid glow
+          fill(col.r, col.g, col.b, 30 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 1.4);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 1.4);
+          endShape(CLOSE);
+
+          // Draw bright core ribbon
+          fill(col.r, col.g, col.b, 55 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 0.5);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 0.5);
+          endShape(CLOSE);
+
+          // Draw luminous edge line
+          drawingContext.shadowBlur = 8 * intensity * auroraPulse;
+          drawingContext.shadowColor = `rgb(${col.r},${col.g},${col.b})`;
+          stroke(col.r, col.g, col.b, 80 * intensity * auroraPulse);
+          strokeWeight(1);
+          noFill();
+          beginShape();
+          for (let p of pts) curveVertex(p.x, p.y);
+          endShape();
+          drawingContext.shadowBlur = 0;
+        }
+      }
+
+      // ─── DUST MOTES ──────────────────────────────────────────────────────────────
+      function drawDust() {
+        noStroke();
+        for (let d of dustMotes) {
+          d.x += d.vx + (params.scrollSpeed > 0 ? random(-0.02, 0.02) : 0);
+          d.y += d.vy * max(0.05, params.scrollSpeed * 0.5);
+          d.phase += 0.02;
+          if (d.y > CH + 4) {
+            d.y = -4;
+            d.x = random(CW);
+          }
+          if (d.x < -4) d.x = CW + 4;
+          if (d.x > CW + 4) d.x = -4;
+          let alpha = d.alpha * (0.7 + 0.3 * sin(d.phase));
+          fill(180, 188, 220, alpha);
+          ellipse(d.x, d.y, d.size);
+        }
+      }
+
+      // ─── SHOOTING STARS ───────────────────────────────────────────────────────────
+      function spawnShootingStar() {
+        let startX = random(CW * 0.1, CW * 0.9);
+        let startY = random(CH * 0.05, CH * 0.55);
+        let angle = random(PI * 0.08, PI * 0.38); // shallow diagonal
+        let speed = random(9, 16);
+        let len = random(80, 200);
+        shootingStars.push({
+          x: startX,
+          y: startY,
+          vx: cos(angle) * speed,
+          vy: sin(angle) * speed,
+          len,
+          life: 1.0,
+        });
+      }
+
+      function updateShootingStars() {
+        for (let i = shootingStars.length - 1; i >= 0; i--) {
+          let s = shootingStars[i];
+          s.x += s.vx;
+          s.y += s.vy;
+          s.life -= 0.038;
+          if (s.life <= 0 || s.x > CW + 20 || s.y > CH + 20) {
+            shootingStars.splice(i, 1);
+            continue;
+          }
+
+          // Tail
+          let tailX = s.x - (s.vx / sqrt(s.vx * s.vx + s.vy * s.vy)) * s.len * s.life;
+          let tailY = s.y - (s.vy / sqrt(s.vx * s.vx + s.vy * s.vy)) * s.len * s.life;
+          let a = s.life * 200;
+
+          drawingContext.shadowBlur = 10 * s.life;
+          drawingContext.shadowColor = "#ffffff";
+          stroke(255, 255, 255, a);
+          strokeWeight(1.8 * s.life);
+          line(s.x, s.y, tailX, tailY);
+
+          // Faint colored tint trail
+          let col = hexRGB(params.colorA);
+          stroke(col.r, col.g, col.b, a * 0.45);
+          strokeWeight(3.5 * s.life);
+          line(s.x, s.y, tailX, tailY);
+          drawingContext.shadowBlur = 0;
+        }
+      }
+
+      // ─── STAR CLASS ───────────────────────────────────────────────────────────────
+      class Star {
+        constructor(layer, init = false) {
+          this.layer = layer;
+          this.reset(init);
+        }
+        reset(init = false) {
+          const sp = [0.09, 0.3, 0.82],
+            sz = [0.6, 1.25, 2.2],
+            dm = [0.26, 0.56, 0.95];
+          this.x = random(CW);
+          this.y = init ? random(CH) : random(-5, 0);
+          this.speed = sp[this.layer] * (0.7 + random(0.6));
+          this.sz = sz[this.layer] * (0.8 + random(0.5));
+          let bri = dm[this.layer] * (150 + random(105));
+          let rnd = random();
+          if (rnd < 0.72) {
+            this.r = bri;
+            this.g = bri;
+            this.b = bri;
+          } // white
+          else if (rnd < 0.85) {
+            this.r = bri * 0.65;
+            this.g = bri * 0.78;
+            this.b = bri;
+          } // blue-white
+          else if (rnd < 0.93) {
+            this.r = bri;
+            this.g = bri * 0.88;
+            this.b = bri * 0.45;
+          } // warm yellow
+          else {
+            this.r = bri;
+            this.g = bri * 0.45;
+            this.b = bri * 0.55;
+          } // pinkish-red
+          this.phase = random(TWO_PI);
+          this.psp = random(0.02, 0.065);
+        }
+        update() {
+          this.y += this.speed * max(0.04, params.scrollSpeed);
+          this.phase += this.psp;
+          if (this.y > CH + 5) this.reset(false);
+        }
+        display() {
+          let tw = 0.78 + 0.22 * sin(this.phase);
+          let alpha = [128, 172, 225][this.layer];
+          if (this.layer === 2) {
+            drawingContext.shadowBlur = 5;
+            drawingContext.shadowColor = `rgb(${floor(this.r)},${floor(this.g)},${floor(this.b)})`;
+          }
+          noStroke();
+          fill(floor(this.r), floor(this.g), floor(this.b), floor(alpha * tw));
+          ellipse(this.x, this.y, this.sz * tw);
+          if (this.layer === 2) drawingContext.shadowBlur = 0;
+        }
+      }
+
+      // ─── TITLE ────────────────────────────────────────────────────────────────────
+      function drawTitle() {
+        let col = hexRGB(params.colorD);
+        let g = 18;
+        let titleY = floor(CH * 0.5);
+        let pulse = 0.82 + 0.18 * sin(ticker * 0.038);
+
+        push();
+        textAlign(CENTER, CENTER);
+        textStyle(BOLD);
+
+        // "SPACE SHOOTER" — multi-layer neon bloom
+        textSize(60);
+        for (let pass = 3; pass >= 0; pass--) {
+          drawingContext.shadowBlur = g * (pass + 1) * 0.52 * pulse;
+          drawingContext.shadowColor = `rgb(${col.r},${col.g},${col.b})`;
+          fill(col.r, col.g, col.b, 175 + pass * 22);
+          noStroke();
+          // ← Change this to your game title
+          text("SPACE SHOOTER", CW / 2, titleY);
+        }
+
+        // Thin tagline above title
+        drawingContext.shadowBlur = 8;
+        drawingContext.shadowColor = params.colorB;
+        let bc = hexRGB(params.colorB);
+        fill(bc.r, bc.g, bc.b, 170 * pulse);
+        textSize(12);
+        textStyle(NORMAL);
+        letterSpacing = 4;
+        text("D A S H  ·  G L I Z Z Y  ·  C O L L E C T", CW / 2, titleY - 48);
+
+        // Separator line
+        // drawingContext.shadowBlur = 6;
+        // drawingContext.shadowColor = params.colorA;
+        // stroke(col.r, col.g, col.b, 80 * pulse);
+        // strokeWeight(0.8);
+        // noFill();
+        // let lineW = 260;
+        // line(CW / 2 - lineW, titleY - 34, CW / 2 + lineW, titleY - 34);
+
+        // "PRESS START" — flashing
+        let flash = ticker % 58 < 34 ? 220 : 0;
+        drawingContext.shadowBlur = 14;
+        drawingContext.shadowColor = "#ffffff";
+        fill(255, 255, 255, flash);
+        textSize(18);
+        textStyle(BOLD);
+        text("PRESS START", CW / 2, CH - 52);
+
+        drawingContext.shadowBlur = 0;
+        pop();
+      }
+
+      // ─── CRT ─────────────────────────────────────────────────────────────────────
+      function drawScanlines() {
+        if (params.scanlineOpacity < 0.01) return;
+        noStroke();
+        fill(0, 0, 0, params.scanlineOpacity * 255);
+        for (let y = 0; y < CH; y += 3) rect(0, y, CW, 1.5);
+      }
+
+      function drawVignette() {
+        let grad = drawingContext.createRadialGradient(
+          CW / 2,
+          CH / 2,
+          CH * 0.28,
+          CW / 2,
+          CH / 2,
+          CH * 0.92
+        );
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(1, "rgba(0,0,0,0.65)");
+        drawingContext.fillStyle = grad;
+        drawingContext.fillRect(0, 0, CW, CH);
+      }
+
+      // ─── UTILS ────────────────────────────────────────────────────────────────────
+      function hexRGB(hex) {
+        hex = hex.replace("#", "");
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+        };
+      }
+
+      // ─── UI ───────────────────────────────────────────────────────────────────────
+      function updateParam(name, val, reinit = false) {
+        params[name] = val;
+        let el = document.getElementById(name + "-value");
+        if (el) el.textContent = Number.isInteger(val) ? val : val.toFixed(val < 1 ? 2 : 1);
+        if (reinit) initializeSystem();
+      }
+      function updateColor(name, val) {
+        params[name] = val;
+        let el = document.getElementById(name + "-value");
+        if (el) el.textContent = val;
+      }
+      function updateSeedDisplay() {
+        document.getElementById("seed-input").value = params.seed;
+      }
+      function updateSeed() {
+        let v = parseInt(document.getElementById("seed-input").value);
+        if (v > 0) {
+          params.seed = v;
+          initializeSystem();
+        } else updateSeedDisplay();
+      }
+      function previousSeed() {
+        params.seed = Math.max(1, params.seed - 1);
+        updateSeedDisplay();
+        initializeSystem();
+      }
+      function nextSeed() {
+        params.seed++;
+        updateSeedDisplay();
+        initializeSystem();
+      }
+      function randomSeedAndUpdate() {
+        params.seed = Math.floor(Math.random() * 999999) + 1;
+        updateSeedDisplay();
+        initializeSystem();
+      }
+      function resetParameters() {
+        params = { ...defaultParams };
+        [
+          "starCount",
+          "scrollSpeed",
+          "nebulaIntensity",
+          "auroraIntensity",
+          "scanlineOpacity",
+        ].forEach((id) => {
+          let el = document.getElementById(id);
+          if (el) el.value = params[id];
+          let ve = document.getElementById(id + "-value");
+          if (ve) ve.textContent = params[id];
+        });
+        ["colorA", "colorB", "colorC", "colorD"].forEach((id) => {
+          let el = document.getElementById(id);
+          if (el) el.value = params[id];
+          let ve = document.getElementById(id + "-value");
+          if (ve) ve.textContent = params[id];
+        });
+        updateSeedDisplay();
+        initializeSystem();
+      }
+      window.addEventListener("load", updateSeedDisplay);
+    </script>
+  </body>
+</html>

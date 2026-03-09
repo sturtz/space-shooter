@@ -1,0 +1,159 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-220 -220 440 440">
+  <!--
+    Pulse Mothership — command center / player base.
+    Hex body r=90 (18×5), inner hex r=50 (10×5), outer rings r=140/155.
+    4 docking arms at cardinal directions with perpendicular tick marks.
+    Purple (#aa44ff) neon style. Pivot at origin for in-game use.
+  -->
+  <defs>
+    <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="9" result="b1"/>
+      <feGaussianBlur stdDeviation="20" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="edge" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="soft" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <radialGradient id="body-depth" cx="38%" cy="32%" r="68%">
+      <stop offset="0%"  stop-color="#5522bb" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#080412" stop-opacity="0.92"/>
+    </radialGradient>
+    <radialGradient id="core-glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"   stop-color="#ffffff"  stop-opacity="1"/>
+      <stop offset="35%"  stop-color="#ddaaff"  stop-opacity="0.85"/>
+      <stop offset="100%" stop-color="#aa44ff"  stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="inner-fill" cx="42%" cy="38%" r="65%">
+      <stop offset="0%"   stop-color="#3a1a6e" stop-opacity="1"/>
+      <stop offset="100%" stop-color="#130828" stop-opacity="1"/>
+    </radialGradient>
+  </defs>
+
+  <!-- ── Outer bloom rings ── -->
+  <g filter="url(#bloom)" opacity="0.30">
+    <circle cx="0" cy="0" r="155" fill="none" stroke="#aa44ff" stroke-width="4"/>
+    <circle cx="0" cy="0" r="140" fill="none" stroke="#7722cc" stroke-width="2"/>
+  </g>
+
+  <!-- ── Outer structural rings ── -->
+  <circle cx="0" cy="0" r="155" fill="none" stroke="#6611aa" stroke-width="1" stroke-opacity="0.35"/>
+  <circle cx="0" cy="0" r="140" fill="none" stroke="#aa44ff" stroke-width="1.5" stroke-opacity="0.55"/>
+
+  <!-- ── 4 docking arms (cardinal directions via rotate) ── -->
+  <g filter="url(#soft)">
+    <!-- Right arm -->
+    <g>
+      <line x1="80" y1="0" x2="140" y2="0"
+        stroke="#aa44ff" stroke-width="3" stroke-opacity="0.9"/>
+      <line x1="104" y1="-10" x2="104" y2="10"
+        stroke="#aa44ff" stroke-width="2" stroke-opacity="0.7"/>
+      <line x1="126" y1="-7"  x2="126" y2="7"
+        stroke="#cc66ff" stroke-width="1.5" stroke-opacity="0.55"/>
+      <circle cx="140" cy="0" r="4.5" fill="#cc66ff" fill-opacity="0.85"/>
+    </g>
+    <!-- Down arm -->
+    <g transform="rotate(90)">
+      <line x1="80" y1="0" x2="140" y2="0"
+        stroke="#aa44ff" stroke-width="3" stroke-opacity="0.9"/>
+      <line x1="104" y1="-10" x2="104" y2="10"
+        stroke="#aa44ff" stroke-width="2" stroke-opacity="0.7"/>
+      <line x1="126" y1="-7"  x2="126" y2="7"
+        stroke="#cc66ff" stroke-width="1.5" stroke-opacity="0.55"/>
+      <circle cx="140" cy="0" r="4.5" fill="#cc66ff" fill-opacity="0.85"/>
+    </g>
+    <!-- Left arm -->
+    <g transform="rotate(180)">
+      <line x1="80" y1="0" x2="140" y2="0"
+        stroke="#aa44ff" stroke-width="3" stroke-opacity="0.9"/>
+      <line x1="104" y1="-10" x2="104" y2="10"
+        stroke="#aa44ff" stroke-width="2" stroke-opacity="0.7"/>
+      <line x1="126" y1="-7"  x2="126" y2="7"
+        stroke="#cc66ff" stroke-width="1.5" stroke-opacity="0.55"/>
+      <circle cx="140" cy="0" r="4.5" fill="#cc66ff" fill-opacity="0.85"/>
+    </g>
+    <!-- Up arm -->
+    <g transform="rotate(270)">
+      <line x1="80" y1="0" x2="140" y2="0"
+        stroke="#aa44ff" stroke-width="3" stroke-opacity="0.9"/>
+      <line x1="104" y1="-10" x2="104" y2="10"
+        stroke="#aa44ff" stroke-width="2" stroke-opacity="0.7"/>
+      <line x1="126" y1="-7"  x2="126" y2="7"
+        stroke="#cc66ff" stroke-width="1.5" stroke-opacity="0.55"/>
+      <circle cx="140" cy="0" r="4.5" fill="#cc66ff" fill-opacity="0.85"/>
+    </g>
+  </g>
+
+  <!-- ── Main hexagon body fill ── -->
+  <!-- Pointy-top hex: vertices at angles -90°, -30°, 30°, 90°, 150°, 210° at r=90 -->
+  <polygon points="0,-90 78,-45 78,45 0,90 -78,45 -78,-45"
+    fill="#1a0a2e" fill-opacity="0.97"/>
+
+  <!-- ── Depth shading ── -->
+  <polygon points="0,-90 78,-45 78,45 0,90 -78,45 -78,-45"
+    fill="url(#body-depth)"/>
+
+  <!-- ── Hex face panel lines (structural detail, vertex-to-center) ── -->
+  <g stroke="#3a1870" stroke-width="0.9" stroke-opacity="0.5">
+    <line x1="0" y1="0" x2="0"   y2="-90"/>
+    <line x1="0" y1="0" x2="78"  y2="-45"/>
+    <line x1="0" y1="0" x2="78"  y2="45"/>
+    <line x1="0" y1="0" x2="0"   y2="90"/>
+    <line x1="0" y1="0" x2="-78" y2="45"/>
+    <line x1="0" y1="0" x2="-78" y2="-45"/>
+  </g>
+
+  <!-- ── Main hex body edge ── -->
+  <polygon points="0,-90 78,-45 78,45 0,90 -78,45 -78,-45"
+    fill="none" stroke="#aa44ff" stroke-width="2.8" stroke-linejoin="round"
+    filter="url(#edge)"/>
+
+  <!-- ── Hex vertex accent dots ── -->
+  <g fill="#cc66ff" fill-opacity="0.8" filter="url(#soft)">
+    <circle cx="0"   cy="-90" r="5"/>
+    <circle cx="78"  cy="-45" r="5"/>
+    <circle cx="78"  cy="45"  r="5"/>
+    <circle cx="0"   cy="90"  r="5"/>
+    <circle cx="-78" cy="45"  r="5"/>
+    <circle cx="-78" cy="-45" r="5"/>
+  </g>
+
+  <!-- ── Inner hexagon ── -->
+  <polygon points="0,-50 43,-25 43,25 0,50 -43,25 -43,-25"
+    fill="url(#inner-fill)"/>
+  <polygon points="0,-50 43,-25 43,25 0,50 -43,25 -43,-25"
+    fill="none" stroke="#cc66ff" stroke-width="2" stroke-linejoin="round"
+    stroke-opacity="0.85" filter="url(#soft)"/>
+
+  <!-- ── Inner hex vertex dots ── -->
+  <g fill="#ee99ff" fill-opacity="0.65">
+    <circle cx="0"   cy="-50" r="3"/>
+    <circle cx="43"  cy="-25" r="3"/>
+    <circle cx="43"  cy="25"  r="3"/>
+    <circle cx="0"   cy="50"  r="3"/>
+    <circle cx="-43" cy="25"  r="3"/>
+    <circle cx="-43" cy="-25" r="3"/>
+  </g>
+
+  <!-- ── Center core glow ── -->
+  <circle cx="0" cy="0" r="26" fill="url(#core-glow)" filter="url(#bloom)" opacity="0.6"/>
+  <circle cx="0" cy="0" r="11" fill="#1e0c3a" fill-opacity="0.95"/>
+  <circle cx="0" cy="0" r="11" fill="none" stroke="#ee99ff" stroke-width="1.8" stroke-opacity="0.85"/>
+
+  <!-- Bright center pixel — white core -->
+  <rect x="-3.5" y="-3.5" width="7" height="7" fill="#ffffff" fill-opacity="0.98"/>
+</svg>

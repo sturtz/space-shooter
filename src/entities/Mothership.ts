@@ -50,94 +50,44 @@ export class Mothership extends Entity {
     const cx = this.pos.x;
     const cy = this.pos.y;
 
-    const bodyColor = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
-    const glowColor = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothershipGlow;
-    const pulseScale = 1 + Math.sin(this.pulseTimer * 2) * 0.08;
+    const pulseScale = 1 + Math.sin(this.pulseTimer * 2) * 0.04;
+    const SPRITE_SIZE = 60;
 
     ctx.save();
 
-    // Outer ring outline (pulses)
-    ctx.strokeStyle = glowColor;
-    ctx.lineWidth = 1;
-    ctx.globalAlpha = 0.4;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 28 * pulseScale, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 0.2;
-    ctx.beginPath();
-    ctx.arc(cx, cy, 36 * pulseScale, 0, Math.PI * 2);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
-
-    // Main body - hexagonal outline
-    ctx.strokeStyle = bodyColor;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = (Math.PI / 3) * i - Math.PI / 6;
-      const r = 18;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.stroke();
-
-    // Inner hexagon outline
-    ctx.strokeStyle = glowColor;
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    for (let i = 0; i < 6; i++) {
-      const a = (Math.PI / 3) * i;
-      const r = 10;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      if (i === 0) ctx.moveTo(px, py);
-      else ctx.lineTo(px, py);
-    }
-    ctx.closePath();
-    ctx.stroke();
-
-    // Center core - small bright pixel
-    ctx.fillStyle = "#ffffff";
-    ctx.fillRect(cx - 2, cy - 2, 4, 4);
-
-    // Docking arms (4 lines extending out, slowly rotating)
-    ctx.strokeStyle = bodyColor;
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < 4; i++) {
-      const a = (Math.PI / 2) * i + this.pulseTimer * 0.3;
+    // Draw sprite
+    const sprite = ShipImages.mothership;
+    if (imageReady(sprite)) {
+      const size = SPRITE_SIZE * pulseScale;
+      if (this.damageFlash > 0) {
+        ctx.shadowColor = COLORS.mothershipDamaged;
+        ctx.shadowBlur = 18;
+      } else {
+        ctx.shadowColor = COLORS.mothership;
+        ctx.shadowBlur = 10;
+      }
+      ctx.drawImage(sprite, cx - size / 2, cy - size / 2, size, size);
+      if (this.damageFlash > 0) {
+        ctx.globalCompositeOperation = "source-atop";
+        ctx.fillStyle = "rgba(255,68,68,0.5)";
+        ctx.fillRect(cx - size / 2, cy - size / 2, size, size);
+        ctx.globalCompositeOperation = "source-over";
+      }
+      ctx.shadowBlur = 0;
+    } else {
+      // Fallback: simple circle
+      ctx.strokeStyle = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.moveTo(cx + Math.cos(a) * 13, cy + Math.sin(a) * 13);
-      ctx.lineTo(cx + Math.cos(a) * 22, cy + Math.sin(a) * 22);
+      ctx.arc(cx, cy, 18, 0, Math.PI * 2);
       ctx.stroke();
-      // Small tick at end
-      const endX = cx + Math.cos(a) * 22;
-      const endY = cy + Math.sin(a) * 22;
-      const perpX = -Math.sin(a) * 3;
-      const perpY = Math.cos(a) * 3;
-      ctx.beginPath();
-      ctx.moveTo(endX - perpX, endY - perpY);
-      ctx.lineTo(endX + perpX, endY + perpY);
-      ctx.stroke();
-    }
-
-    // Vertex dots on hexagon
-    ctx.fillStyle = bodyColor;
-    for (let i = 0; i < 6; i++) {
-      const a = (Math.PI / 3) * i - Math.PI / 6;
-      const r = 18;
-      const px = cx + Math.cos(a) * r;
-      const py = cy + Math.sin(a) * r;
-      ctx.fillRect(px - 1, py - 1, 2, 2);
     }
 
     // HP bar below
     const barWidth = 40;
     const barHeight = 3;
     const barX = cx - barWidth / 2;
-    const barY = cy + 26;
+    const barY = cy + 28;
     const hpRatio = this.hp / this.maxHp;
 
     // HP bar outline style
@@ -151,7 +101,7 @@ export class Mothership extends Entity {
 
     // HP numbers
     ctx.fillStyle = "#fff";
-    ctx.font = "8px monospace";
+    ctx.font = "8px Tektur";
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);

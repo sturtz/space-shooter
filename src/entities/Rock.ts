@@ -17,13 +17,17 @@ export class Rock extends Enemy {
     hp: number,
     speed: number,
     isBig: boolean = false,
-    sizeScale: number = 1.0
+    sizeScale: number = 1.0,
+    mega: boolean = false
   ) {
     super(x, y, (isBig ? ROCK_BIG_SIZE : ROCK_SIZE) * sizeScale, hp, speed, isBig ? 3 : 1);
     this.isBig = isBig;
     this.rotSpeed = randomRange(-1.5, 1.5);
 
     // Pick sprite based on size — no tiny pool, all small rocks use the small pool
+    if (mega) {
+      this.sprite = AsteroidImages.mega;
+    }
     if (isBig) {
       this.sprite = pickRandom(AsteroidImages.big);
     } else {

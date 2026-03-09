@@ -24,27 +24,30 @@ export const BgImages = {
 
 // ─── Player sprites ───────────────────────────────────────────────────────────
 export const PlayerImages = {
-  glider: img("./assets/ships/starfighter-r2.svg"),
+  glider: img("./assets/ships/pulse-player.svg"),
 };
 
 // ─── Ships / enemies ─────────────────────────────────────────────────────────
 export const ShipImages = {
+  enemy: img("./assets/ships/pulse-enemy-ship.svg"),
   enemyBee: img("./assets/ships/enemy-bee.svg"),
   enemyButterfly: img("./assets/ships/enemy-butterfly.svg"),
   enemyBoss: img("./assets/ships/enemy-boss.svg"),
   mothershipDeath: img("./assets/ships/mothership-death.gif"),
-  mothership: img("./assets/ships/mothership.svg"),
+  mothership: img("./assets/ships/pulse-mothership.svg"),
 };
 
 // ─── Asteroids ───────────────────────────────────────────────────────────────
 export const AsteroidImages = {
-  tiny: [img("./assets/items/tiny-asteroid.png"), img("./assets/items/tiny-purple-asteroid.png")],
   small: [
-    img("./assets/items/small-asteroid.png"),
-    img("./assets/items/sm-asteroid.png"),
+    img("./assets/items/pulse-asteroid-small.svg"),
     img("./assets/items/purple-asteroid-small.png"),
   ],
-  big: [img("./assets/items/md-asteroid.png"), img("./assets/items/large-asteroid.png")],
+  big: [
+    img("./assets/items/pulse-asteroid-big.svg"),
+    img("./assets/items/purple-asteroid-small.png"),
+  ],
+  mega: img("./assets/items/pulse-asteroid-mega.png"),
 };
 
 // ─── Items / pickups ─────────────────────────────────────────────────────────

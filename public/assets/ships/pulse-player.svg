@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-92 -126 184 232">
+  <defs>
+    <!-- Outer neon bloom -->
+    <filter id="bloom" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="6" result="b1"/>
+      <feGaussianBlur stdDeviation="12" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Soft inner edge glow -->
+    <filter id="edge" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── Outer bloom layer (blurred stroke only) ── -->
+  <g filter="url(#bloom)" opacity="0.45">
+    <polygon
+      points="0,-110 35,-20 30,40 75,60 60,85 20,70 0,90 -20,70 -60,85 -75,60 -30,40 -35,-20"
+      fill="none" stroke="#00d4ff" stroke-width="10" stroke-linejoin="round"/>
+  </g>
+
+  <!-- ── Wing fill (dark, slightly transparent) ── -->
+  <polygon
+    points="0,-110 35,-20 30,40 75,60 60,85 20,70 0,90 -20,70 -60,85 -75,60 -30,40 -35,-20"
+    fill="#001428" fill-opacity="0.88"/>
+
+  <!-- ── Hull edge (crisp neon stroke) ── -->
+  <polygon
+    points="0,-110 35,-20 30,40 75,60 60,85 20,70 0,90 -20,70 -60,85 -75,60 -30,40 -35,-20"
+    fill="none" stroke="#00d4ff" stroke-width="2.5" stroke-linejoin="round"
+    filter="url(#edge)"/>
+
+  <!-- ── Center spine ── -->
+  <line x1="0" y1="-90" x2="0" y2="60"
+    stroke="#00d4ff" stroke-width="1.4" stroke-opacity="0.48"/>
+
+  <!-- ── Wing accent lines ── -->
+  <line x1="20" y1="45" x2="65" y2="65"
+    stroke="#00d4ff" stroke-width="1.1" stroke-opacity="0.42"/>
+  <line x1="-20" y1="45" x2="-65" y2="65"
+    stroke="#00d4ff" stroke-width="1.1" stroke-opacity="0.42"/>
+
+  <!-- ── Cockpit glass ── -->
+  <ellipse cx="0" cy="-40" rx="17.5" ry="22.5"
+    fill="#00d7ff" fill-opacity="0.60" stroke="#00d4ff" stroke-width="1"/>
+
+  <!-- ── Cockpit highlight ── -->
+  <ellipse cx="-5" cy="-50" rx="7.5" ry="10"
+    fill="#d2f8ff" fill-opacity="0.28"/>
+</svg>

@@ -158,7 +158,6 @@ export class Game implements IGame {
   gameTime: number = 0;
   menuPulse: number = 0;
   paused: boolean = false;
-  screenFlashTimer: number = 0;
   screenFlashColor: string = "";
   damageNumbers: DamageNumber[] = [];
   dashRings: DashRing[] = [];
@@ -367,9 +366,6 @@ export class Game implements IGame {
     this.audio.playDash();
     this.particles.emit(this.player.pos, 4, COLORS.dashReady, 30, 0.15, 1.5);
 
-    // Screen flash
-    this.screenFlashTimer = 0.08;
-    this.screenFlashColor = "rgba(100, 200, 255, 0.15)";
     this.renderer.shake(2);
 
     // Create expanding ring animation
@@ -416,9 +412,6 @@ export class Game implements IGame {
           enemy.applyStun(2.0);
         }
       }
-      // Brighter cyan flash for stun
-      this.screenFlashTimer = 0.12;
-      this.screenFlashColor = "rgba(80, 210, 255, 0.2)";
       this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 12, "#44ccff", 80, 0.3, 2);
     }
 
@@ -613,11 +606,6 @@ export class Game implements IGame {
     this.lastDt = dt;
     this.gameTime += dt;
     this.menuPulse += dt;
-
-    // Screen flash decay
-    if (this.screenFlashTimer > 0) {
-      this.screenFlashTimer -= dt;
-    }
 
     // Damage numbers decay
     for (let i = this.damageNumbers.length - 1; i >= 0; i--) {
@@ -816,14 +804,16 @@ export class Game implements IGame {
     const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
     const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
     const bossHP = 5 + this.save.currentLevel * 5; // scales with level
-    const boss = new Rock(x, y, bossHP, 15, true); // slow speed, big rock
-    boss.radius = 30; // extra large
-    boss.coinValue = 10;
-    this.bossEnemy = boss;
-    this.enemies.push(boss);
+    const megaRock = new Rock(x, y, bossHP, 15, true, 2, true); // slow speed, big rock
+    megaRock.radius = 30; // extra large
+    megaRock.coinValue = 10;
+    if (this.save.currentLevel === 1) {
+      this.bossEnemy = megaRock;
+    }
+    this.enemies.push(megaRock);
 
     // Announce boss — shake only, no screen flash (flash was jarring/confusing)
-    this.renderer.shake(4);
+    this.renderer.shake(2);
   }
 
   onEnemyKilled(enemy: Enemy) {
@@ -835,27 +825,26 @@ export class Game implements IGame {
       this.particles.emit(enemy.pos, 40, "#ff4444", 160, 0.7, 5);
       this.particles.emit(enemy.pos, 25, "#ffaa00", 130, 0.55, 4);
       this.particles.emit(enemy.pos, 15, "#ffffff", 90, 0.35, 2.5);
-      this.renderer.shake(10);
-      this.screenFlashTimer = 0.25;
-      this.screenFlashColor = "rgba(255, 255, 255, 0.35)";
+      this.renderer.shake(2);
       this.audio.playExplosion();
-      // Stop the beat track
-      this.audio.stopConeTrack();
-      // Level up — only boss kill advances the level
-      this.save.currentLevel++;
+      // If first level give boss reward
+      if (this.save.currentLevel === 1) {
+        this.audio.stopConeTrack();
+        this.save.currentLevel++;
+        this.save.starCoins++;
+        // Transition to boss reward selection screen
+        this.state = "bossReward";
+      }
       if (this.save.currentLevel > this.save.highestLevel) {
         this.save.highestLevel = this.save.currentLevel;
       }
-      this.save.starCoins++;
-      // Transition to boss reward selection screen
-      this.state = "bossReward";
       return;
     }
 
     // Explosion particles
     this.particles.emit(enemy.pos, 12, COLORS.explosion, 100, 0.4, 3);
     this.particles.emit(enemy.pos, 6, COLORS.particle, 60, 0.3, 2);
-    this.renderer.shake(3);
+    this.renderer.shake(2);
     this.audio.playExplosion();
 
     // Kill streak
@@ -1394,12 +1383,6 @@ export class Game implements IGame {
     }
     this.renderer.ctx.globalAlpha = 1;
 
-    // Screen flash overlay
-    if (this.screenFlashTimer > 0) {
-      this.renderer.ctx.fillStyle = this.screenFlashColor;
-      this.renderer.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-    }
-
     // Compute actual streak coin bonus for HUD (Issue #19 fix)
     const streakBonus = 1 + this.killStreak * this.upgrades.getLevel("econ_combo") * 0.1;
 
@@ -1607,7 +1590,7 @@ export class Game implements IGame {
       maxLife: 0.22,
     });
 
-    this.renderer.shake(1);
+    this.renderer.shake(2);
   }
 
   /** Tick pending dash bombs — detonate when countdown reaches 0 */
@@ -1622,9 +1605,7 @@ export class Game implements IGame {
         this.particles.emit(bPos, 45, "#ff8800", 200, 0.65, 6);
         this.particles.emit(bPos, 25, COLORS.engineGlow, 150, 0.45, 4);
         this.particles.emit(bPos, 15, "#ffffff", 110, 0.25, 2.5);
-        this.renderer.shake(7);
-        this.screenFlashTimer = 0.12;
-        this.screenFlashColor = "rgba(255, 140, 0, 0.22)";
+        this.renderer.shake(2);
         this.audio.playExplosion();
 
         for (const enemy of this.enemies) {

@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-96 -66 192 118">
+  <!--
+    Enemy ship — diamond body with swept wings.
+    Pivot at origin. Nose points UP (–Y) to match game rotation convention.
+    Geometry derived from main-screen-bg.html at size s=10, scale ×5.
+
+    Body diamond:  (0,−50) (32.5,0) (0,41) (−32.5,0)
+    Left wing:     (−32.5,0) (−80,−20) (−65,20)
+    Right wing:    (32.5,0)  (80,−20)  (65,20)
+    Eye:           cx=0 cy=−12.5 rx=12.5 ry=15
+  -->
+  <defs>
+    <filter id="bloom" x="-80%" y="-80%" width="260%" height="260%">
+      <feGaussianBlur stdDeviation="5" result="b1"/>
+      <feGaussianBlur stdDeviation="10" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="edge" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- ── Outer bloom ── -->
+  <g filter="url(#bloom)" opacity="0.5">
+    <polygon points="0,-50 32.5,0 0,41 -32.5,0"
+      fill="none" stroke="#ff4466" stroke-width="8" stroke-linejoin="round"/>
+    <polygon points="-32.5,0 -80,-20 -65,20"
+      fill="none" stroke="#ff4466" stroke-width="6"/>
+    <polygon points="32.5,0 80,-20 65,20"
+      fill="none" stroke="#ff4466" stroke-width="6"/>
+  </g>
+
+  <!-- ── Wing fills ── -->
+  <polygon points="-32.5,0 -80,-20 -65,20"
+    fill="#47000f" fill-opacity="0.82"/>
+  <polygon points="32.5,0 80,-20 65,20"
+    fill="#47000f" fill-opacity="0.82"/>
+
+  <!-- ── Wing edges (crisp) ── -->
+  <polygon points="-32.5,0 -80,-20 -65,20"
+    fill="none" stroke="#ff4466" stroke-width="1.5" stroke-opacity="0.7"
+    filter="url(#edge)"/>
+  <polygon points="32.5,0 80,-20 65,20"
+    fill="none" stroke="#ff4466" stroke-width="1.5" stroke-opacity="0.7"
+    filter="url(#edge)"/>
+
+  <!-- ── Body fill ── -->
+  <polygon points="0,-50 32.5,0 0,41 -32.5,0"
+    fill="#590512" fill-opacity="0.90"/>
+
+  <!-- ── Body edge (crisp neon) ── -->
+  <polygon points="0,-50 32.5,0 0,41 -32.5,0"
+    fill="none" stroke="#ff4466" stroke-width="2" stroke-linejoin="round"
+    filter="url(#edge)"/>
+
+  <!-- ── Eye glow ── -->
+  <ellipse cx="0" cy="-12.5" rx="12.5" ry="15"
+    fill="#ff4466" fill-opacity="0.68"/>
+  <ellipse cx="0" cy="-12.5" rx="5" ry="6"
+    fill="#ff9aaa" fill-opacity="0.55"/>
+</svg>

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="-165 -165 330 330">
+  <!--
+    Mega asteroid — 9 sides, massive and imposing. Multiple cracks + crater.
+    s≈30, scale ×5. Pivot at origin for in-game tumble rotation.
+  -->
+  <defs>
+    <filter id="bloom" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10" result="b1"/>
+      <feGaussianBlur stdDeviation="20" result="b2"/>
+      <feMerge>
+        <feMergeNode in="b2"/>
+        <feMergeNode in="b1"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="edge" x="-15%" y="-15%" width="130%" height="130%">
+      <feGaussianBlur stdDeviation="2.5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <!-- Inner shadow for depth -->
+    <radialGradient id="depth" cx="38%" cy="35%" r="65%">
+      <stop offset="0%"  stop-color="#3a3860" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0e0d1a" stop-opacity="0.85"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Outer bloom -->
+  <g filter="url(#bloom)" opacity="0.30">
+    <polygon
+      points="125,15 88,120 -15,148 -118,112 -148,20 -130,-75 -60,-145 50,-148 128,-82"
+      fill="none" stroke="#9999bb" stroke-width="12"/>
+  </g>
+
+  <!-- Body fill — deepest, darkest -->
+  <polygon
+    points="125,15 88,120 -15,148 -118,112 -148,20 -130,-75 -60,-145 50,-148 128,-82"
+    fill="#1e1c36" fill-opacity="0.97"/>
+
+  <!-- Depth shading gradient -->
+  <polygon
+    points="125,15 88,120 -15,148 -118,112 -148,20 -130,-75 -60,-145 50,-148 128,-82"
+    fill="url(#depth)"/>
+
+  <!-- Body edge -->
+  <polygon
+    points="125,15 88,120 -15,148 -118,112 -148,20 -130,-75 -60,-145 50,-148 128,-82"
+    fill="none" stroke="#8888bb" stroke-width="2.5" stroke-linejoin="round"
+    filter="url(#edge)"/>
+
+  <!-- ── Crater (impact scar, upper right) ── -->
+  <ellipse cx="55" cy="-55" rx="28" ry="22" transform="rotate(-20 55 -55)"
+    fill="none" stroke="#5a5878" stroke-width="1.4" stroke-opacity="0.65"/>
+  <ellipse cx="55" cy="-55" rx="14" ry="11" transform="rotate(-20 55 -55)"
+    fill="#151426" fill-opacity="0.75"/>
+  <ellipse cx="55" cy="-55" rx="8" ry="6.5" transform="rotate(-20 55 -55)"
+    fill="#0c0b1c" fill-opacity="0.9"/>
+
+  <!-- ── Primary crack (runs top-left to lower-right) ── -->
+  <polyline points="-80,-92 -42,-28 -12,8 30,62"
+    fill="none" stroke="#4a4c6e" stroke-width="1.6" stroke-opacity="0.75"
+    stroke-linejoin="round"/>
+
+  <!-- ── Branch crack from primary ── -->
+  <line x1="-12" y1="8" x2="35" y2="-18"
+    stroke="#4a4c6e" stroke-width="1.1" stroke-opacity="0.55"/>
+
+  <!-- ── Secondary crack (lower half) ── -->
+  <line x1="-110" y1="30" x2="-55" y2="110"
+    stroke="#4a4c6e" stroke-width="1.2" stroke-opacity="0.5"/>
+
+  <!-- ── Highlight facets (light catch on upper faces) ── -->
+  <line x1="118" y1="-40" x2="55" y2="-135"
+    stroke="#bbbbdd" stroke-width="1" stroke-opacity="0.20"/>
+  <line x1="105" y1="58" x2="118" y2="-40"
+    stroke="#aaaacc" stroke-width="0.8" stroke-opacity="0.14"/>
+</svg>

@@ -46,9 +46,12 @@ export class UpgradeScreen {
   // Layout constants
   readonly CX = GAME_WIDTH / 2;
   readonly CY = GAME_HEIGHT / 2 - 20;
-  readonly DEPTH_SPACING = 165;
-  readonly NODE_RADIUS = 22;
-  readonly BRANCH_SPREAD = 0.48;
+  readonly DEPTH_SPACING = 120;
+  readonly NODE_RADIUS = 20;
+  readonly BRANCH_SPREAD = 0.3;
+
+  // Animation time
+  time = 0;
 
   // Pan / drag state
   panX = 0;
@@ -138,11 +141,11 @@ export class UpgradeScreen {
     }
   }
 
-  /** A node is visible only when its parent is fully maxed (or the node is root/tier-1). */
+  /** A node is visible once its required parent level is met. */
   private isParentMaxed(node: UpgradeNode): boolean {
-    const parent = getParentNode(node);
-    if (!parent) return true;
-    return this.upgrades.getLevel(parent.id) >= parent.maxLevel;
+    if (!node.requires || node.requires.length === 0) return true;
+    const req = node.requires[0];
+    return this.upgrades.getLevel(req.id) >= req.level;
   }
 
   handleClick(mx: number, my: number) {
@@ -206,6 +209,7 @@ export class UpgradeScreen {
 
   render(renderer: Renderer, dt: number = 1 / 60) {
     this.clickables = [];
+    this.time += dt;
     const ctx = renderer.ctx;
 
     // Dark background with subtle vignette
@@ -324,49 +328,21 @@ export class UpgradeScreen {
       if (!this.isParentMaxed(node)) continue;
 
       const level = this.upgrades.getLevel(node.id);
-      const unlocked = this.upgrades.isUnlocked(node);
 
       if (level > 0) {
-        // Purchased — solid branch color, no glow
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 2;
-        ctx.globalAlpha = 0.7;
-        ctx.beginPath();
-        ctx.moveTo(parentPos.x, parentPos.y);
-        ctx.lineTo(childPos.x, childPos.y);
-        ctx.stroke();
-      } else if (unlocked) {
-        // Unlocked, not yet bought — dim branch color
-        ctx.strokeStyle = BRANCH_COLORS[node.branch];
-        ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.25;
-        ctx.beginPath();
-        ctx.moveTo(parentPos.x, parentPos.y);
-        ctx.lineTo(childPos.x, childPos.y);
-        ctx.stroke();
+        ctx.strokeStyle = "#aaaaaa";
+        ctx.globalAlpha = 0.5;
       } else {
-        // Locked — muted grey, still visible
-        ctx.strokeStyle = COLORS.panelBorder;
-        ctx.lineWidth = 1;
-        ctx.globalAlpha = 0.28;
-        ctx.beginPath();
-        ctx.moveTo(parentPos.x, parentPos.y);
-        ctx.lineTo(childPos.x, childPos.y);
-        ctx.stroke();
+        ctx.strokeStyle = "#555555";
+        ctx.globalAlpha = 0.35;
       }
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(parentPos.x, parentPos.y);
+      ctx.lineTo(childPos.x, childPos.y);
+      ctx.stroke();
       ctx.globalAlpha = 1;
     }
-
-    // Depth rings
-    ctx.globalAlpha = 0.07;
-    ctx.strokeStyle = COLORS.panelBorder;
-    ctx.lineWidth = 0.5;
-    for (let d = 1; d <= 3; d++) {
-      ctx.beginPath();
-      ctx.arc(this.CX, this.CY, d * this.DEPTH_SPACING, 0, Math.PI * 2);
-      ctx.stroke();
-    }
-    ctx.globalAlpha = 1;
   }
 
   renderBranchLabels(renderer: Renderer) {
@@ -399,7 +375,7 @@ export class UpgradeScreen {
     }
   }
 
-  renderNodes(renderer: Renderer, ctx: CanvasRenderingContext2D) {
+  renderNodes(_renderer: Renderer, ctx: CanvasRenderingContext2D) {
     for (const node of UPGRADE_TREE) {
       const pos = this.nodePositions.get(node.id);
       if (!pos) continue;
@@ -414,6 +390,14 @@ export class UpgradeScreen {
 
       const r = isRoot ? this.NODE_RADIUS + 5 : this.NODE_RADIUS;
 
+      // Bobbing offset — each node gets a unique phase from its index
+      const nodeIdx = UPGRADE_TREE.indexOf(node);
+      const phase = nodeIdx * 1.3;
+      const bobAmp = isRoot ? 2 : 1.5;
+      const bobSpeed = isRoot ? 1.2 : 0.9 + (nodeIdx % 3) * 0.15;
+      const bobY = Math.sin(this.time * bobSpeed + phase) * bobAmp;
+      const bobX = Math.cos(this.time * bobSpeed * 0.6 + phase) * bobAmp * 0.4;
+
       // Shake animation offset
       let shakeX = 0;
       let shakeY = 0;
@@ -423,66 +407,74 @@ export class UpgradeScreen {
         shakeY = (Math.random() - 0.5) * intensity;
       }
 
-      const nx = pos.x + shakeX;
-      const ny = pos.y + shakeY;
+      const nx = pos.x + shakeX + bobX;
+      const ny = pos.y + shakeY + bobY;
 
-      if (isRoot) {
-        // Root node — solid white filled circle
-        ctx.fillStyle = "#ffffff";
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.fill();
-      } else if (maxed) {
-        // Maxed — hollow with alpha gradient border
-        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
-        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 1));
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (level > 0) {
-        // Partially upgraded — progress arc with alpha gradient
-        const progressAngle = (level / node.maxLevel) * Math.PI * 2;
-        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
-        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.95));
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
-        ctx.stroke();
-      } else if (canBuy) {
-        // Affordable and unlocked — hollow with alpha gradient
-        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
-        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.3));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 1));
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 1.8;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
-      } else if (unlocked) {
-        // Unlocked but can't afford — muted gradient
-        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
-        grad.addColorStop(0, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.15));
-        grad.addColorStop(1, renderer.hexToRgba(BRANCH_COLORS[node.branch], 0.5));
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 1.2;
-        ctx.beginPath();
-        ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
+      // Black background circle/hex behind every node
+      if (!isRoot && maxed) {
+        this.drawHexagon(ctx, nx, ny, r, "#000000", "transparent", 0);
       } else {
-        // Locked — dim grey gradient
-        const grad = ctx.createRadialGradient(nx, ny, r * 0.85, nx, ny, r);
-        grad.addColorStop(0, "rgba(68, 85, 102, 0.15)");
-        grad.addColorStop(1, "rgba(68, 85, 102, 0.45)");
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
-        ctx.stroke();
+        ctx.fillStyle = "#000000";
+        ctx.fill();
+      }
+
+      // Outer glow / ring drawn before border shape
+      if (!isRoot) {
+        const pulse = (Math.sin(this.time * 2.2 + phase) + 1) / 2; // 0..1
+        if (maxed) {
+          // Gold shimmer glow
+          ctx.save();
+          ctx.shadowColor = "#ffd700";
+          ctx.shadowBlur = 6 + pulse * 8;
+          this.drawHexagon(ctx, nx, ny, r, "rgba(255,210,0,0.18)", "#ffd700", 1.5);
+          ctx.restore();
+        } else if (level > 0) {
+          // Partially bought — pink progress arc + dim full ring
+          const progressAngle = (level / node.maxLevel) * Math.PI * 2;
+          ctx.strokeStyle = "rgba(255,100,180,0.25)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.arc(nx, ny, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.save();
+          ctx.shadowColor = "#ff69b4";
+          ctx.shadowBlur = 4 + pulse * 6;
+          ctx.strokeStyle = "#ff69b4";
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
+          ctx.stroke();
+          ctx.restore();
+        } else if (this.upgrades.isUnlocked(node)) {
+          const cost2 = getUpgradeCost(node, level);
+          const canBuy2 = this.upgrades.canAfford(cost2);
+          ctx.save();
+          if (canBuy2) {
+            ctx.shadowColor = "#00ffff";
+            ctx.shadowBlur = 6 + pulse * 10;
+          } else {
+            ctx.shadowColor = "#ff4444";
+            ctx.shadowBlur = 3 + pulse * 4;
+          }
+          ctx.strokeStyle = canBuy2 ? "#00ffff" : "#ff4444";
+          ctx.lineWidth = canBuy2 ? 1.5 : 1;
+          ctx.globalAlpha = canBuy2 ? 0.9 : 0.65;
+          ctx.beginPath();
+          ctx.arc(nx, ny, r, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+          ctx.globalAlpha = 1;
+        }
+      } else {
+        // Root node — gold hexagon with glow
+        const pulse = (Math.sin(this.time * 1.5) + 1) / 2;
+        ctx.save();
+        ctx.shadowColor = "#ffd700";
+        ctx.shadowBlur = 8 + pulse * 12;
+        this.drawHexagon(ctx, nx, ny, r, "rgba(255,210,0,0.25)", "#ffd700", 2);
+        ctx.restore();
       }
 
       // Icon alpha: locked = 0.45 (visible, greyed), unlocked-can't-afford = 0.6, else full
@@ -492,18 +484,18 @@ export class UpgradeScreen {
       if (node.iconPath) {
         const img = this.iconImages.get(node.iconPath);
         if (img && img.complete && img.naturalWidth > 0) {
-          const iconSize = isRoot ? 28 : 22;
+          const iconSize = 24;
           ctx.drawImage(img, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
         } else {
           ctx.font = `${isRoot ? 16 : 13}px Tektur`;
-          ctx.fillStyle = isRoot ? "#111" : "#fff";
+          ctx.fillStyle = "#fff";
           ctx.textAlign = "center";
           ctx.textBaseline = "middle";
           ctx.fillText(node.icon, nx, ny);
         }
       } else {
         ctx.font = `${isRoot ? 16 : 13}px Tektur`;
-        ctx.fillStyle = isRoot ? "#111" : "#fff";
+        ctx.fillStyle = "#fff";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(node.icon, nx, ny);
@@ -747,6 +739,33 @@ export class UpgradeScreen {
       ctx.textBaseline = "bottom";
       ctx.fillText(`Reach Lv10 (current: ${this.upgrades.save.highestLevel})`, pBtnX, barY - 4);
       ctx.restore();
+    }
+  }
+
+  private drawHexagon(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    r: number,
+    fill: string,
+    stroke: string,
+    lineWidth: number
+  ) {
+    ctx.beginPath();
+    for (let i = 0; i < 6; i++) {
+      const angle = (Math.PI / 3) * i - Math.PI / 6;
+      const hx = x + r * Math.cos(angle);
+      const hy = y + r * Math.sin(angle);
+      if (i === 0) ctx.moveTo(hx, hy);
+      else ctx.lineTo(hx, hy);
+    }
+    ctx.closePath();
+    ctx.fillStyle = fill;
+    ctx.fill();
+    if (lineWidth > 0) {
+      ctx.strokeStyle = stroke;
+      ctx.lineWidth = lineWidth;
+      ctx.stroke();
     }
   }
 
