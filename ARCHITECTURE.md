@@ -645,6 +645,18 @@ Complete redesign of the upgrade screen UI from a flat programmer layout to a po
 
 *Last updated by agent — 2026-03-09. Boss reward flow + tutorial overhaul.*
 
+### 2026-03-09 — Mobile 1.75× Sprite Scale-Up (Player, Rocks, Mothership)
+
+1. **Added `isMobileDevice` and `MOBILE_SPRITE_SCALE` to Constants.ts** — `isMobileDevice` is a one-time check at module load (`ontouchstart` or `maxTouchPoints > 0`). `MOBILE_SPRITE_SCALE = 1.75` is the multiplier applied to visual sprite sizes on mobile devices. Desktop rendering is unchanged (multiplier = 1).
+
+2. **Player sprite 1.75× on mobile** — `SPRITE_W` (16px) and `SPRITE_H` (23.6px) are now multiplied by `MOBILE_SPRITE_SCALE` on touch devices, making the player ship 32×47.2px on mobile. Collision radius is unchanged.
+
+3. **Rock sprites 1.75× on mobile** — `drawSize` (`radius * 3.5`) is now multiplied by `MOBILE_SPRITE_SCALE` on touch devices. Small rocks render at ~70px, big rocks at ~154px on mobile. Collision radii are unchanged.
+
+4. **Mothership sprite 1.75× on mobile** — `SPRITE_SIZE` (60px) is now multiplied by `MOBILE_SPRITE_SCALE` on touch devices (120px on mobile). HP bar, HP text font, fallback circle, and death animation GIF are all scaled proportionally. Collision radius is unchanged.
+
+*Last updated by agent — 2026-03-09. Mobile 2× sprite scale-up.*
+
 ## TODO — Deferred
 
 - [ ] **Interactive tutorial demo** — Let the user practice movement with the real joystick and dash on a safe target before starting. Lower priority now that the visual tutorial shows the actual controls layout.

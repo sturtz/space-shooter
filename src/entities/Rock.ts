@@ -1,7 +1,13 @@
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
 import { Vec2, vec2, vecSub, vecNormalize, vecAdd, vecScale, randomRange } from "../utils/Math";
-import { ROCK_SIZE, ROCK_BIG_SIZE, COLORS } from "../utils/Constants";
+import {
+  ROCK_SIZE,
+  ROCK_BIG_SIZE,
+  COLORS,
+  isMobileDevice,
+  MOBILE_SPRITE_SCALE,
+} from "../utils/Constants";
 import { AsteroidImages, pickRandom, imageReady } from "../utils/Assets";
 
 export class Rock extends Enemy {
@@ -64,7 +70,8 @@ export class Rock extends Enemy {
     const ctx = renderer.ctx;
     const isFlashing = this.flashTimer > 0;
     const isPoisoned = this.poisonTimer > 0;
-    const drawSize = this.radius * 3.5; // sprite draw size — scaled up for mobile readability
+    const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
+    const drawSize = this.radius * 3.5 * mob; // sprite draw size — 3× on mobile
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);

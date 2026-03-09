@@ -1,5 +1,13 @@
 // === GAME CONSTANTS ===
 
+// Mobile detection (resolved once at module load)
+export const isMobileDevice =
+  typeof globalThis !== "undefined" &&
+  ("ontouchstart" in globalThis || (navigator && navigator.maxTouchPoints > 0));
+
+/** Visual sprite scale multiplier for mobile devices */
+export const MOBILE_SPRITE_SCALE = 1.75;
+
 // Canvas
 export const GAME_WIDTH = 1200;
 export const GAME_HEIGHT = 800;

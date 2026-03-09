@@ -1,6 +1,13 @@
 import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
-import { GAME_WIDTH, GAME_HEIGHT, MOTHERSHIP_COLLISION_RADIUS, COLORS } from "../utils/Constants";
+import {
+  GAME_WIDTH,
+  GAME_HEIGHT,
+  MOTHERSHIP_COLLISION_RADIUS,
+  COLORS,
+  isMobileDevice,
+  MOBILE_SPRITE_SCALE,
+} from "../utils/Constants";
 import { ShipImages, imageReady } from "../utils/Assets";
 
 export class Mothership extends Entity {
@@ -52,8 +59,9 @@ export class Mothership extends Entity {
     const cx = this.pos.x;
     const cy = this.pos.y;
 
+    const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
     const pulseScale = 1 + Math.sin(this.pulseTimer * 2) * 0.04;
-    const SPRITE_SIZE = 60;
+    const SPRITE_SIZE = 60 * mob; // 3× on mobile
 
     ctx.save();
 
@@ -85,15 +93,15 @@ export class Mothership extends Entity {
       ctx.strokeStyle = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(cx, cy, 18, 0, Math.PI * 2);
+      ctx.arc(cx, cy, 18 * mob, 0, Math.PI * 2);
       ctx.stroke();
     }
 
     // HP bar below
-    const barWidth = 40;
-    const barHeight = 3;
+    const barWidth = 40 * mob;
+    const barHeight = 3 * mob;
     const barX = cx - barWidth / 2;
-    const barY = cy + 28;
+    const barY = cy + 28 * mob;
     const hpRatio = this.hp / this.maxHp;
 
     // HP bar outline style
@@ -107,7 +115,7 @@ export class Mothership extends Entity {
 
     // HP numbers
     ctx.fillStyle = "#fff";
-    ctx.font = "8px Tektur";
+    ctx.font = `${8 * mob}px Tektur`;
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);
@@ -117,7 +125,7 @@ export class Mothership extends Entity {
       const deathImg = ShipImages.mothershipDeath;
       if (imageReady(deathImg)) {
         const progress = 1 - this.deathAnimTimer / this.DEATH_ANIM_DURATION;
-        const gifSize = 80 + progress * 40; // expands 80→120px
+        const gifSize = (80 + progress * 40) * mob; // expands 80→120px (3× on mobile)
         ctx.globalAlpha = Math.min(1, this.deathAnimTimer / 0.3); // fade out in last 300ms
         ctx.drawImage(deathImg, cx - gifSize / 2, cy - gifSize / 2, gifSize, gifSize);
         ctx.globalAlpha = 1;

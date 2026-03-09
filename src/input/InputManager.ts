@@ -231,17 +231,11 @@ export class InputManager {
     canvas.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
   }
 
-  /** Convert a Touch event to game coordinates (clamped to game area) */
+  /** Convert a Touch event to game coordinates (unclamped — side zones valid for joystick) */
   private touchToGame(touch: Touch): { gameX: number; gameY: number } {
     return {
-      gameX: Math.max(
-        0,
-        Math.min(GAME_WIDTH, (touch.clientX - this._gameOffsetX) / this._gameScale)
-      ),
-      gameY: Math.max(
-        0,
-        Math.min(GAME_HEIGHT, (touch.clientY - this._gameOffsetY) / this._gameScale)
-      ),
+      gameX: (touch.clientX - this._gameOffsetX) / this._gameScale,
+      gameY: (touch.clientY - this._gameOffsetY) / this._gameScale,
     };
   }
 

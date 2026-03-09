@@ -3,7 +3,14 @@ import { Renderer } from "../rendering/Renderer";
 import { InputManager } from "../input/InputManager";
 import { PlayerStats } from "../upgrades/UpgradeManager";
 import { Vec2, vec2, vecScale, vecFromAngle, clamp } from "../utils/Math";
-import { GAME_WIDTH, GAME_HEIGHT, PLAYER_COLLISION_RADIUS, COLORS } from "../utils/Constants";
+import {
+  GAME_WIDTH,
+  GAME_HEIGHT,
+  PLAYER_COLLISION_RADIUS,
+  COLORS,
+  isMobileDevice,
+  MOBILE_SPRITE_SCALE,
+} from "../utils/Constants";
 import { PlayerImages, imageReady } from "../utils/Assets";
 
 export interface DashResult {
@@ -159,8 +166,9 @@ export class Player extends Entity {
     // ship-glider.svg — nose points up (north) in SVG space.
     // rotate(angle + Math.PI/2) maps north → aim direction correctly.
     // spaceship.svg has a square viewBox — use equal W and H.
-    const SPRITE_W = 16; // display size in game-pixels (scaled up for mobile)
-    const SPRITE_H = 23.6; // starfighter-r2 viewBox is 208×304 → aspect preserved
+    const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
+    const SPRITE_W = 16 * mob; // display size in game-pixels (3× on mobile)
+    const SPRITE_H = 23.6 * mob; // starfighter-r2 viewBox is 208×304 → aspect preserved
 
     // ── DASH (no flash — just render with cyan glow) ────────────
     if (this.isDashing) {
