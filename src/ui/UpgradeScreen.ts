@@ -1,9 +1,7 @@
 import { Renderer } from "../rendering/Renderer";
-import { UpgradeManager } from "../upgrades/UpgradeManager";
 import {
   UPGRADE_TREE,
   UpgradeNode,
-  UpgradeBranch,
   getUpgradeCost,
   getParentNode,
   BRANCH_ANGLES,
@@ -11,7 +9,8 @@ import {
 } from "../upgrades/UpgradeTree";
 import { saveGame, clearSave, getDefaultSave } from "../utils/SaveManager";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
-import { IGame } from "../game/GameInterface";
+import { PlayerImages, imageReady } from "../utils/Assets";
+import type { ScreenManager } from "../game/ScreenManager";
 
 interface ClickableArea {
   x: number;
@@ -32,28 +31,24 @@ interface NodePos {
 }
 
 export class UpgradeScreen {
-  upgrades: UpgradeManager;
-  game: IGame;
+  renderer: Renderer;
+  manager: ScreenManager;
   clickables: ClickableArea[] = [];
   hoveredNode: UpgradeNode | null = null;
   nodePositions: Map<string, NodePos> = new Map();
   tooltip: { node: UpgradeNode; x: number; y: number } | null = null;
   cantAffordShake: ShakeAnim | null = null;
   cantAffordMessage: { text: string; timer: number } | null = null;
-  /** Preloaded SVG images keyed by iconPath */
   iconImages: Map<string, HTMLImageElement> = new Map();
 
-  // Layout constants
   readonly CX = GAME_WIDTH / 2;
   readonly CY = GAME_HEIGHT / 2 - 20;
   readonly DEPTH_SPACING = 120;
   readonly NODE_RADIUS = 20;
   readonly BRANCH_SPREAD = 0.3;
 
-  // Animation time
   time = 0;
 
-  // Pan / drag state
   panX = 0;
   panY = 0;
   private isPanning = false;
@@ -63,14 +58,100 @@ export class UpgradeScreen {
   private panStartPanY = 0;
   private panMoved = 0;
 
-  constructor(upgrades: UpgradeManager, game: IGame) {
-    this.upgrades = upgrades;
-    this.game = game;
+  // Mouse position tracking for tooltips
+  private mouseX = 0;
+  private mouseY = 0;
+  private touchActive = false;
+
+  constructor(renderer: Renderer, manager: ScreenManager) {
+    this.renderer = renderer;
+    this.manager = manager;
     this.computeNodePositions();
     this.preloadIcons();
+
+    const canvas = renderer.canvas;
+
+    const getScaledCoords = (clientX: number, clientY: number) => {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = GAME_WIDTH / rect.width;
+      const scaleY = GAME_HEIGHT / rect.height;
+      return {
+        mx: (clientX - rect.left) * scaleX,
+        my: (clientY - rect.top) * scaleY,
+      };
+    };
+
+    // Mouse/desktop click
+    canvas.addEventListener("click", (e) => {
+      const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+      this.handleClick(mx, my);
+    });
+
+    // Mouse move for tooltips
+    canvas.addEventListener("mousemove", (e) => {
+      const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+      this.mouseX = mx;
+      this.mouseY = my;
+    });
+
+    // Pan — mouse
+    canvas.addEventListener("mousedown", (e) => {
+      const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+      this.beginPan(mx, my);
+    });
+    canvas.addEventListener("mousemove", (e) => {
+      if (this.isPanning) {
+        const { mx, my } = getScaledCoords(e.clientX, e.clientY);
+        this.updatePan(mx, my);
+      }
+    });
+    canvas.addEventListener("mouseup", () => {
+      this.endPan();
+    });
+
+    // Touch
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        const touch = e.touches[0];
+        const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        this.beginPan(mx, my);
+        this.touchActive = true;
+        this.mouseX = mx;
+        this.mouseY = my;
+      },
+      { passive: true }
+    );
+    canvas.addEventListener(
+      "touchmove",
+      (e) => {
+        e.preventDefault();
+        const touch = e.touches[0];
+        const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        this.updatePan(mx, my);
+        this.mouseX = mx;
+        this.mouseY = my;
+      },
+      { passive: false }
+    );
+    canvas.addEventListener(
+      "touchend",
+      (e) => {
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        this.endPan();
+        this.touchActive = false;
+        this.handleClick(mx, my);
+      },
+      { passive: false }
+    );
   }
 
-  /** Preload all unique SVG icon paths from the upgrade tree. */
+  get upgrades() {
+    return this.manager.upgrades;
+  }
+
   preloadIcons() {
     for (const node of UPGRADE_TREE) {
       if (node.iconPath && !this.iconImages.has(node.iconPath)) {
@@ -106,7 +187,6 @@ export class UpgradeScreen {
     const dx = mx - this.panStartX;
     const dy = my - this.panStartY;
     this.panMoved = Math.sqrt(dx * dx + dy * dy);
-    // Keep root node (CX, CY) at least 50px inside the viewport at all times
     const margin = 50;
     const minX = -(this.CX - margin);
     const maxX = GAME_WIDTH - this.CX - margin;
@@ -141,7 +221,6 @@ export class UpgradeScreen {
     }
   }
 
-  /** A node is visible once its required parent level is met. */
   private isParentMaxed(node: UpgradeNode): boolean {
     if (!node.requires || node.requires.length === 0) return true;
     const req = node.requires[0];
@@ -149,7 +228,6 @@ export class UpgradeScreen {
   }
 
   handleClick(mx: number, my: number) {
-    // Suppress tap if the pointer has dragged (pan gesture)
     const dragged = this.hasDragged();
     this.panMoved = 0;
     if (dragged) return;
@@ -162,7 +240,6 @@ export class UpgradeScreen {
       }
     }
 
-    // Node positions are in world space; convert screen coords by subtracting pan
     const wmx = mx - this.panX;
     const wmy = my - this.panY;
 
@@ -184,9 +261,9 @@ export class UpgradeScreen {
   tryPurchaseNode(node: UpgradeNode) {
     if (this.upgrades.purchaseUpgrade(node)) {
       saveGame(this.upgrades.save);
-      this.game.audio?.playUpgrade();
+      this.manager.audio?.playUpgrade();
     } else {
-      this.game.audio?.playError();
+      this.manager.audio?.playError();
       this.cantAffordShake = { nodeId: node.id, timer: 0.3 };
       const level = this.upgrades.getLevel(node.id);
       const maxed = level >= node.maxLevel;
@@ -207,27 +284,27 @@ export class UpgradeScreen {
     }
   }
 
-  render(renderer: Renderer, dt: number = 1 / 60) {
-    this.clickables = [];
+  update(dt: number) {
     this.time += dt;
+    if (this.cantAffordShake && this.cantAffordShake.timer > 0) {
+      this.cantAffordShake.timer -= dt;
+      if (this.cantAffordShake.timer <= 0) this.cantAffordShake = null;
+    }
+    if (this.cantAffordMessage && this.cantAffordMessage.timer > 0) {
+      this.cantAffordMessage.timer -= dt;
+      if (this.cantAffordMessage.timer <= 0) this.cantAffordMessage = null;
+    }
+  }
+
+  render(dt: number = 1 / 60) {
+    this.clickables = [];
+    const renderer = this.renderer;
     const ctx = renderer.ctx;
 
-    // Dark background with subtle vignette
-    ctx.fillStyle = COLORS.panelBg;
-    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    renderer.beginFrame(dt);
 
-    // Vignette effect
-    const vignetteGrad = ctx.createRadialGradient(
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2,
-      GAME_WIDTH * 0.2,
-      GAME_WIDTH / 2,
-      GAME_HEIGHT / 2,
-      GAME_WIDTH * 0.7
-    );
-    vignetteGrad.addColorStop(0, "rgba(0,0,0,0)");
-    vignetteGrad.addColorStop(1, "rgba(0,0,0,0.4)");
-    ctx.fillStyle = vignetteGrad;
+    // Semi-transparent dark overlay so p5.js background shows through
+    ctx.fillStyle = "rgba(6, 6, 18, 0.55)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
     // Title panel
@@ -250,7 +327,7 @@ export class UpgradeScreen {
       "middle"
     );
 
-    // Coins display panel
+    // Coins display
     const coinsStr = `💰 ${this.upgrades.save.coins}    ⭐ ${this.upgrades.save.starCoins}    LV ${this.upgrades.save.currentLevel}`;
     renderer.drawPanel(GAME_WIDTH / 2 - 150, 36, 300, 20, {
       bg: "rgba(6, 6, 20, 0.7)",
@@ -266,17 +343,7 @@ export class UpgradeScreen {
     ctx.fillText(coinsStr, GAME_WIDTH / 2, 46);
     ctx.restore();
 
-    // Update shake/message timers
-    if (this.cantAffordShake && this.cantAffordShake.timer > 0) {
-      this.cantAffordShake.timer -= dt;
-      if (this.cantAffordShake.timer <= 0) this.cantAffordShake = null;
-    }
-    if (this.cantAffordMessage && this.cantAffordMessage.timer > 0) {
-      this.cantAffordMessage.timer -= dt;
-      if (this.cantAffordMessage.timer <= 0) this.cantAffordMessage = null;
-    }
-
-    // Apply pan offset for the world-space tree; UI panels are drawn after restore
+    // Pan offset for world-space tree
     ctx.save();
     ctx.translate(this.panX, this.panY);
     this.renderConnections(ctx);
@@ -287,32 +354,30 @@ export class UpgradeScreen {
     this.renderTooltip(renderer, ctx);
     this.renderBottomBar(renderer, ctx);
 
-    // Can't afford message — floating panel
+    // Can't afford message
     if (this.cantAffordMessage) {
       const msgAlpha = Math.min(1, this.cantAffordMessage.timer);
       ctx.save();
       ctx.globalAlpha = msgAlpha;
-
       const msgW = 280;
       const msgH = 28;
       const msgX = GAME_WIDTH / 2 - msgW / 2;
       const msgY = GAME_HEIGHT / 2 + 90;
-
       renderer.drawPanel(msgX, msgY, msgW, msgH, {
         bg: "rgba(40, 8, 8, 0.9)",
         border: "rgba(255, 68, 68, 0.5)",
         radius: 6,
       });
-
       ctx.font = `bold 12px Tektur`;
       ctx.fillStyle = COLORS.hpBarDamage;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillText(this.cantAffordMessage.text, GAME_WIDTH / 2, msgY + msgH / 2);
-
       ctx.globalAlpha = 1;
       ctx.restore();
     }
+
+    renderer.endFrame();
   }
 
   renderConnections(ctx: CanvasRenderingContext2D) {
@@ -320,7 +385,6 @@ export class UpgradeScreen {
       if (node.id === "root") continue;
       const childPos = this.nodePositions.get(node.id);
       if (!childPos) continue;
-
       const parent = getParentNode(node);
       if (!parent) continue;
       const parentPos = this.nodePositions.get(parent.id);
@@ -345,34 +409,8 @@ export class UpgradeScreen {
     }
   }
 
-  renderBranchLabels(renderer: Renderer) {
-    const ctx = renderer.ctx;
-    const branches: UpgradeBranch[] = [
-      "dmg",
-      "guns",
-      "economy",
-      "movement",
-      "health",
-      "mothership",
-    ];
-    for (const branch of branches) {
-      const angle = BRANCH_ANGLES[branch];
-      const dist = 3.3 * this.DEPTH_SPACING;
-      let ly = this.CY + Math.sin(angle) * dist;
-      if (ly < 62) ly = 62;
-      if (ly > GAME_HEIGHT - 48) ly = GAME_HEIGHT - 48;
-
-      // Label with subtle bg pill
-      ctx.save();
-      ctx.font = `bold 8px Tektur`;
-
-      ctx.globalAlpha = 1;
-
-      ctx.fillStyle = BRANCH_COLORS[branch];
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.restore();
-    }
+  renderBranchLabels(_renderer: Renderer) {
+    // Labels are positioned but not drawn (per original code)
   }
 
   renderNodes(_renderer: Renderer, ctx: CanvasRenderingContext2D) {
@@ -390,7 +428,6 @@ export class UpgradeScreen {
 
       const r = isRoot ? this.NODE_RADIUS + 5 : this.NODE_RADIUS;
 
-      // Bobbing offset — each node gets a unique phase from its index
       const nodeIdx = UPGRADE_TREE.indexOf(node);
       const phase = nodeIdx * 1.3;
       const bobAmp = isRoot ? 2 : 1.5;
@@ -398,7 +435,6 @@ export class UpgradeScreen {
       const bobY = Math.sin(this.time * bobSpeed + phase) * bobAmp;
       const bobX = Math.cos(this.time * bobSpeed * 0.6 + phase) * bobAmp * 0.4;
 
-      // Shake animation offset
       let shakeX = 0;
       let shakeY = 0;
       if (this.cantAffordShake && this.cantAffordShake.nodeId === node.id) {
@@ -410,7 +446,6 @@ export class UpgradeScreen {
       const nx = pos.x + shakeX + bobX;
       const ny = pos.y + shakeY + bobY;
 
-      // Black background circle/hex behind every node
       if (!isRoot && maxed) {
         this.drawHexagon(ctx, nx, ny, r, "#000000", "transparent", 0);
       } else {
@@ -420,18 +455,15 @@ export class UpgradeScreen {
         ctx.fill();
       }
 
-      // Outer glow / ring drawn before border shape
       if (!isRoot) {
-        const pulse = (Math.sin(this.time * 2.2 + phase) + 1) / 2; // 0..1
+        const pulse = (Math.sin(this.time * 2.2 + phase) + 1) / 2;
         if (maxed) {
-          // Gold shimmer glow
           ctx.save();
           ctx.shadowColor = "#ffd700";
           ctx.shadowBlur = 6 + pulse * 8;
           this.drawHexagon(ctx, nx, ny, r, "rgba(255,210,0,0.18)", "#ffd700", 1.5);
           ctx.restore();
         } else if (level > 0) {
-          // Partially bought — pink progress arc + dim full ring
           const progressAngle = (level / node.maxLevel) * Math.PI * 2;
           ctx.strokeStyle = "rgba(255,100,180,0.25)";
           ctx.lineWidth = 1;
@@ -452,13 +484,13 @@ export class UpgradeScreen {
           const canBuy2 = this.upgrades.canAfford(cost2);
           ctx.save();
           if (canBuy2) {
-            ctx.shadowColor = "#00ffff";
+            ctx.shadowColor = "#ffffff";
             ctx.shadowBlur = 6 + pulse * 10;
           } else {
             ctx.shadowColor = "#ff4444";
             ctx.shadowBlur = 3 + pulse * 4;
           }
-          ctx.strokeStyle = canBuy2 ? "#00ffff" : "#ff4444";
+          ctx.strokeStyle = canBuy2 ? "#ffffff" : "#ff4444";
           ctx.lineWidth = canBuy2 ? 1.5 : 1;
           ctx.globalAlpha = canBuy2 ? 0.9 : 0.65;
           ctx.beginPath();
@@ -468,42 +500,68 @@ export class UpgradeScreen {
           ctx.globalAlpha = 1;
         }
       } else {
-        // Root node — gold hexagon with glow
+        // Root node: draw player sprite instead of gold hexagon
+        const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
         const pulse = (Math.sin(this.time * 1.5) + 1) / 2;
         ctx.save();
-        ctx.shadowColor = "#ffd700";
-        ctx.shadowBlur = 8 + pulse * 12;
-        this.drawHexagon(ctx, nx, ny, r, "rgba(255,210,0,0.25)", "#ffd700", 2);
+        if (sprite) {
+          ctx.shadowColor = COLORS.player;
+          ctx.shadowBlur = 8 + pulse * 12;
+          const spriteSize = r * 2.2;
+          ctx.drawImage(sprite, nx - spriteSize / 2, ny - spriteSize / 2, spriteSize, spriteSize);
+        } else {
+          // Fallback if sprite not loaded yet
+          ctx.shadowColor = "#ffd700";
+          ctx.shadowBlur = 8 + pulse * 12;
+          this.drawHexagon(ctx, nx, ny, r, "rgba(255,210,0,0.25)", "#ffd700", 2);
+        }
         ctx.restore();
       }
 
-      // Icon alpha: locked = 0.45 (visible, greyed), unlocked-can't-afford = 0.6, else full
-      const iconAlpha = !unlocked ? 0.45 : !canBuy && !maxed && level === 0 ? 0.6 : 1.0;
-      ctx.save();
-      ctx.globalAlpha = isRoot ? 1 : iconAlpha;
-      if (node.iconPath) {
-        const img = this.iconImages.get(node.iconPath);
-        if (img && img.complete && img.naturalWidth > 0) {
-          const iconSize = 24;
-          ctx.drawImage(img, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
+      // Draw node interior — colored gradient fill instead of SVG icons
+      if (!isRoot) {
+        const iconAlpha = !unlocked ? 0.35 : !canBuy && !maxed && level === 0 ? 0.5 : 0.85;
+        const branchColor = BRANCH_COLORS[node.branch];
+        ctx.save();
+        ctx.globalAlpha = iconAlpha;
+
+        // Radial gradient fill using the branch color
+        const innerR = r * 0.75;
+        const grad = ctx.createRadialGradient(nx, ny - innerR * 0.3, 0, nx, ny, innerR);
+        grad.addColorStop(0, branchColor);
+        grad.addColorStop(1, "rgba(0,0,0,0.6)");
+
+        if (maxed) {
+          // Hexagon fill for maxed nodes
+          ctx.beginPath();
+          for (let i = 0; i < 6; i++) {
+            const angle = (Math.PI / 3) * i - Math.PI / 6;
+            const hx = nx + innerR * Math.cos(angle);
+            const hy = ny + innerR * Math.sin(angle);
+            if (i === 0) ctx.moveTo(hx, hy);
+            else ctx.lineTo(hx, hy);
+          }
+          ctx.closePath();
+          ctx.fillStyle = grad;
+          ctx.fill();
         } else {
-          ctx.font = `${isRoot ? 16 : 13}px Tektur`;
-          ctx.fillStyle = "#fff";
-          ctx.textAlign = "center";
-          ctx.textBaseline = "middle";
-          ctx.fillText(node.icon, nx, ny);
+          ctx.beginPath();
+          ctx.arc(nx, ny, innerR, 0, Math.PI * 2);
+          ctx.fillStyle = grad;
+          ctx.fill();
         }
-      } else {
-        ctx.font = `${isRoot ? 16 : 13}px Tektur`;
+
+        // Draw the emoji icon on top (small, centered)
+        ctx.font = `11px Tektur`;
         ctx.fillStyle = "#fff";
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
         ctx.fillText(node.icon, nx, ny);
-      }
-      ctx.restore();
-      ctx.globalAlpha = 1;
 
-      // Level text below node
+        ctx.restore();
+        ctx.globalAlpha = 1;
+      }
+
       if (level > 0 && !isRoot) {
         const lvlText = maxed ? "MAX" : `${level}/${node.maxLevel}`;
         ctx.save();
@@ -518,16 +576,11 @@ export class UpgradeScreen {
   }
 
   renderTooltip(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    const input = this.game.input;
-    if (!input) return;
-    // On touch devices, only show tooltip while a finger is actively on the screen
-    if (input.isTouchDevice && !input.touchTargetActive) return;
-    const mousePos = input.mousePos;
-    if (!mousePos) return;
+    const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    if (isTouchDevice && !this.touchActive) return;
 
-    // Convert screen coords to world space (undo pan offset)
-    const wx = mousePos.x - this.panX;
-    const wy = mousePos.y - this.panY;
+    const wx = this.mouseX - this.panX;
+    const wy = this.mouseY - this.panY;
 
     let closest: UpgradeNode | null = null;
     let closestDist = Infinity;
@@ -553,7 +606,6 @@ export class UpgradeScreen {
     const maxed = level >= closest.maxLevel;
     const cost = maxed ? 0 : getUpgradeCost(closest, level);
 
-    // Tooltip panel at bottom
     const panelW = GAME_WIDTH - 60;
     const panelH = 56;
     const panelX = 30;
@@ -567,7 +619,6 @@ export class UpgradeScreen {
       glowBlur: 10,
     });
 
-    // Name + icon
     ctx.save();
     ctx.font = `bold 14px  Tektur`;
     ctx.fillStyle = BRANCH_COLORS[closest.branch];
@@ -576,7 +627,6 @@ export class UpgradeScreen {
     ctx.fillText(`${closest.icon} ${closest.name}`, panelX + 10, panelY + 7);
     ctx.restore();
 
-    // Level badge
     ctx.save();
     ctx.font = `bold 12px  Tektur`;
     ctx.fillStyle = maxed ? COLORS.player : COLORS.textSecondary;
@@ -585,7 +635,6 @@ export class UpgradeScreen {
     ctx.fillText(`Lv ${level}/${closest.maxLevel}`, panelX + panelW - 10, panelY + 8);
     ctx.restore();
 
-    // Description
     ctx.save();
     ctx.font = `10px Tektur`;
     ctx.fillStyle = COLORS.textSecondary;
@@ -594,7 +643,6 @@ export class UpgradeScreen {
     ctx.fillText(closest.description, panelX + 10, panelY + 24);
     ctx.restore();
 
-    // Status line
     ctx.save();
     ctx.font = `bold 9px  Tektur`;
     ctx.textAlign = "left";
@@ -615,11 +663,10 @@ export class UpgradeScreen {
   }
 
   renderBottomBar(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    // Bottom button bar
     const barY = GAME_HEIGHT - 34;
     const btnH = 30;
 
-    // START RUN button — prominent center
+    // START RUN button
     const playBtnW = 180;
     const playBtnX = GAME_WIDTH / 2 - playBtnW / 2;
 
@@ -637,7 +684,7 @@ export class UpgradeScreen {
       y: barY,
       w: playBtnW,
       h: btnH,
-      action: () => this.game.startRun(),
+      action: () => this.manager.startRunFromUpgrade(),
     });
 
     // RESET button (top right)
@@ -686,15 +733,12 @@ export class UpgradeScreen {
       y: barY,
       w: menuBtnW,
       h: btnH,
-      action: () => {
-        this.game.state = "menu";
-      },
+      action: () => this.manager.goToMenu(),
     });
 
     // PRESTIGE button (bottom left)
     const pBtnW = 120;
     const pBtnX = 8;
-
     const canPrestige = this.upgrades.save.highestLevel >= 10;
 
     if (canPrestige) {
@@ -731,7 +775,6 @@ export class UpgradeScreen {
       ctx.globalAlpha = 1;
       ctx.restore();
 
-      // Hint text
       ctx.save();
       ctx.font = `7px Tektur`;
       ctx.fillStyle = "#555";

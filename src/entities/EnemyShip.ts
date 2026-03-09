@@ -108,17 +108,6 @@ export class EnemyShip extends Enemy {
     ctx.lineTo(1, 0);
     ctx.stroke();
 
-    // Elite marker - double outline
-    if (this.isElite) {
-      ctx.strokeStyle = COLORS.coin;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(0, 0, ENEMY_SHIP_SIZE + 4, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
     ctx.restore();
 
     // HP bar if damaged

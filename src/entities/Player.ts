@@ -63,34 +63,43 @@ export class Player extends Entity {
     // Skip normal movement while dashing — dash controls movement directly
     if (this.isDashing) return;
 
-    // Move toward mouse cursor (desktop) or touch position (mobile).
-    // On touch, only move when a finger is actively held down.
-    const canMove = !input.isTouchDevice || input.touchTargetActive;
+    if (input.isTouchDevice) {
+      // Mobile: use joystick direction
+      const joy = input.joystick;
+      this.isMoving = joy.active && joy.magnitude > 0;
 
-    const target = input.mousePos;
-    const dx = target.x - this.pos.x;
-    const dy = target.y - this.pos.y;
-    const dist = Math.sqrt(dx * dx + dy * dy);
+      if (this.isMoving) {
+        const speed = this.stats.moveSpeed * joy.magnitude; // magnitude scales speed
+        this.pos.x += joy.dirX * speed * dt;
+        this.pos.y += joy.dirY * speed * dt;
+        // Face movement direction
+        this.angle = Math.atan2(joy.dirY, joy.dirX);
+      }
+    } else {
+      // Desktop: move toward mouse cursor
+      const target = input.mousePos;
+      const dx = target.x - this.pos.x;
+      const dy = target.y - this.pos.y;
+      const dist = Math.sqrt(dx * dx + dy * dy);
 
-    const STOP_THRESHOLD = 3; // px — prevents jitter when already at cursor
+      const STOP_THRESHOLD = 3;
+      this.isMoving = dist > STOP_THRESHOLD;
 
-    this.isMoving = canMove && dist > STOP_THRESHOLD;
+      if (this.isMoving) {
+        const moveAmount = Math.min(this.stats.moveSpeed * dt, dist);
+        this.pos.x += (dx / dist) * moveAmount;
+        this.pos.y += (dy / dist) * moveAmount;
+      }
 
-    if (this.isMoving) {
-      const moveAmount = Math.min(this.stats.moveSpeed * dt, dist); // never overshoot
-      this.pos.x += (dx / dist) * moveAmount;
-      this.pos.y += (dy / dist) * moveAmount;
+      if (dist > STOP_THRESHOLD) {
+        this.angle = Math.atan2(dy, dx);
+      }
     }
 
     // Clamp to screen
     const margin = 20;
     this.pos.x = clamp(this.pos.x, margin, GAME_WIDTH - margin);
     this.pos.y = clamp(this.pos.y, margin, GAME_HEIGHT - margin);
-
-    // Face toward mouse target
-    if (dist > STOP_THRESHOLD) {
-      this.angle = Math.atan2(dy, dx);
-    }
   }
 
   /** Attempt a smooth high-speed dash in current facing direction. */
@@ -153,38 +162,27 @@ export class Player extends Entity {
     const SPRITE_W = 10; // display size in game-pixels
     const SPRITE_H = 14.75; // starfighter-r2 viewBox is 208×304 → 40×59
 
-    // ── DASH FLASH ──────────────────────────────────────────────
-    // During a dash: rapidly alternate between bright cyan-tinted sprite and blank.
+    // ── DASH (no flash — just render with cyan glow) ────────────
     if (this.isDashing) {
-      const flashOn = Math.floor(this.dashTimer * 22) % 2 === 0;
-      if (flashOn) {
-        const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
-        ctx.save();
-        ctx.translate(this.pos.x, this.pos.y);
-        ctx.rotate(this.angle + Math.PI / 2); // rotate sprite to face aim direction
-        if (sprite) {
-          ctx.shadowColor = COLORS.player;
-          ctx.shadowBlur = 22;
-          ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
-          // Cyan overlay tint
-          ctx.globalCompositeOperation = "source-atop";
-          ctx.fillStyle = "rgba(0,212,255,0.7)";
-          ctx.fillRect(-SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
-          ctx.globalCompositeOperation = "source-over";
-        } else {
-          // Fallback silhouette
-          ctx.fillStyle = COLORS.player;
-          ctx.globalAlpha = 0.9;
-          ctx.beginPath();
-          ctx.moveTo(10 * s, 0);
-          ctx.lineTo(-6 * s, -6 * s);
-          ctx.lineTo(-6 * s, 6 * s);
-          ctx.closePath();
-          ctx.fill();
-        }
-        ctx.restore();
+      const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
+      ctx.save();
+      ctx.translate(this.pos.x, this.pos.y);
+      ctx.rotate(this.angle + Math.PI / 2);
+      ctx.shadowColor = COLORS.player;
+      ctx.shadowBlur = 18;
+      if (sprite) {
+        ctx.drawImage(sprite, -SPRITE_W / 2, -SPRITE_H / 2, SPRITE_W, SPRITE_H);
+      } else {
+        ctx.fillStyle = COLORS.player;
+        ctx.beginPath();
+        ctx.moveTo(10 * s, 0);
+        ctx.lineTo(-6 * s, -6 * s);
+        ctx.lineTo(-6 * s, 6 * s);
+        ctx.closePath();
+        ctx.fill();
       }
-      return; // skip normal hull and overlays during dash
+      ctx.restore();
+      return;
     }
 
     // ── NORMAL SHIP RENDER (ship-glider.svg) ──────────────────────

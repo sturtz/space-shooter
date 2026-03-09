@@ -17,16 +17,407 @@
       href="https://fonts.googleapis.com/css2?family=Tektur:wght@400..900&display=swap"
       rel="stylesheet"
     />
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.7.0/p5.min.js"></script>
     <link rel="stylesheet" href="/style.css" />
   </head>
   <body>
+    <!-- p5.js Deep Field background renders here, behind everything -->
+    <div id="bg-canvas"></div>
+
     <div id="game-container">
-      <canvas id="game"></canvas>
+      <canvas id="menu-canvas" class="screen active"></canvas>
+      <canvas id="game-canvas" class="screen"></canvas>
+      <canvas id="upgrade-canvas" class="screen"></canvas>
       <div id="volume-control">
         <img width="18" height="18" id="volume-icon" src="./assets/items/volume-on.svg" />
-        <input type="range" id="music-volume" min="0" max="1" step="0.1" value="0.2" />
+        <input type="range" id="music-volume" min="0" max="1" step="0.05" value="0.2" />
       </div>
     </div>
+
+    <!-- Deep Field p5.js background sketch (no title/text — just the cosmos) -->
+    <script>
+      // ─── PARAMS ───────────────────────────────────────────────────────
+      const bgParams = {
+        seed: 44,
+        starCount: 600,
+        scrollSpeed: 1.4,
+        nebulaIntensity: 2.0,
+        auroraIntensity: 2.0,
+        scanlineOpacity: 0.1,
+        colorA: "#00d4ff",
+        colorB: "#4488ff",
+        colorC: "#aa44ff",
+        colorD: "#00d4ff",
+      };
+      const BG_CW = 1200,
+        BG_CH = 800;
+
+      let bgStars = [];
+      let bgNebulaBlobs = [];
+      let bgAuroraRibbons = [];
+      let bgShootingStars = [];
+      let bgDustMotes = [];
+      let bgTicker = 0;
+      let bgShootTimer = 0,
+        bgNextShoot = 300;
+
+      function setup() {
+        let canvas = createCanvas(BG_CW, BG_CH);
+        canvas.parent("bg-canvas");
+        frameRate(60);
+        bgInitializeSystem();
+      }
+
+      function bgInitializeSystem() {
+        randomSeed(bgParams.seed);
+        noiseSeed(bgParams.seed);
+        bgStars = [];
+        bgNebulaBlobs = [];
+        bgAuroraRibbons = [];
+        bgShootingStars = [];
+        bgDustMotes = [];
+        bgTicker = 0;
+        bgShootTimer = 0;
+        bgNextShoot = floor(random(200, 420));
+
+        for (let i = 0; i < bgParams.starCount; i++) {
+          let layer = i < bgParams.starCount * 0.52 ? 0 : i < bgParams.starCount * 0.82 ? 1 : 2;
+          bgStars.push(new BgStar(layer, true));
+        }
+
+        let blobDefs = [
+          [0.22, 0.32, 0.42, "A", 38],
+          [0.68, 0.28, 0.38, "B", 34],
+          [0.82, 0.7, 0.3, "C", 28],
+          [0.1, 0.78, 0.28, "B", 22],
+          [0.5, 0.52, 0.32, "A", 20],
+          [0.4, 0.15, 0.22, "C", 18],
+        ];
+        let extras = floor(random(1, 3));
+        for (let i = 0; i < extras; i++) {
+          blobDefs.push([
+            random(0.1, 0.9),
+            random(0.1, 0.9),
+            random(0.18, 0.28),
+            random() < 0.5 ? "A" : "C",
+            floor(random(12, 22)),
+          ]);
+        }
+        bgNebulaBlobs = blobDefs.map((b) => ({
+          xFrac: b[0] + random(-0.08, 0.08),
+          yFrac: b[1] + random(-0.06, 0.06),
+          rFrac: b[2] + random(-0.05, 0.05),
+          colorKey: b[3],
+          alpha: b[4],
+          phase: random(TWO_PI),
+        }));
+
+        let ribbonDefs = [
+          { yFrac: 0.28, colorKey: "A", amp: 55, width: 18, spd: 0.8 },
+          { yFrac: 0.46, colorKey: "B", amp: 70, width: 28, spd: 0.55 },
+          { yFrac: 0.62, colorKey: "C", amp: 45, width: 14, spd: 1.1 },
+          { yFrac: 0.38, colorKey: "B", amp: 35, width: 10, spd: 1.4 },
+        ];
+        bgAuroraRibbons = ribbonDefs.map((r) => ({
+          ...r,
+          phase: random(TWO_PI),
+          noiseOff: random(100),
+        }));
+
+        let dustCount = floor(bgParams.starCount * 0.4);
+        for (let i = 0; i < dustCount; i++) {
+          bgDustMotes.push({
+            x: random(BG_CW),
+            y: random(BG_CH),
+            vx: random(-0.08, 0.08),
+            vy: random(0.04, 0.18),
+            size: random(0.5, 1.4),
+            alpha: random(20, 60),
+            phase: random(TWO_PI),
+          });
+        }
+      }
+
+      function draw() {
+        background(10, 10, 26);
+        bgDrawNebulaBlobs();
+        // bgDrawNebulaTexture();
+        for (let s of bgStars) {
+          if (s.layer < 2) {
+            s.update();
+            s.display();
+          }
+        }
+        bgDrawAuroras();
+        for (let s of bgStars) {
+          if (s.layer === 2) {
+            s.update();
+            s.display();
+          }
+        }
+        bgDrawDust();
+        bgUpdateShootingStars();
+        bgDrawScanlines();
+        bgDrawVignette();
+
+        bgTicker++;
+        bgShootTimer++;
+        if (bgShootTimer > bgNextShoot) {
+          bgSpawnShootingStar();
+          bgShootTimer = 0;
+          bgNextShoot = floor(random(240, 500));
+        }
+      }
+
+      function bgDrawNebulaBlobs() {
+        let intensity = bgParams.nebulaIntensity;
+        if (intensity < 0.01) return;
+        for (let b of bgNebulaBlobs) {
+          let col = bgHexRGB(bgParams["color" + b.colorKey]);
+          let x = b.xFrac * BG_CW,
+            y = b.yFrac * BG_CH,
+            r = b.rFrac * BG_CW;
+          let pulse = 1 + 0.04 * sin(bgTicker * 0.012 + b.phase);
+          let rr = r * pulse;
+          let peakAlpha = (b.alpha * intensity) / 255;
+          let grad = drawingContext.createRadialGradient(x, y, 0, x, y, rr);
+          grad.addColorStop(0, "rgba(" + col.r + "," + col.g + "," + col.b + "," + peakAlpha + ")");
+          grad.addColorStop(
+            0.4,
+            "rgba(" + col.r + "," + col.g + "," + col.b + "," + peakAlpha * 0.45 + ")"
+          );
+          grad.addColorStop(1, "rgba(0,0,0,0)");
+          drawingContext.fillStyle = grad;
+          drawingContext.fillRect(0, 0, BG_CW, BG_CH);
+        }
+      }
+
+      function bgDrawNebulaTexture() {
+        let intensity = bgParams.nebulaIntensity;
+        if (intensity < 0.01) return;
+        let t = bgTicker * 0.00014;
+        noStroke();
+        let step = 38;
+        for (let x = 0; x < BG_CW; x += step) {
+          for (let y = 0; y < BG_CH; y += step) {
+            let n1 = noise(x * 0.0038 + t, y * 0.0038 + 10);
+            if (n1 > 0.595) {
+              let a = map(n1, 0.595, 0.82, 0, 22 * intensity);
+              let col = bgHexRGB(bgParams.colorA);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+            let n2 = noise(x * 0.003 + 80 + t * 0.7, y * 0.003 + 40);
+            if (n2 > 0.61) {
+              let a = map(n2, 0.61, 0.84, 0, 16 * intensity);
+              let col = bgHexRGB(bgParams.colorC);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+            let n3 = noise(x * 0.005 + 200, y * 0.005 + t * 0.5);
+            if (n3 > 0.64) {
+              let a = map(n3, 0.64, 0.86, 0, 10 * intensity);
+              let col = bgHexRGB(bgParams.colorB);
+              fill(col.r, col.g, col.b, a);
+              rect(x, y, step, step);
+            }
+          }
+        }
+      }
+
+      function bgDrawAuroras() {
+        let intensity = bgParams.auroraIntensity;
+        if (intensity < 0.01) return;
+        let t = bgTicker * 0.001;
+        let auroraPulse = 0.22 + 0.78 * pow(abs(sin((bgTicker * PI) / 120)), 1.6);
+
+        for (let ribbon of bgAuroraRibbons) {
+          let col = bgHexRGB(bgParams["color" + ribbon.colorKey]);
+          let baseY = ribbon.yFrac * BG_CH;
+          let step = 12;
+          let pts = [];
+          for (let x = -step; x <= BG_CW + step; x += step) {
+            let n = noise(x * 0.0028 + ribbon.noiseOff, t * ribbon.spd + ribbon.phase);
+            let y = baseY + (n - 0.5) * ribbon.amp * 2;
+            let w =
+              ribbon.width *
+              (0.6 + 0.4 * noise(x * 0.006 + ribbon.noiseOff + 50, t * ribbon.spd * 0.7));
+            pts.push({ x, y, w });
+          }
+          noStroke();
+          fill(col.r, col.g, col.b, 18 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 2.8);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 2.8);
+          endShape(CLOSE);
+          fill(col.r, col.g, col.b, 30 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 1.4);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 1.4);
+          endShape(CLOSE);
+          fill(col.r, col.g, col.b, 55 * intensity * auroraPulse);
+          beginShape();
+          for (let p of pts) vertex(p.x, p.y - p.w * 0.5);
+          for (let i = pts.length - 1; i >= 0; i--) vertex(pts[i].x, pts[i].y + pts[i].w * 0.5);
+          endShape(CLOSE);
+          drawingContext.shadowBlur = 8 * intensity * auroraPulse;
+          drawingContext.shadowColor = "rgb(" + col.r + "," + col.g + "," + col.b + ")";
+          stroke(col.r, col.g, col.b, 80 * intensity * auroraPulse);
+          strokeWeight(1);
+          noFill();
+          beginShape();
+          for (let p of pts) curveVertex(p.x, p.y);
+          endShape();
+          drawingContext.shadowBlur = 0;
+        }
+      }
+
+      function bgDrawDust() {
+        noStroke();
+        for (let d of bgDustMotes) {
+          d.x += d.vx + (bgParams.scrollSpeed > 0 ? random(-0.02, 0.02) : 0);
+          d.y += d.vy * max(0.05, bgParams.scrollSpeed * 0.5);
+          d.phase += 0.02;
+          if (d.y > BG_CH + 4) {
+            d.y = -4;
+            d.x = random(BG_CW);
+          }
+          if (d.x < -4) d.x = BG_CW + 4;
+          if (d.x > BG_CW + 4) d.x = -4;
+          let alpha = d.alpha * (0.7 + 0.3 * sin(d.phase));
+          fill(180, 188, 220, alpha);
+          ellipse(d.x, d.y, d.size);
+        }
+      }
+
+      function bgSpawnShootingStar() {
+        let startX = random(BG_CW * 0.1, BG_CW * 0.9);
+        let startY = random(BG_CH * 0.05, BG_CH * 0.55);
+        let angle = random(PI * 0.08, PI * 0.38);
+        let speed = random(9, 16);
+        let len = random(80, 200);
+        bgShootingStars.push({
+          x: startX,
+          y: startY,
+          vx: cos(angle) * speed,
+          vy: sin(angle) * speed,
+          len,
+          life: 1.0,
+        });
+      }
+
+      function bgUpdateShootingStars() {
+        for (let i = bgShootingStars.length - 1; i >= 0; i--) {
+          let s = bgShootingStars[i];
+          s.x += s.vx;
+          s.y += s.vy;
+          s.life -= 0.038;
+          if (s.life <= 0 || s.x > BG_CW + 20 || s.y > BG_CH + 20) {
+            bgShootingStars.splice(i, 1);
+            continue;
+          }
+          let tailX = s.x - (s.vx / sqrt(s.vx * s.vx + s.vy * s.vy)) * s.len * s.life;
+          let tailY = s.y - (s.vy / sqrt(s.vx * s.vx + s.vy * s.vy)) * s.len * s.life;
+          let a = s.life * 200;
+          drawingContext.shadowBlur = 10 * s.life;
+          drawingContext.shadowColor = "#ffffff";
+          stroke(255, 255, 255, a);
+          strokeWeight(1.8 * s.life);
+          line(s.x, s.y, tailX, tailY);
+          let col = bgHexRGB(bgParams.colorA);
+          stroke(col.r, col.g, col.b, a * 0.45);
+          strokeWeight(3.5 * s.life);
+          line(s.x, s.y, tailX, tailY);
+          drawingContext.shadowBlur = 0;
+        }
+      }
+
+      class BgStar {
+        constructor(layer, init = false) {
+          this.layer = layer;
+          this.reset(init);
+        }
+        reset(init = false) {
+          const sp = [0.09, 0.3, 0.82],
+            sz = [0.6, 1.25, 2.2],
+            dm = [0.26, 0.56, 0.95];
+          this.x = random(BG_CW);
+          this.y = init ? random(BG_CH) : random(-5, 0);
+          this.speed = sp[this.layer] * (0.7 + random(0.6));
+          this.sz = sz[this.layer] * (0.8 + random(0.5));
+          let bri = dm[this.layer] * (150 + random(105));
+          let rnd = random();
+          if (rnd < 0.72) {
+            this.r = bri;
+            this.g = bri;
+            this.b = bri;
+          } else if (rnd < 0.85) {
+            this.r = bri * 0.65;
+            this.g = bri * 0.78;
+            this.b = bri;
+          } else if (rnd < 0.93) {
+            this.r = bri;
+            this.g = bri * 0.88;
+            this.b = bri * 0.45;
+          } else {
+            this.r = bri;
+            this.g = bri * 0.45;
+            this.b = bri * 0.55;
+          }
+          this.phase = random(TWO_PI);
+          this.psp = random(0.02, 0.065);
+        }
+        update() {
+          this.y += this.speed * max(0.04, bgParams.scrollSpeed);
+          this.phase += this.psp;
+          if (this.y > BG_CH + 5) this.reset(false);
+        }
+        display() {
+          let tw = 0.78 + 0.22 * sin(this.phase);
+          let alpha = [128, 172, 225][this.layer];
+          if (this.layer === 2) {
+            drawingContext.shadowBlur = 5;
+            drawingContext.shadowColor =
+              "rgb(" + floor(this.r) + "," + floor(this.g) + "," + floor(this.b) + ")";
+          }
+          noStroke();
+          fill(floor(this.r), floor(this.g), floor(this.b), floor(alpha * tw));
+          ellipse(this.x, this.y, this.sz * tw);
+          if (this.layer === 2) drawingContext.shadowBlur = 0;
+        }
+      }
+
+      function bgDrawScanlines() {
+        if (bgParams.scanlineOpacity < 0.01) return;
+        noStroke();
+        fill(0, 0, 0, bgParams.scanlineOpacity * 255);
+        for (let y = 0; y < BG_CH; y += 3) rect(0, y, BG_CW, 1.5);
+      }
+
+      function bgDrawVignette() {
+        let grad = drawingContext.createRadialGradient(
+          BG_CW / 2,
+          BG_CH / 2,
+          BG_CH * 0.28,
+          BG_CW / 2,
+          BG_CH / 2,
+          BG_CH * 0.92
+        );
+        grad.addColorStop(0, "rgba(0,0,0,0)");
+        grad.addColorStop(1, "rgba(0,0,0,0.65)");
+        drawingContext.fillStyle = grad;
+        drawingContext.fillRect(0, 0, BG_CW, BG_CH);
+      }
+
+      function bgHexRGB(hex) {
+        hex = hex.replace("#", "");
+        return {
+          r: parseInt(hex.slice(0, 2), 16),
+          g: parseInt(hex.slice(2, 4), 16),
+          b: parseInt(hex.slice(4, 6), 16),
+        };
+      }
+    </script>
 
     <script type="module" src="/src/main.ts"></script>
   </body>

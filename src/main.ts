@@ -1,4 +1,4 @@
-import { Game } from "./game/Game";
+import { ScreenManager } from "./game/ScreenManager";
 
 // Try to lock orientation to landscape on supported devices
 try {
@@ -18,10 +18,15 @@ try {
   /* orientation lock not available */
 }
 
-const canvas = document.getElementById("game") as HTMLCanvasElement;
-if (!canvas) throw new Error("Canvas element not found!");
+const menuCanvas = document.getElementById("menu-canvas") as HTMLCanvasElement;
+const gameCanvas = document.getElementById("game-canvas") as HTMLCanvasElement;
+const upgradeCanvas = document.getElementById("upgrade-canvas") as HTMLCanvasElement;
 
-const game = new Game(canvas);
+if (!menuCanvas || !gameCanvas || !upgradeCanvas) {
+  throw new Error("Canvas elements not found!");
+}
+
+const manager = new ScreenManager(menuCanvas, gameCanvas, upgradeCanvas);
 
 // Game loop
 let lastTime = 0;
@@ -31,8 +36,8 @@ function gameLoop(timestamp: number) {
   const dt = Math.min((timestamp - lastTime) / 1000, MAX_DT);
   lastTime = timestamp;
 
-  game.update(dt);
-  game.render();
+  manager.update(dt);
+  manager.render();
 
   requestAnimationFrame(gameLoop);
 }
@@ -41,16 +46,4 @@ function gameLoop(timestamp: number) {
 requestAnimationFrame((timestamp) => {
   lastTime = timestamp;
   requestAnimationFrame(gameLoop);
-});
-
-function handleResize() {
-  game.renderer.resize();
-}
-
-window.addEventListener("resize", handleResize);
-
-// orientationchange fires BEFORE resize on most mobile browsers
-// — wait for dimensions to settle before recalculating
-window.addEventListener("orientationchange", () => {
-  setTimeout(handleResize, 150);
 });

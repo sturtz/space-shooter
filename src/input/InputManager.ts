@@ -14,6 +14,22 @@ const GAME_KEYS = new Set([
   " ",
 ]);
 
+/** Virtual joystick state (mobile only) */
+export interface JoystickState {
+  active: boolean;
+  /** Center of the joystick base (game coords) */
+  baseX: number;
+  baseY: number;
+  /** Current thumb position (game coords) */
+  thumbX: number;
+  thumbY: number;
+  /** Normalized direction (-1 to 1 on each axis) */
+  dirX: number;
+  dirY: number;
+  /** How far the thumb is from center (0–1) */
+  magnitude: number;
+}
+
 export class InputManager {
   keys: Set<string> = new Set();
   mousePos: Vec2 = vec2(GAME_WIDTH / 2, GAME_HEIGHT / 2);
@@ -30,6 +46,20 @@ export class InputManager {
 
   // Right side touch for dash
   private touchDashId: number | null = null;
+
+  // Virtual joystick (floating — appears where left-side touch starts)
+  joystick: JoystickState = {
+    active: false,
+    baseX: 0,
+    baseY: 0,
+    thumbX: 0,
+    thumbY: 0,
+    dirX: 0,
+    dirY: 0,
+    magnitude: 0,
+  };
+  readonly JOYSTICK_RADIUS = 50; // max distance thumb can move from base (game coords)
+  readonly JOYSTICK_DEAD_ZONE = 0.1; // ignore tiny movements
 
   // Store bound handlers for cleanup
   private onKeyDown: (e: KeyboardEvent) => void;
@@ -75,36 +105,43 @@ export class InputManager {
     this.onContextMenu = (e: Event) => e.preventDefault();
 
     // === TOUCH HANDLERS ===
-    // Controls: touch anywhere (except dash zone) → player follows that position.
-    // Right 12% of the canvas (game-coord x > GAME_WIDTH * 0.88) → dash button.
+    // Left half of screen → floating joystick (move)
+    // Right 25% + bottom 40% → dash button
+    // Everything else on right → ignored (auto-fire handles shooting)
 
     this.onTouchStart = (e: TouchEvent) => {
       this.isTouchDevice = true;
-      // Prevent iOS scroll/bounce for all game touches
       e.preventDefault();
 
       for (let i = 0; i < e.changedTouches.length; i++) {
         const touch = e.changedTouches[i];
-        const rect = canvas.getBoundingClientRect();
-        const scaleX = GAME_WIDTH / rect.width;
-        const scaleY = GAME_HEIGHT / rect.height;
-        const gameX = (touch.clientX - rect.left) * scaleX;
-        const gameY = (touch.clientY - rect.top) * scaleY;
+        const { gameX, gameY } = this.touchToGame(touch);
 
-        // Dash zone: right 12% of screen at the bottom half (bottom-right corner area)
+        // Dash zone: right 25% of screen + bottom 40%
         const isDashArea = gameX > GAME_WIDTH * 0.75 && gameY > GAME_HEIGHT * 0.6;
 
         if (isDashArea) {
-          // Bottom-right tap = dash
           if (this.touchDashId === null) {
             this.touchDashId = touch.identifier;
             this.dashRequested = true;
           }
-        } else if (this.touchMoveId === null) {
-          // Primary movement touch — update mousePos so Player.move() can use it
-          this.touchMoveId = touch.identifier;
-          this.mousePos = vec2(gameX, gameY);
-          this.touchTargetActive = true;
+        } else if (gameX < GAME_WIDTH * 0.5) {
+          // Left half → joystick
+          if (this.touchMoveId === null) {
+            this.touchMoveId = touch.identifier;
+            this.touchTargetActive = true;
+            // Place joystick base at touch point
+            this.joystick.active = true;
+            this.joystick.baseX = gameX;
+            this.joystick.baseY = gameY;
+            this.joystick.thumbX = gameX;
+            this.joystick.thumbY = gameY;
+            this.joystick.dirX = 0;
+            this.joystick.dirY = 0;
+            this.joystick.magnitude = 0;
+            // Also set mousePos for compatibility
+            this.mousePos = vec2(gameX, gameY);
+          }
         }
       }
     };
@@ -115,13 +152,34 @@ export class InputManager {
         const touch = e.changedTouches[i];
 
         if (touch.identifier === this.touchMoveId) {
-          const rect = canvas.getBoundingClientRect();
-          const scaleX = GAME_WIDTH / rect.width;
-          const scaleY = GAME_HEIGHT / rect.height;
-          this.mousePos = vec2(
-            (touch.clientX - rect.left) * scaleX,
-            (touch.clientY - rect.top) * scaleY
-          );
+          const { gameX, gameY } = this.touchToGame(touch);
+
+          // Calculate joystick displacement from base
+          const dx = gameX - this.joystick.baseX;
+          const dy = gameY - this.joystick.baseY;
+          const dist = Math.sqrt(dx * dx + dy * dy);
+
+          // Clamp thumb to joystick radius
+          const clampedDist = Math.min(dist, this.JOYSTICK_RADIUS);
+          if (dist > 0) {
+            this.joystick.thumbX = this.joystick.baseX + (dx / dist) * clampedDist;
+            this.joystick.thumbY = this.joystick.baseY + (dy / dist) * clampedDist;
+          }
+
+          // Normalized direction and magnitude
+          const normalizedDist = clampedDist / this.JOYSTICK_RADIUS;
+          if (normalizedDist > this.JOYSTICK_DEAD_ZONE) {
+            this.joystick.dirX = dx / dist;
+            this.joystick.dirY = dy / dist;
+            this.joystick.magnitude = normalizedDist;
+          } else {
+            this.joystick.dirX = 0;
+            this.joystick.dirY = 0;
+            this.joystick.magnitude = 0;
+          }
+
+          // Update mousePos for compatibility (aim direction)
+          this.mousePos = vec2(gameX, gameY);
         }
       }
     };
@@ -133,6 +191,10 @@ export class InputManager {
         if (touch.identifier === this.touchMoveId) {
           this.touchMoveId = null;
           this.touchTargetActive = false;
+          this.joystick.active = false;
+          this.joystick.dirX = 0;
+          this.joystick.dirY = 0;
+          this.joystick.magnitude = 0;
         }
         if (touch.identifier === this.touchDashId) {
           this.touchDashId = null;
@@ -152,6 +214,17 @@ export class InputManager {
     canvas.addEventListener("touchmove", this.onTouchMove, { passive: false });
     canvas.addEventListener("touchend", this.onTouchEnd, { passive: false });
     canvas.addEventListener("touchcancel", this.onTouchEnd, { passive: false });
+  }
+
+  /** Convert a Touch event to game coordinates */
+  private touchToGame(touch: Touch): { gameX: number; gameY: number } {
+    const rect = this.canvas.getBoundingClientRect();
+    const scaleX = GAME_WIDTH / rect.width;
+    const scaleY = GAME_HEIGHT / rect.height;
+    return {
+      gameX: (touch.clientX - rect.left) * scaleX,
+      gameY: (touch.clientY - rect.top) * scaleY,
+    };
   }
 
   /** Remove all event listeners — call when tearing down the game */

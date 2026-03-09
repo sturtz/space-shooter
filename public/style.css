@@ -42,14 +42,33 @@ body {
   left: 0;
 }
 
+/* ── p5.js Deep Field background — fills viewport behind everything ── */
+#bg-canvas {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+#bg-canvas canvas {
+  display: block;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: cover;
+}
+
 /* ── Game Container — centers the canvas letter-box style ── */
 #game-container {
   position: fixed;
   inset: 0;
+  z-index: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
   overflow: hidden;
   /* Safe-area padding for notched phones */
   padding-top: env(safe-area-inset-top, 0px);
@@ -58,9 +77,10 @@ body {
   padding-right: env(safe-area-inset-right, 0px);
 }
 
-/* ── Canvas — sized by JS, displayed centered ── */
-canvas {
-  display: block;
+/* ── Canvas — sized by JS, displayed centered, transparent ── */
+canvas.screen {
+  display: none;
+  position: absolute;
   /* width/height set by Renderer.resize() via inline styles — do not override here */
   width: 100%;
   height: 100%;
@@ -75,10 +95,6 @@ canvas {
   cursor:
     url("assets/cursor.svg") 11 11,
     crosshair;
-  /* Drop shadow to float the canvas over the dark bg */
-  box-shadow:
-    0 0 60px rgba(0, 255, 231, 0.08),
-    0 0 120px rgba(0, 0, 0, 0.6);
 }
 
 /* ── Hide scrollbars everywhere ── */

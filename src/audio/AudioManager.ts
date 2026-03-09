@@ -1,41 +1,53 @@
 // === Procedural Web Audio sound effects ===
 
+import type { MusicTrack } from "../utils/SaveManager";
+
+/** Track metadata: file path + BPM for beat sync */
+const TRACK_INFO: Record<MusicTrack, { src: string; bpm: number; beatOffset: number }> = {
+  fire: { src: "./assets/sounds/fire.mp3", bpm: 100, beatOffset: 1.2 },
+  chill: { src: "./assets/sounds/chill.mp3", bpm: 130, beatOffset: 0.0 },
+  trap: { src: "./assets/sounds/trap.mp3", bpm: 130, beatOffset: 0.0 },
+};
+
 export class AudioManager {
   private ctx: AudioContext | null = null;
   private initialized = false;
   private masterGain: GainNode | null = null;
 
   // Dedicated sub-gain for procedural cone synth layers.
-  // Set to 0 so fire.mp3 is the sole audible music; the cone scheduler
-  // still runs for its beat-callback (weapon timing) without competing audio.
   private coneTrackGain: GainNode | null = null;
 
-  // Background music — fire.mp3 loops continuously through ALL game states
-  // (menu, playing, paused, upgrade screen).  Never stopped.
-  private menuMusic: HTMLAudioElement;
-  private menuMusicStarted = false;
+  // Background music — loops continuously through ALL game states
+  private musicEl: HTMLAudioElement;
+  private musicStarted = false;
+  private currentTrack: MusicTrack = "fire";
 
   private muted = false;
-  private volumeBeforeMute = 0.2;
+  private volumeBeforeMute = 0.07;
 
-  // Cone-attack music track state
+  // Cone-attack music track state — synced to music currentTime
   private coneTrackPlaying = false;
   private coneTrackTimer: number | null = null;
   private coneTrackNodes: { stop: () => void }[] = [];
   private coneBeatCallback: (() => void) | null = null;
   private coneBeatIndex = 0;
 
-  constructor() {
-    // Pre-create audio element — won't play until init() is called on first interaction
-    this.menuMusic = new Audio("./assets/sounds/fire.mp3");
-    this.menuMusic.loop = true;
-    this.menuMusic.volume = 0.2;
+  // Music-synced beat tracking (updated on track switch)
+  private musicBPM = 100;
+  private beatOffset = 0;
+  private lastMusicBeat = -1;
 
-    // Wire mute toggle immediately — available before first interaction
+  constructor() {
+    this.musicEl = new Audio(TRACK_INFO.fire.src);
+    this.musicEl.loop = true;
+    this.musicEl.volume = 0.05;
+
+    // Wire mute toggle immediately
     const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
     if (icon) icon.addEventListener("click", () => this.toggleMute());
   }
 
+  /** Initialize audio context + start music. Call on first user interaction. */
   init() {
     if (this.initialized) return;
     try {
@@ -44,7 +56,6 @@ export class AudioManager {
       this.masterGain.gain.value = 0.2;
       this.masterGain.connect(this.ctx.destination);
 
-      // Cone synth sub-gain (silent — fire.mp3 provides the music)
       this.coneTrackGain = this.ctx.createGain();
       this.coneTrackGain.gain.value = 1;
       this.coneTrackGain.connect(this.masterGain);
@@ -53,18 +64,15 @@ export class AudioManager {
     } catch (e) {
       console.warn("Web Audio not available:", e);
     }
-    // Start menu music on first user interaction (browser autoplay policy)
-    if (!this.menuMusicStarted) {
-      this.menuMusicStarted = true;
-      this.menuMusic.play().catch(() => {
-        /* silently ignore if still blocked */
-      });
+    if (!this.musicStarted) {
+      this.musicStarted = true;
+      this.musicEl.play().catch(() => {});
     }
 
-    // Wire up the volume slider if present in the DOM
+    // Wire up volume slider if present
     const slider = document.getElementById("music-volume") as HTMLInputElement | null;
     if (slider) {
-      slider.value = String(this.menuMusic.volume);
+      slider.value = String(this.musicEl.volume);
       slider.addEventListener("input", () => {
         if (this.muted) this.muted = false;
         const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
@@ -74,22 +82,83 @@ export class AudioManager {
     }
   }
 
-  /** Pause background music (pause state, upgrade screen). */
-  stopMenuMusic() {
-    this.menuMusic.pause();
+  // ── Track switching ────────────────────────────────────────────
+
+  /** Get the currently playing track name */
+  get track(): MusicTrack {
+    return this.currentTrack;
   }
 
-  /** Resume background music (unpausing, starting run). */
-  resumeMenuMusic() {
-    if (this.menuMusicStarted) {
-      this.menuMusic.play().catch(() => {});
+  /** Get available track names */
+  get availableTracks(): MusicTrack[] {
+    return ["fire", "chill", "trap"];
+  }
+
+  /** Switch to a different music track. Preserves volume and playback state. */
+  switchTrack(track: MusicTrack) {
+    if (track === this.currentTrack) return;
+
+    const info = TRACK_INFO[track];
+    const wasPlaying = !this.musicEl.paused;
+    const vol = this.musicEl.volume;
+
+    // Stop cone track scheduling before swapping audio
+    const hadCone = this.coneTrackPlaying;
+    const savedCallback = this.coneBeatCallback;
+    if (hadCone) this.stopConeTrack();
+
+    // Swap audio source
+    this.musicEl.pause();
+    this.musicEl.src = info.src;
+    this.musicEl.loop = true;
+    this.musicEl.volume = vol;
+    this.musicEl.currentTime = 0;
+
+    this.currentTrack = track;
+    this.musicBPM = info.bpm;
+    this.beatOffset = info.beatOffset;
+
+    if (wasPlaying || this.musicStarted) {
+      this.musicEl.play().catch(() => {});
+    }
+
+    // Restart cone track with new BPM if it was running
+    if (hadCone && savedCallback) {
+      this.startConeTrack(savedCallback);
     }
   }
 
-  /** Set music volume (0–1). */
+  /** Apply saved preferences (track + volume). Call after init. */
+  applyPreferences(track: MusicTrack, volume: number) {
+    this.setMusicVolume(volume);
+    if (track !== this.currentTrack) {
+      this.switchTrack(track);
+    }
+  }
+
+  // ── Music playback controls ────────────────────────────────────
+
+  /** Pause background music */
+  stopMenuMusic() {
+    this.musicEl.pause();
+  }
+
+  /** Resume background music */
+  resumeMenuMusic() {
+    if (this.musicStarted) {
+      this.musicEl.play().catch(() => {});
+    }
+  }
+
+  /** Set music volume (0–1) */
   setMusicVolume(v: number) {
-    this.menuMusic.volume = Math.max(0, Math.min(1, v));
+    this.musicEl.volume = Math.max(0, Math.min(1, v));
     if (v > 0) this.volumeBeforeMute = v;
+  }
+
+  /** Get current music volume */
+  getMusicVolume(): number {
+    return this.musicEl.volume;
   }
 
   toggleMute() {
@@ -97,22 +166,28 @@ export class AudioManager {
     const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
     const slider = document.getElementById("music-volume") as HTMLInputElement | null;
     if (this.muted) {
-      this.volumeBeforeMute = this.menuMusic.volume;
-      this.menuMusic.volume = 0;
+      this.volumeBeforeMute = this.musicEl.volume;
+      this.musicEl.volume = 0;
       if (this.masterGain) this.masterGain.gain.value = 0;
       if (icon) icon.src = "./assets/items/volume-off.svg";
       if (slider) slider.value = "0";
     } else {
-      this.menuMusic.volume = this.volumeBeforeMute;
+      this.musicEl.volume = this.volumeBeforeMute;
       if (this.masterGain) this.masterGain.gain.value = this.volumeBeforeMute;
       if (icon) icon.src = "./assets/items/volume-on.svg";
       if (slider) slider.value = String(this.volumeBeforeMute);
     }
   }
 
+  get isMuted(): boolean {
+    return this.muted;
+  }
+
   private get ready(): boolean {
     return this.initialized && this.ctx !== null && this.masterGain !== null;
   }
+
+  // ── SFX ────────────────────────────────────────────────────────
 
   /** Short laser "pew" for player shooting */
   playShoot() {
@@ -135,8 +210,6 @@ export class AudioManager {
   playExplosion() {
     if (!this.ready) return;
     const ctx = this.ctx!;
-
-    // Noise burst via oscillator
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = "sawtooth";
@@ -148,8 +221,6 @@ export class AudioManager {
     gain.connect(this.masterGain!);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.25);
-
-    // Sub-bass thump
     const sub = ctx.createOscillator();
     const subGain = ctx.createGain();
     sub.type = "sine";
@@ -221,7 +292,6 @@ export class AudioManager {
   playFlashbang() {
     if (!this.ready) return;
     const ctx = this.ctx!;
-    // Bright zap burst
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = "sawtooth";
@@ -233,7 +303,6 @@ export class AudioManager {
     gain.connect(this.masterGain!);
     osc.start(ctx.currentTime);
     osc.stop(ctx.currentTime + 0.2);
-    // Sub thump
     const sub = ctx.createOscillator();
     const subGain = ctx.createGain();
     sub.type = "sine";
@@ -298,14 +367,24 @@ export class AudioManager {
     osc.stop(ctx.currentTime + 0.12);
   }
 
-  // =========================================================================
-  //  CONE ATTACK MUSIC TRACK — Dark, dreary, spacey, spooky
-  //  100 BPM (0.6s per beat) — music layers pulse at full tempo.
-  //  Cone weapon fires every OTHER beat (every 1.2s / half-time feel).
-  //  Primary layers: deep kick, sub drone, ghostly hat, dark pad, void sweep
-  //  Secondary track: variety element every 2-3 beats (chimes, stingers, etc.)
-  //  onBeat callback fires every 2nd beat for cone weapon sync.
-  // =========================================================================
+  /** UI click sound for menu interactions */
+  playClick() {
+    if (!this.ready) return;
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(1000, ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(600, ctx.currentTime + 0.04);
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.05);
+    osc.connect(gain);
+    gain.connect(this.masterGain!);
+    osc.start(ctx.currentTime);
+    osc.stop(ctx.currentTime + 0.05);
+  }
+
+  // ── Cone track (beat-synced weapon firing) ─────────────────────
 
   get isConeTrackPlaying(): boolean {
     return this.coneTrackPlaying;
@@ -317,14 +396,15 @@ export class AudioManager {
     this.coneTrackPlaying = true;
     this.coneBeatCallback = onBeat ?? null;
     this.coneBeatIndex = 0;
-    this.scheduleConeLoop();
+    this.lastMusicBeat = -1;
+    this.scheduleMusicSyncLoop();
   }
 
   stopConeTrack() {
     this.coneTrackPlaying = false;
     this.coneBeatCallback = null;
     if (this.coneTrackTimer !== null) {
-      clearTimeout(this.coneTrackTimer);
+      cancelAnimationFrame(this.coneTrackTimer);
       this.coneTrackTimer = null;
     }
     for (const n of this.coneTrackNodes) {
@@ -332,286 +412,44 @@ export class AudioManager {
         n.stop();
       } catch (_e) {
         /* already stopped */
-        console.log(_e);
       }
     }
     this.coneTrackNodes = [];
   }
 
-  // ---- internal scheduling -------------------------------------------------
-
-  private scheduleConeLoop() {
-    if (!this.coneTrackPlaying || !this.ready) return;
-    const ctx = this.ctx!;
-    const now = ctx.currentTime;
-    const BEAT = 60 / 100; // 100 BPM = 0.6s per beat — matches song tempo
-
-    // Node cleanup
-    if (this.coneTrackNodes.length > 50) {
-      this.coneTrackNodes = this.coneTrackNodes.slice(-30);
-    }
-
-    const bi = this.coneBeatIndex;
-
-    // Fire beat callback every OTHER beat (half-time cone attacks = every 1.2s)
-    if (this.coneBeatCallback && bi % 2 === 0) {
-      this.coneBeatCallback();
-    }
-
-    // --- Primary Track ---
-
-    // Layer 1: Deep muffled kick on every beat
-    this.scheduleDeepKick(now);
-
-    // Layer 2: Sub drone (continuous low rumble, changes note every 4 beats)
-    this.scheduleSubDrone(now, BEAT);
-
-    // Layer 3: Ghostly hi-hat (sparse — every other beat only)
-    if (bi % 2 === 0) {
-      this.scheduleGhostlyHat(now);
-    }
-
-    // Layer 4: Dark eerie pad (slow attack minor chord, sustains across beat)
-    this.scheduleDarkPad(now, BEAT);
-
-    // Layer 5: Void sweep (descending filter — every 4th beat)
-    if (bi % 4 === 0) {
-      this.scheduleVoidSweep(now, BEAT * 3);
-    }
-
-    // --- Secondary Track (variety every 2-3 beats) ---
-    // Cycles through different spooky elements
-    const secondaryPattern = [0, 0, 1, 0, 2, 0, 0, 3]; // trigger on non-zero
-    const secondaryType = secondaryPattern[bi % secondaryPattern.length];
-    if (secondaryType > 0) {
-      this.scheduleSecondaryElement(now, BEAT, secondaryType);
-    }
-
-    this.coneBeatIndex++;
-
-    this.coneTrackTimer = window.setTimeout(
-      () => {
-        this.scheduleConeLoop();
-      },
-      BEAT * 1000 - 25
-    );
-  }
-
-  /** Deep muffled kick — low sine with slow decay, no click transient */
-  private scheduleDeepKick(time: number) {
-    const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(80, time);
-    osc.frequency.exponentialRampToValueAtTime(30, time + 0.25);
-
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(200, time);
-
-    gain.gain.setValueAtTime(0.3, time);
-    gain.gain.linearRampToValueAtTime(0.15, time + 0.1);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.4);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.coneTrackGain!);
-    osc.start(time);
-    osc.stop(time + 0.45);
-    this.coneTrackNodes.push(osc);
-  }
-
-  /** Sub drone — continuous low rumble, minor key movement */
-  private scheduleSubDrone(time: number, beatLen: number) {
-    const ctx = this.ctx!;
-    // Dark minor riff: A1, Ab1, G1, Ab1 (chromatic descent & return)
-    const freqs = [55, 51.91, 49, 51.91]; // A1, Ab1, G1, Ab1
-    const freq = freqs[Math.floor(this.coneBeatIndex / 2) % freqs.length];
-
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "sine";
-    osc.frequency.setValueAtTime(freq, time);
-    // Very slow vibrato for unease
-    osc.frequency.linearRampToValueAtTime(freq * 1.005, time + beatLen * 0.5);
-    osc.frequency.linearRampToValueAtTime(freq * 0.995, time + beatLen);
-
-    gain.gain.setValueAtTime(0.0, time);
-    gain.gain.linearRampToValueAtTime(0.12, time + 0.1);
-    gain.gain.setValueAtTime(0.12, time + beatLen * 0.7);
-    gain.gain.exponentialRampToValueAtTime(0.02, time + beatLen * 0.98);
-
-    osc.connect(gain);
-    gain.connect(this.coneTrackGain!);
-    osc.start(time);
-    osc.stop(time + beatLen + 0.05);
-    this.coneTrackNodes.push(osc);
-  }
-
-  /** Ghostly hi-hat — very quiet, heavily filtered, long tail */
-  private scheduleGhostlyHat(time: number) {
-    const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc.type = "square";
-    osc.frequency.setValueAtTime(4000 + Math.random() * 3000, time);
-
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(6000, time);
-    filter.Q.setValueAtTime(8, time); // narrow = ghostly ring
-
-    gain.gain.setValueAtTime(0.03, time);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + 0.15); // long fade
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.coneTrackGain!);
-    osc.start(time);
-    osc.stop(time + 0.18);
-    this.coneTrackNodes.push(osc);
-  }
-
-  /** Dark pad — detuned minor chord with slow attack, eerie and sustained */
-  private scheduleDarkPad(time: number, beatLen: number) {
-    const ctx = this.ctx!;
-    // A minor: A2(110), C3(130.81), Eb3(155.56) — diminished feel
-    const chordFreqs = [110, 130.81, 155.56];
-    const padStart = time + 0.02;
-    const padDur = beatLen * 0.9;
-
-    for (const freq of chordFreqs) {
-      for (const detune of [-8, 8]) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "sine"; // pure sine for haunting quality
-        osc.frequency.setValueAtTime(freq, padStart);
-        osc.detune.setValueAtTime(detune, padStart);
-
-        // Slow attack, sustained, slow fade
-        gain.gain.setValueAtTime(0.0, padStart);
-        gain.gain.linearRampToValueAtTime(0.025, padStart + padDur * 0.3);
-        gain.gain.setValueAtTime(0.025, padStart + padDur * 0.6);
-        gain.gain.exponentialRampToValueAtTime(0.001, padStart + padDur);
-
-        osc.connect(gain);
-        gain.connect(this.coneTrackGain!);
-        osc.start(padStart);
-        osc.stop(padStart + padDur + 0.05);
-        this.coneTrackNodes.push(osc);
-      }
-    }
-  }
-
-  /** Void sweep — descending filter sweep, creates a sucking void feel */
-  private scheduleVoidSweep(time: number, duration: number) {
-    const ctx = this.ctx!;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    const filter = ctx.createBiquadFilter();
-
-    osc.type = "sawtooth";
-    osc.frequency.setValueAtTime(40, time);
-
-    filter.type = "bandpass";
-    filter.frequency.setValueAtTime(2000, time);
-    filter.frequency.exponentialRampToValueAtTime(80, time + duration * 0.9);
-    filter.Q.setValueAtTime(5, time);
-    filter.Q.linearRampToValueAtTime(1, time + duration);
-
-    gain.gain.setValueAtTime(0.0, time);
-    gain.gain.linearRampToValueAtTime(0.05, time + duration * 0.15);
-    gain.gain.setValueAtTime(0.05, time + duration * 0.5);
-    gain.gain.exponentialRampToValueAtTime(0.001, time + duration * 0.95);
-
-    osc.connect(filter);
-    filter.connect(gain);
-    gain.connect(this.coneTrackGain!);
-    osc.start(time);
-    osc.stop(time + duration);
-    this.coneTrackNodes.push(osc);
-  }
-
   /**
-   * Secondary variety elements — different spooky sounds on a rotating cycle.
-   * type 1: Ghostly chime (high pitched, reverb-like decay)
-   * type 2: Dissonant stinger (tritone interval, brief)
-   * type 3: Metallic resonance (filtered noise ring)
+   * Polls music currentTime every frame to detect beat crossings.
+   * Fires the cone beat callback on every even beat (every 2 beats).
+   * BPM and offset are updated when track changes.
    */
-  private scheduleSecondaryElement(time: number, beatLen: number, type: number) {
-    const ctx = this.ctx!;
+  private scheduleMusicSyncLoop() {
+    if (!this.coneTrackPlaying || !this.ready) return;
 
-    if (type === 1) {
-      // Ghostly chime — high sine with long decay
-      const notes = [880, 1046.5, 784]; // A5, C6, G5 — rotate
-      const freq = notes[this.coneBeatIndex % notes.length];
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sine";
-      osc.frequency.setValueAtTime(freq, time);
-      osc.frequency.linearRampToValueAtTime(freq * 0.99, time + 0.6);
-      gain.gain.setValueAtTime(0.0, time);
-      gain.gain.linearRampToValueAtTime(0.04, time + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.6);
-      osc.connect(gain);
-      gain.connect(this.coneTrackGain!);
-      osc.start(time);
-      osc.stop(time + 0.65);
-      this.coneTrackNodes.push(osc);
-    }
+    const beatDuration = 60 / this.musicBPM;
+    const musicTime = this.musicEl.currentTime - this.beatOffset;
+    const currentBeat = Math.floor(musicTime / beatDuration);
 
-    if (type === 2) {
-      // Dissonant stinger — tritone (devil's interval)
-      const root = 220; // A3
-      const tritone = root * 1.414; // ~Eb4
-      for (const f of [root, tritone]) {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = "triangle";
-        osc.frequency.setValueAtTime(f, time);
-        gain.gain.setValueAtTime(0.0, time);
-        gain.gain.linearRampToValueAtTime(0.06, time + 0.01);
-        gain.gain.exponentialRampToValueAtTime(0.001, time + 0.25);
-        osc.connect(gain);
-        gain.connect(this.coneTrackGain!);
-        osc.start(time);
-        osc.stop(time + 0.28);
-        this.coneTrackNodes.push(osc);
+    if (currentBeat > this.lastMusicBeat && currentBeat >= 0) {
+      this.lastMusicBeat = currentBeat;
+      this.coneBeatIndex = currentBeat;
+
+      if (this.coneTrackNodes.length > 50) {
+        this.coneTrackNodes = this.coneTrackNodes.slice(-30);
+      }
+
+      if (this.coneBeatCallback && currentBeat % 2 === 0) {
+        this.coneBeatCallback();
       }
     }
 
-    if (type === 3) {
-      // Metallic resonance — tightly filtered square, ringing
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      osc.type = "square";
-      osc.frequency.setValueAtTime(200 + Math.random() * 100, time);
-      filter.type = "bandpass";
-      filter.frequency.setValueAtTime(1200, time);
-      filter.Q.setValueAtTime(20, time); // high Q = metallic ring
-      gain.gain.setValueAtTime(0.0, time);
-      gain.gain.linearRampToValueAtTime(0.04, time + 0.01);
-      gain.gain.exponentialRampToValueAtTime(0.001, time + 0.5);
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(this.coneTrackGain!);
-      osc.start(time);
-      osc.stop(time + 0.55);
-      this.coneTrackNodes.push(osc);
-    }
+    this.coneTrackTimer = requestAnimationFrame(() => this.scheduleMusicSyncLoop());
   }
 
-  /** One-shot cone blast SFX — dark, muted version */
+  /** One-shot cone blast SFX */
   playConeBlast() {
     if (!this.ready) return;
     const ctx = this.ctx!;
     const t = ctx.currentTime;
-
-    // Dark mid-range thud
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     const filter = ctx.createBiquadFilter();
@@ -627,8 +465,6 @@ export class AudioManager {
     gain.connect(this.masterGain!);
     osc.start(t);
     osc.stop(t + 0.28);
-
-    // Sub impact
     const sub = ctx.createOscillator();
     const subGain = ctx.createGain();
     sub.type = "sine";

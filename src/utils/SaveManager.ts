@@ -1,5 +1,7 @@
 const SAVE_KEY = "space_shooter_save";
 
+export type MusicTrack = "fire" | "chill" | "trap";
+
 export interface SaveData {
   coins: number;
   starCoins: number;
@@ -14,6 +16,10 @@ export interface SaveData {
   specialAbility: string | null;
   /** Whether the first-load tutorial has been completed */
   tutorialSeen: boolean;
+  /** Selected background music track */
+  musicTrack: MusicTrack;
+  /** Music volume (0–1) */
+  musicVolume: number;
 }
 
 export function getDefaultSave(): SaveData {
@@ -29,6 +35,8 @@ export function getDefaultSave(): SaveData {
     highestLevel: 1,
     specialAbility: null,
     tutorialSeen: false,
+    musicTrack: "fire",
+    musicVolume: 0.07,
   };
 }
 

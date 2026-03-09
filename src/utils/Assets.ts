@@ -39,15 +39,9 @@ export const ShipImages = {
 
 // ─── Asteroids ───────────────────────────────────────────────────────────────
 export const AsteroidImages = {
-  small: [
-    img("./assets/items/pulse-asteroid-small.svg"),
-    img("./assets/items/purple-asteroid-small.png"),
-  ],
-  big: [
-    img("./assets/items/pulse-asteroid-big.svg"),
-    img("./assets/items/purple-asteroid-small.png"),
-  ],
-  mega: img("./assets/items/pulse-asteroid-mega.png"),
+  small: [img("./assets/items/pulse-asteroid-small.svg")],
+  big: [img("./assets/items/pulse-asteroid-big.svg")],
+  mega: img("./assets/items/pulse-asteroid-mega.svg"),
 };
 
 // ─── Items / pickups ─────────────────────────────────────────────────────────

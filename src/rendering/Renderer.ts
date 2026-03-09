@@ -20,7 +20,7 @@ export class Renderer {
     const dpr = Math.min(window.devicePixelRatio || 1, 3); // cap at 3× to avoid VRAM issues
     this.dpr = dpr;
 
-    // Compute the largest size that fits the viewport while keeping 900×600 aspect ratio
+    // Compute the largest size that fits the viewport while keeping 1200x800 aspect ratio
     const container = this.canvas.parentElement;
     let availW: number;
     let availH: number;
@@ -35,7 +35,7 @@ export class Renderer {
       availH = window.innerHeight;
     }
 
-    const aspect = GAME_WIDTH / GAME_HEIGHT; // 1600/900 = 1.5
+    const aspect = GAME_WIDTH / GAME_HEIGHT; // 1200/800 = 1.5
     let displayW = availW;
     let displayH = availW / aspect;
     if (displayH > availH) {
@@ -74,8 +74,7 @@ export class Renderer {
     } else {
       this.shakeAmount = 0;
     }
-    this.ctx.fillStyle = COLORS.bg;
-    this.ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
   }
 
   endFrame() {

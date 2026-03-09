@@ -1,8 +1,8 @@
 // === GAME CONSTANTS ===
 
 // Canvas
-export const GAME_WIDTH = 900;
-export const GAME_HEIGHT = 600;
+export const GAME_WIDTH = 1200;
+export const GAME_HEIGHT = 800;
 
 // Player
 export const PLAYER_BASE_SPEED = 50; // pixels/sec (slow, deliberate)

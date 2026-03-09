@@ -64,7 +64,7 @@ export class Rock extends Enemy {
     const ctx = renderer.ctx;
     const isFlashing = this.flashTimer > 0;
     const isPoisoned = this.poisonTimer > 0;
-    const drawSize = this.radius * 5; // sprite draw size (slightly larger than collision radius)
+    const drawSize = this.radius * 2.5; // sprite draw size — closely matches collision radius
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -88,13 +88,13 @@ export class Rock extends Enemy {
 
       // ── SPRITE RENDER ──────────────────────────────────────────
       if (isPoisoned) {
-        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(2)";
+        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(1.5)";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.filter = "none";
       } else {
         // Slightly brighten all rocks so they pop against the dark bg
         ctx.filter =
-          "brightness(2) contrast(1.5) drop-shadow(1px 1px 5px rgba(255, 255, 255, 0.6))";
+          "brightness(1.5) contrast(1) drop-shadow(1px 1px 5px rgba(255, 255, 255, 0.4))";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.filter = "none";
       }
@@ -102,22 +102,9 @@ export class Rock extends Enemy {
       // Elite gold tint overlay
       if (this.isElite) {
         ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255, 220, 0, 0.35)";
+        ctx.fillStyle = "rgba(255, 220, 0, 0.30)";
         ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
         ctx.globalCompositeOperation = "source-over";
-      }
-
-      // Thin rim highlight around the rock sprite
-      if (!isFlashing) {
-        ctx.strokeStyle = this.isElite
-          ? "rgba(255,220,60,0.5)"
-          : isPoisoned
-            ? "rgba(80,255,80,0.4)"
-            : "rgba(210,160,100,0.3)";
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 1.05, 0, Math.PI * 2);
-        ctx.stroke();
       }
     } else {
       // ── CANVAS FALLBACK (while image loads) ──────────────────────
@@ -137,17 +124,6 @@ export class Rock extends Enemy {
       ctx.closePath();
       ctx.fill();
       ctx.stroke();
-    }
-
-    // Elite glow ring (always on top)
-    if (this.isElite) {
-      ctx.strokeStyle = COLORS.textGold;
-      ctx.lineWidth = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius + 5, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
     }
 
     ctx.restore();
