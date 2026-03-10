@@ -7,6 +7,8 @@ import {
   GAME_WIDTH,
   GAME_HEIGHT,
   PLAYER_COLLISION_RADIUS,
+  PLAYER_BASE_HP,
+  PLAYER_HIT_INVULN,
   COLORS,
   isMobileDevice,
   MOBILE_SPRITE_SCALE,
@@ -21,6 +23,12 @@ export interface DashResult {
 export class Player extends Entity {
   stats!: PlayerStats;
   fireCooldown: number = 0;
+
+  // Player health
+  hp: number = PLAYER_BASE_HP;
+  maxHp: number = PLAYER_BASE_HP;
+  invulnTimer: number = 0; // seconds of invulnerability remaining
+  damageFlash: number = 0; // visual flash when hit
 
   // Dash ability
   dashCooldown: number = 0;
@@ -45,12 +53,43 @@ export class Player extends Entity {
     this.stats = stats;
   }
 
+  /** Take damage from an enemy bullet or boss hit. Returns true if player is killed. */
+  takeDamage(amount: number = 1): boolean {
+    if (this.invulnTimer > 0 || this.isDashing) return false; // invulnerable
+    this.hp -= amount;
+    this.damageFlash = 0.3;
+    this.invulnTimer = PLAYER_HIT_INVULN;
+    if (this.hp <= 0) {
+      this.hp = 0;
+      return true; // killed
+    }
+    return false;
+  }
+
+  /** Reset HP to max (called at start of each run) */
+  resetHp(maxHp: number) {
+    this.maxHp = maxHp;
+    this.hp = maxHp;
+    this.invulnTimer = 0;
+    this.damageFlash = 0;
+  }
+
+  get isInvulnerable(): boolean {
+    return this.invulnTimer > 0 || this.isDashing;
+  }
+
   update(dt: number) {
     if (this.fireCooldown > 0) {
       this.fireCooldown -= dt;
     }
     if (this.dashCooldown > 0) {
       this.dashCooldown -= dt;
+    }
+    if (this.invulnTimer > 0) {
+      this.invulnTimer -= dt;
+    }
+    if (this.damageFlash > 0) {
+      this.damageFlash -= dt;
     }
 
     // Smooth dash motion — move at high speed for DASH_DURATION seconds
@@ -169,6 +208,27 @@ export class Player extends Entity {
     const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
     const SPRITE_W = 16 * mob; // display size in game-pixels (3× on mobile)
     const SPRITE_H = 23.6 * mob; // starfighter-r2 viewBox is 208×304 → aspect preserved
+
+    // ── Invulnerability blink — flicker visibility when recently hit ──
+    if (this.invulnTimer > 0 && !this.isDashing) {
+      // Blink rapidly (10Hz) — skip rendering every other frame
+      if (Math.floor(this.invulnTimer * 20) % 2 === 0) {
+        // Draw a red damage flash ring instead of the ship
+        if (this.damageFlash > 0) {
+          ctx.save();
+          ctx.globalAlpha = this.damageFlash / 0.3;
+          ctx.strokeStyle = COLORS.playerHp;
+          ctx.lineWidth = 2;
+          ctx.shadowColor = COLORS.playerHp;
+          ctx.shadowBlur = 12;
+          ctx.beginPath();
+          ctx.arc(this.pos.x, this.pos.y, 14, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        return; // skip ship render this frame (blink)
+      }
+    }
 
     // ── DASH (no flash — just render with cyan glow) ────────────
     if (this.isDashing) {

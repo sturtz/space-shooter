@@ -52,7 +52,8 @@ export interface IGame {
   bossDefeated: boolean;
 
   startRun(): void;
-  endRound(mothershipDestroyed: boolean): void;
+  deathCause: "mothership" | "player" | "time" | "";
+  endRound(mothershipDestroyed: boolean, cause?: "mothership" | "player" | "time"): void;
   onEnemyKilled(enemy: Enemy): void;
   spawnDamageNumber(x: number, y: number, damage: number, isCrit?: boolean): void;
 }

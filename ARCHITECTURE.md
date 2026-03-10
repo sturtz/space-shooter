@@ -657,6 +657,241 @@ Complete redesign of the upgrade screen UI from a flat programmer layout to a po
 
 *Last updated by agent — 2026-03-09. Mobile 2× sprite scale-up.*
 
+### 2026-03-10 — Mobile Touch Fixes: Volume Control, Mute Icon, Pause Menu Volume Drag
+
+1. **HTML volume slider now works on mobile** — Added `touch-action: auto` to `#volume-control`, `#volume-icon`, and `touch-action: pan-x` to `#music-volume` slider in CSS, overriding the global `body { touch-action: none }` that was blocking all touch interaction on the HTML volume control.
+
+2. **Volume control always expanded on mobile** — Added `@media (hover: none) and (pointer: coarse)` CSS rules that force the volume control to 160px width (instead of relying on `:hover` which doesn't exist on touch devices), with bigger slider thumb (24px), thicker track (10px), pill-shaped background, and larger icon (28px).
+
+3. **Volume slider wired in constructor, not just `init()`** — Moved slider event wiring from `AudioManager.init()` (only called on game start) to the constructor, so the HTML volume slider works from the menu screen before any game has started. Added both `input` and `change` event listeners for reliable mobile support. Touch events on the slider `stopPropagation()` to prevent them from reaching the game canvas.
+
+4. **Mute icon touch support** — Added `touchend` listener (with `preventDefault` + `stopPropagation`) to the volume icon alongside the existing `click` listener. Mobile users can now tap the speaker icon to toggle mute.
+
+5. **Pause menu volume bar supports touch drag** — Added `touchstart` and `touchmove` listeners on the game canvas that detect when a touch begins on the pause menu volume bar area (with ±10px generous hit zone). When dragging, volume updates in real-time as the finger moves horizontally. The `touchend` handler finalizes the drag and prevents it from triggering other UI interactions (resume, forfeit, etc.).
+
+*Last updated by agent — 2026-03-10. Mobile touch fixes: volume control, mute icon, pause menu volume drag.*
+
+---
+
+### 2026-03-10 — Boss Damage, Player Health, Mobile Scaling Fixes
+
+1. **Bosses deal much more damage to mothership** — Boss enemies now deal `BOSS_MOTHERSHIP_DAMAGE` (3×) damage to the mothership on body collision instead of the default 1. Time penalty is also multiplied by the damage amount. Screen shake is heavier (8 instead of 5) for boss hits. Constants `BOSS_MOTHERSHIP_DAMAGE = 3` and `BOSS_BULLET_DAMAGE = 2` added to Constants.ts.
+
+2. **Player health system** — Player is no longer invincible. New constants: `PLAYER_BASE_HP = 3`, `PLAYER_HIT_INVULN = 1.0s`.
+   - `Player.ts` gains `hp`, `maxHp`, `invulnTimer`, `damageFlash` fields, plus `takeDamage()`, `resetHp()`, and `isInvulnerable` getter.
+   - Player is invulnerable during dash and for 1 second after taking damage (i-frames).
+   - Invulnerability renders as rapid blinking (10Hz flicker) with a red damage flash ring.
+   - Player HP is reset via `player.resetHp(PLAYER_BASE_HP)` at the start of each run.
+
+3. **Enemy bullets damage the player** — New `CollisionSystem.checkEnemyBulletPlayerCollisions()` method checks enemy bullets against the player with a slightly generous hitbox (`PLAYER_COLLISION_RADIUS + 6`). Each hit deals 1 HP damage, triggers red particle burst + screen shake, and plays a hit SFX. If player HP reaches 0, the round ends with a dramatic explosion effect.
+
+4. **Player HP displayed in HUD** — Hearts system below the top bar shows filled (red with glow) and empty (dark outline) diamond-shaped hearts. `HUDData` interface extended with `playerHp` and `playerMaxHp` fields.
+
+5. **Enemy ship sprites scaled for mobile** — `EnemyShip.render()` now applies `MOBILE_SPRITE_SCALE` (1.75×) to both sprite-based variants (bee, butterfly, boss, pulse) and the canvas-drawn normal variant (via `ctx.scale()`). Enemy ships are now proportionally sized with the already-scaled player, rocks, and mothership on mobile.
+
+6. **Enemy bullets scaled for mobile** — `Bullet.render()` now applies `MOBILE_SPRITE_SCALE` to enemy bullet rectangles on mobile devices, making them ~1.75× larger with an added red glow for visibility. Player bullets were already scaled in a previous patch.
+
+*Last updated by agent — 2026-03-10. Boss damage, player health, mobile scaling fixes.*
+
+---
+
+### 2026-03-10 — Hitbox & Boss Spawn Fixes
+
+1. **Fixed rock glow halo not rendering** — `Rock.render()` had `ctx.beginPath(); ctx.fill()` with no `ctx.arc()` call in between, so the radial gradient glow behind rocks was silently discarded. Added the missing `ctx.arc(0, 0, this.radius * 1.7, 0, Math.PI * 2)` call. Rocks now properly show their warm/poison/elite glow halo, making them read better against the dark background and appear closer to their actual collision size.
+
+2. **Fixed boss EnemyShip sprite vastly oversized vs hitbox** — Boss ship sprites were drawn at `radius * 4` (e.g., a bee boss with radius 20 would render as an 80px sprite, but only collide at 20px). Reduced boss drawSize multiplier from `4` to `2.5` so the visual sprite closely matches the collision circle. Regular enemy ship sprites remain at `radius * 3`.
+
+3. **Fixed boss ships spawning at wrong angle** — All `EnemyShip` instances started with `angle = 0` (facing right) from the `Entity` base class. Since boss ships spawn on-screen (350px from center, within the 1200×800 viewport), they'd appear sideways for one frame before `update()` corrected the angle. Added initial angle calculation in the `EnemyShip` constructor: `this.angle = Math.atan2(targetPos.y - y, targetPos.x - x)` so they face the center of the screen immediately on spawn.
+
+*Last updated by agent — 2026-03-10. Hitbox & boss spawn fixes.*
+
+---
+
+### 2026-03-10 — Enemy Hitbox Fix
+
+1. **Increased `ENEMY_SHIP_SIZE` from 12→18** — Enemy ships had a collision radius of 12px but their sprite-based variants (bee, butterfly, boss, pulse) were drawn at `radius * 3 = 36px`, meaning the visual sprite was 3× the collision diameter. Bullets and cone attacks would pass through the visible edges of enemies without registering hits. Increased the base collision radius to 18px so hitboxes encompass most of the visible sprite.
+
+2. **Reduced sprite draw multiplier from 3→2** — Sprite-based enemy ships now render at `radius * 2` (diameter = collision diameter) instead of `radius * 3`. Combined with the radius increase, the visual sprite (36px) now closely matches the collision circle (36px diameter). Boss ships also use the same `radius * 2` multiplier (previously had a separate `2.5` path).
+
+3. **Scaled canvas-drawn hull (normal variant) to match** — The hand-drawn hull outline for the "normal" enemy ship variant was designed for the old 12px radius. All hull vertex coordinates scaled by 1.5× to match the new 18px collision radius (e.g., tip at x=12→18, wings at y=±10→±15).
+
+   Updated hitbox summary:
+   | Entity | Collision Radius | Visual Size | Ratio |
+   |---|---|---|---|
+   | EnemyShip (sprite) | 18px | 36px (radius×2) | 1:1 ✓ |
+   | EnemyShip (canvas) | 18px | ~36px tip-to-tip | 1:1 ✓ |
+   | EnemyShip (boss) | varies (20-24+) | radius×2 | 1:1 ✓ |
+   | Rock (small) | 10px | 22px (radius×2.2) | ~1:1.1 ✓ |
+   | Rock (big) | 22px | 48px (radius×2.2) | ~1:1.1 ✓ |
+
+*Last updated by agent — 2026-03-10. Enemy hitbox fix.*
+
+---
+
+### 2026-03-10 — Bug Fix & Improvement Batch
+
+1. **Fixed mega rock sprite never showing (Rock.ts)** — The sprite assignment used sequential `if` blocks instead of `if/else if`, so mega rocks had their sprite immediately overwritten by the big or small pool. Changed to proper `if/else if/else` chain. Mega boss asteroids now correctly display the `pulse-asteroid-mega.svg` sprite.
+
+2. **Applied BOSS_BULLET_DAMAGE to mothership (CollisionSystem.ts)** — `BOSS_BULLET_DAMAGE` constant was imported but never used. Enemy bullets hitting the mothership now check if they're high-damage (boss) bullets and apply `BOSS_BULLET_DAMAGE` (2×) instead of hardcoded 1. Time penalty also scales with bullet damage.
+
+3. **Added Hypersonic Bolt upgrade (guns_bolt) to upgrade tree** — `pierceCount` in UpgradeManager referenced `guns_bolt` but no such upgrade existed, so pierce was always 0. Added "Hypersonic Bolt" node: +1 bullet pierce per level (max 3), requires dmg_core level 2, costs [40, 100, 250]. Players can now unlock bullet pierce as a mid-tier weapon upgrade.
+
+4. **Added Lucky Strike upgrade (econ_lucky) to upgrade tree** — `econ_lucky` was referenced in Game.ts for 5× coin drops but had no upgrade node. Added "Lucky Strike" node: +4% chance per level (max 3, up to 12%) for enemies to drop 5× coins, requires econ_value level 1, costs [50, 120, 280]. Wired into `PlayerStats.luckyChance` field computed from the upgrade tree instead of raw `getLevel()` call.
+
+5. **Fixed SFX volume after unmute (AudioManager.ts)** — `toggleMute()` was restoring `masterGain` to `volumeBeforeMute` (the music volume, typically 0.07) instead of the SFX master gain value (0.2). After muting and unmuting, all procedural SFX were ~65% quieter. Now correctly restores `masterGain` to 0.2.
+
+6. **Rebalanced asteroid coin values** — Small rocks: 1 coin (unchanged). Medium rocks: 2→3 coins (Bug #6 fix — medium asteroids now drop meaningful coins). Large rocks: 3→5 coins (reward proportional to difficulty).
+
+7. **Cleaned up duplicate imports in Game.ts** — Removed `saveGame as persistSave` and `hasAbility as _hasAbility` duplicate imports. All code now uses the single `saveGame` import. Removed unused `type SaveData` import from the alias line.
+
+8. **Removed unused variable in MenuScreen.ts** — `playerPhase` was declared but never read in `renderTutorialPage2_HowToPlay()`.
+
+*Last updated by agent — 2026-03-10. Bug fix & improvement batch.*
+
+---
+
+### 2026-03-10 — Tutorial Page 2: Player Over Asteroid Fix
+
+1. **Step 1 card ("MOVE TO ENEMIES")** — Player ship now moves all the way onto the asteroid instead of stopping short. Asteroid is drawn first (behind), then player on top, so the layering shows the ship overlapping the rock. Asteroid position moved slightly left to center the overlap visually.
+
+2. **Step 2 card ("HIT TO THE BEAT")** — Player ship is now rendered overlapping the asteroid (both centered in the card). Previously the asteroid was 45px above the player with no overlap, making it unclear they needed to be close. Now asteroid is drawn first behind the player with a warm glow, player on top with the beat loader ring centered on the cluster.
+
+*Last updated by agent — 2026-03-10. Tutorial page 2 player-over-asteroid fix.*
+
+---
+
+## Bugs & Issues Found (2026-03-10 Audit)
+
+### 🔴 Bugs
+
+18. **`highestLevel` saved BEFORE being updated (Game.ts)**
+    - `saveGame()` is called on line ~995, then `highestLevel` is updated on line ~999. The new highest level is never persisted until the next unrelated `saveGame()` call. Data-loss bug.
+
+19. **`lifetimeKills` double-counted on boss kill**
+    - `onEnemyKilled()` adds to `lifetimeKills`, but `endRound()` also adds `roundKills` to it, and forfeit paths do too. If a boss kill triggers `onEnemyKilled` + `endRound`, kills are counted twice.
+
+20. **Splash + chain can still double-kill same enemy**
+    - In `checkBulletEnemyCollisions`, splash damage may kill an enemy, then chain lightning also processes `game.enemies`. The `onEnemyKilled` guard (`if (!enemy.alive) return`) prevents double rewards, but the dead enemy still receives chain damage and triggers particles redundantly.
+
+21. **`coinRare` color particle mismatch**
+    - `checkCoinCollections` uses `coin.value >= 5` as the `isRare` threshold for purple particle bursts, but coin entities themselves render gold until value ≥ 50. Coins worth 5–49 get purple pickup particles but appear gold in-world.
+
+22. **Missing `iconPath` on `ms_turret` upgrade node**
+    - `ms_turret` ("Sentinel Eye") is the only UPGRADE_TREE node without an `iconPath`. Falls back to Unicode "◉" character instead of SVG icon.
+
+23. **Missing `paused` field in `IGame` interface**
+    - `Game.ts` declares `paused: boolean` but `IGame` in `GameInterface.ts` doesn't include it. Subsystems that access game through the interface can't check pause state.
+
+### 🟡 Potential Issues
+
+24. **`getUpgradeEffect()` and `effectPerLevel` are dead code**
+    - `getUpgradeEffect()` is exported from `UpgradeTree.ts` but never called. All stats in `computeStats()` use hardcoded multipliers instead of `node.effectPerLevel`. The `effectPerLevel` values on nodes are documentation-only and can silently drift from actual behavior.
+
+25. **`screenFlashColor` declared but never read**
+    - Dead field in `Game.ts` (line ~170) and `GameInterface.ts` (line ~50). Never written to or consumed.
+
+26. **`streakBonus` is always 1 (dead code path)**
+    - `streakBonus` in Game.ts is always `1` with comment "kill streak bonus removed." HUD receives it as `streakCoinBonus` but only displays when `> 1.0`, so the entire prop chain is unused.
+
+27. **Lifesteal mentioned in JSDoc but never implemented**
+    - `CollisionSystem.checkBulletEnemyCollisions` JSDoc documents "lifesteal" but no lifesteal logic exists. `game.stats.lifestealChance` exists in UpgradeManager but is never read in CollisionSystem.
+
+28. **`resetHp` always uses `PLAYER_BASE_HP` instead of upgraded HP**
+    - `startRun()` calls `player.resetHp(PLAYER_BASE_HP)` (always 3). `PlayerStats.playerHp` exists as a compat stub always set to 1. If a future upgrade increases HP, the call won't use it.
+
+29. **Event listeners still leak on Game/ScreenManager re-instantiation (Bug #16 persists)**
+    - `Game` constructor registers anonymous click/touch/key listeners with no cleanup. `ScreenManager` registers resize/mousemove with no `destroy()`. Listeners accumulate on re-instantiation.
+
+30. **`type SaveData` imported but unused in Game.ts**
+    - Stale import that should be removed.
+
+---
+
+### 2026-03-10 — Death Screen, Mothership Delay, Touch Fix, Button Unification
+
+1. **Death screen with cause of death** — Game over screen now shows context-specific titles and subtitles based on how the round ended:
+   - **"MOTHERSHIP DESTROYED" / "The mothership exploded!"** (red theme) — when mothership HP reaches 0
+   - **"SHIP DESTROYED" / "Killed by enemy fire!"** (orange theme) — when player HP reaches 0
+   - **"TIME EXPIRED" / "The clock ran out!"** (gold theme) — when round timer hits 0 from time penalties
+   - **"ROUND COMPLETE"** (cyan theme) — when timer naturally expires (normal end)
+   - Panel border and glow colors match the death cause for visual reinforcement.
+
+2. **Mothership explosion delay (1.2s)** — When the mothership is destroyed and there's still round time left, the game now waits 1.2 seconds before showing the game over screen. During the delay, a massive particle explosion plays (50 red + 30 orange + 20 white particles), heavy screen shake (10), and enemies/coins continue updating so players can collect last-second coins. `deathDelayActive` flag prevents double-triggering.
+
+3. **Fixed touchend triggering next screen buttons** — Added a 0.6s `stateChangeTime` guard. When the game state changes (to gameover or bossReward), a timestamp is recorded. Touch/click interactions on gameover and bossReward screens are ignored for 0.6 seconds after the state change. This prevents the joystick release touchend from accidentally clicking "Continue" or boss reward cards.
+
+4. **Tutorial buttons positioned higher for mobile** — `drawContinueButton()` in `MenuScreen.ts` moved from `GAME_HEIGHT - 52` to `GAME_HEIGHT - 80` (28px higher), with increased height from 40→48px. Buttons are now in the same Y zone as the upgrade screen's START RUN button, making them reachable on mobile without scrolling.
+
+5. **All buttons unified to cyan START RUN style** — Every interactive button across all screens now uses the same visual language as the upgrade screen's START RUN button:
+   - Dark blue background (`rgba(0, 50, 110, 0.9)`)
+   - Pulsing cyan border (`rgba(0, 180, 255, ...)`)
+   - Cyan text color (`COLORS.player` / `#00d4ff`)
+   - Breathing cyan glow shadow
+   - Rounded corners (radius 10)
+   - Applied to: Menu "TAP TO START", tutorial "NEXT →" / "GOT IT — LET'S GO!", game over "CONTINUE"
+
+6. **`IGame` interface updated** — Added `deathCause` field. `endRound()` signature expanded with optional `cause` parameter (`"mothership" | "player" | "time"`). `CollisionSystem` passes appropriate cause for each death type.
+
+*Last updated by agent — 2026-03-10. Death screen, mothership delay, touch fix, button unification.*
+
+---
+
+### 2026-03-10 — Targeting Laser: Aim-Based Instead of Auto-Target
+
+1. **Laser fires toward pointer/aim direction** — The boss 2 reward "TARGETING LASER" no longer auto-targets the nearest enemy. Instead it raycasts from the player toward the current mouse/touch aim position (`input.mousePos`). A ray-vs-circle check finds the first enemy along the aim line (with `enemy.radius + 4` generous hitbox). If an enemy is hit, it takes 3× weapon damage and the beam terminates at the enemy. If no enemy is hit, the beam extends to max range (1600px) in the aim direction, providing visual feedback of the shot direction. On mobile, `mousePos` is set by the joystick touch position, so the laser fires in the direction the player is moving.
+
+2. **Boss reward card description updated** — Changed from "Fires at nearest enemy" to "Fires where you aim" to reflect the new behavior.
+
+3. **Fixed mothership rendering after destruction** — Mothership sprite (with `shadowColor`/`shadowBlur` glow) and HP bar continued rendering after `isDestroyed = true`, causing a bright yellow shadow artifact during the death delay. Both the sprite and HP bar are now wrapped in `if (!this.isDestroyed)` guards. Only the death animation GIF renders when destroyed. Also fixed pre-existing lint errors: removed unused `_e` catch param in AudioManager, prefixed unused `totalHeartsW` in HUD.
+
+*Last updated by agent — 2026-03-10. Targeting laser aim-based + mothership death render fix.*
+
+---
+
+### 2026-03-10 — Mobile Camera Zoom System
+
+Implemented a renderer-level camera system that zooms into the game world on mobile devices, making everything larger and more playable on small screens. Desktop rendering is completely unchanged.
+
+1. **Camera state in Renderer** — Added `cameraX`, `cameraY`, `cameraZoom` fields to `Renderer.ts`. At zoom 1.0 (desktop), the full 1200×800 world is visible. At zoom 1.5 (mobile), the visible area is ~800×533, centered on the camera position.
+
+2. **Camera transform in beginFrame()** — When `cameraZoom > 1`, `beginFrame()` applies `translate(GAME_WIDTH/2, GAME_HEIGHT/2) → scale(zoom) → translate(-cameraX, -cameraY)` after shake, making all world-space rendering (entities, particles, effects) automatically zoomed and centered on the camera. Camera position is clamped to world bounds so no out-of-bounds area is shown.
+
+3. **Camera follows player** — In `Game.updatePlaying()`, the camera lerps toward the player position each frame (`lerpSpeed = 0.08`) with a +40px downward Y bias to keep the mothership partially visible. Camera starts centered on the player at `startRun()`.
+
+4. **Screen-space rendering for UI** — Added `pushScreenSpace()` / `popScreenSpace()` methods to Renderer that save/restore the canvas transform. When called, drawing reverts to the base viewport transform (no camera zoom). Used in `renderPlaying()` to render HUD, mobile controls (joystick, dash button), pause button, and ability labels at fixed screen positions regardless of camera. Pause overlay, boss reward screen, and game over screen also render in screen-space.
+
+5. **`MOBILE_CAMERA_ZOOM` constant** — Added to `Constants.ts` (default: `1.5`). Easy to tune — `1.5×` shows ~800×533 of the world (good balance), `1.75×` would show ~685×457 (more intimate). Desktop always uses `1.0`.
+
+6. **`screenToWorld()` utility** — Added to Renderer for converting screen-space coordinates to world-space, accounting for camera zoom and position. Available for future use in input mapping if needed.
+
+7. **What scales automatically** — All entities (player, enemies, rocks, mothership, bullets, coins, missiles), all particles and effects (explosions, glow, shockwaves, dash rings), damage numbers, laser beams, pending bombs — everything drawn in world-space gets the zoom for free with zero per-sprite changes.
+
+8. **What stays fixed (screen-space)** — HUD (timer, coins, kills, HP hearts), mobile joystick, dash button, pause button, pause menu, boss reward cards, game over panel, ability labels.
+
+   **Files modified**: `Constants.ts` (+1 constant), `Renderer.ts` (+camera state, transform, pushScreenSpace/popScreenSpace, screenToWorld), `Game.ts` (imports, startRun camera init, updatePlaying camera follow, render flow with push/popScreenSpace).
+
+   **Build note**: `compactAlive` references in Game.ts cause TS errors (pre-existing from another branch — not related to camera changes). Camera system itself compiles cleanly.
+
+*Last updated by agent — 2026-03-10. Mobile camera zoom system.*
+
+---
+
+### 2026-03-10 — Auto-Increment BUILD_NUMBER on Build → Replaced with package.json version
+
+~~1. **Vite plugin `increment-build-number`** — Added a custom Vite plugin in `vite.config.ts` that runs during production builds only. On `buildStart`, it reads `src/utils/Constants.ts`, finds the `BUILD_NUMBER` constant via regex, increments it by 1, and writes the file back.~~
+
+**Replaced**: The custom Vite plugin was removed in favor of the standard approach:
+
+1. **`package.json` version as source of truth** — `APP_VERSION` is injected at compile-time via Vite's built-in `define` option, reading `version` from `package.json`. No source files are mutated during builds.
+2. **`APP_VERSION` replaces `BUILD_NUMBER`** — `Constants.ts` exports `APP_VERSION` (string, e.g. `"0.0.2"`) instead of `BUILD_NUMBER` (number). `SaveManager.ts` compares `appVersion` (string) instead of `buildNumber` (number).
+3. **Backwards-compatible migration** — `loadGame()` checks for both `appVersion` and old `buildNumber` fields, so existing saves from the old format are wiped cleanly on first load.
+4. **To wipe saves**: Run `npm version patch` (or `minor`/`major`) — standard npm workflow that also creates a git tag. No custom plugin needed.
+5. **`src/env.d.ts`** — Declares the `__APP_VERSION__` global constant for TypeScript.
+
+*Last updated by agent — 2026-03-10. Replaced custom build-number plugin with Vite define + package.json version.*
+
+---
+
 ## TODO — Deferred
 
 - [ ] **Interactive tutorial demo** — Let the user practice movement with the real joystick and dash on a safe target before starting. Lower priority now that the visual tutorial shows the actual controls layout.

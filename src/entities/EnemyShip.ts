@@ -1,7 +1,7 @@
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
 import { vec2, vecSub, vecNormalize, vecAdd, vecScale, vecAngle, randomRange } from "../utils/Math";
-import { ENEMY_SHIP_SIZE, COLORS } from "../utils/Constants";
+import { ENEMY_SHIP_SIZE, COLORS, isMobileDevice, MOBILE_SPRITE_SCALE } from "../utils/Constants";
 import { ShipImages, imageReady } from "../utils/Assets";
 
 /** Visual variant for enemy ships */
@@ -29,6 +29,10 @@ export class EnemyShip extends Enemy {
     this.shootTimer = this.shootCooldown;
     this.wobbleOffset = randomRange(0, Math.PI * 2);
     this.variant = variant;
+
+    // Face toward target (center of screen) immediately so bosses
+    // don't spawn visually pointing right before their first update()
+    this.angle = Math.atan2(this.targetPos.y - y, this.targetPos.x - x);
   }
 
   update(dt: number) {
@@ -96,9 +100,11 @@ export class EnemyShip extends Enemy {
     const sprite = this.getSprite();
     const isPoisoned = this.poisonTimer > 0;
 
+    const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
+
     // Sprite-based variants (bee, butterfly, boss, pulse)
     if (sprite && imageReady(sprite)) {
-      const drawSize = this.isBoss ? this.radius * 4 : this.radius * 3;
+      const drawSize = this.radius * 2 * mob;
 
       ctx.save();
       ctx.translate(this.pos.x, this.pos.y);
@@ -131,23 +137,13 @@ export class EnemyShip extends Enemy {
         ctx.globalCompositeOperation = "source-over";
       }
 
-      // Boss aura ring
-      if (this.isBoss) {
-        ctx.globalAlpha = 0.4 + Math.sin(this.wobbleTimer * 4) * 0.15;
-        ctx.strokeStyle = this.variant === "bee" ? "#ffcc00" : this.variant === "butterfly" ? "#cc44ff" : "#ff4444";
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 1.8, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-      }
-
       ctx.restore();
     } else {
-      // Canvas-drawn fallback (original normal variant)
+      // Canvas-drawn fallback (original normal variant) — scale for mobile
       ctx.save();
       ctx.translate(this.pos.x, this.pos.y);
       ctx.rotate(this.angle);
+      if (mob > 1) ctx.scale(mob, mob);
 
       ctx.lineWidth = 1.5;
       ctx.lineJoin = "miter";
@@ -160,30 +156,30 @@ export class EnemyShip extends Enemy {
       const accentColor = this.isElite ? COLORS.explosion : COLORS.enemyShipAccent;
 
       // Engine exhaust flicker
-      const flickerLen = 3 + Math.random() * 3;
+      const flickerLen = 4.5 + Math.random() * 4.5;
       ctx.strokeStyle = COLORS.bulletTrail;
       ctx.beginPath();
-      ctx.moveTo(-8, -2);
-      ctx.lineTo(-8 - flickerLen, 0);
-      ctx.lineTo(-8, 2);
+      ctx.moveTo(-12, -3);
+      ctx.lineTo(-12 - flickerLen, 0);
+      ctx.lineTo(-12, 3);
       ctx.stroke();
 
-      // Main hull outline
+      // Main hull outline (scaled to match ENEMY_SHIP_SIZE=18)
       ctx.strokeStyle = mainColor;
       ctx.beginPath();
-      ctx.moveTo(12, 0);
-      ctx.lineTo(6, -3);
-      ctx.lineTo(2, -3);
-      ctx.lineTo(-1, -8);
-      ctx.lineTo(-6, -10);
-      ctx.lineTo(-4, -5);
-      ctx.lineTo(-7, -3);
-      ctx.lineTo(-7, 3);
-      ctx.lineTo(-4, 5);
-      ctx.lineTo(-6, 10);
-      ctx.lineTo(-1, 8);
-      ctx.lineTo(2, 3);
-      ctx.lineTo(6, 3);
+      ctx.moveTo(18, 0);
+      ctx.lineTo(9, -4.5);
+      ctx.lineTo(3, -4.5);
+      ctx.lineTo(-1.5, -12);
+      ctx.lineTo(-9, -15);
+      ctx.lineTo(-6, -7.5);
+      ctx.lineTo(-10.5, -4.5);
+      ctx.lineTo(-10.5, 4.5);
+      ctx.lineTo(-6, 7.5);
+      ctx.lineTo(-9, 15);
+      ctx.lineTo(-1.5, 12);
+      ctx.lineTo(3, 4.5);
+      ctx.lineTo(9, 4.5);
       ctx.closePath();
       ctx.stroke();
 
@@ -191,19 +187,19 @@ export class EnemyShip extends Enemy {
       ctx.strokeStyle = accentColor;
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(8, 0);
-      ctx.lineTo(2, -2);
-      ctx.lineTo(2, 2);
+      ctx.moveTo(12, 0);
+      ctx.lineTo(3, -3);
+      ctx.lineTo(3, 3);
       ctx.closePath();
       ctx.stroke();
 
       ctx.beginPath();
-      ctx.moveTo(-2, -4);
-      ctx.lineTo(-2, 4);
+      ctx.moveTo(-3, -6);
+      ctx.lineTo(-3, 6);
       ctx.stroke();
       ctx.beginPath();
-      ctx.moveTo(-5, 0);
-      ctx.lineTo(1, 0);
+      ctx.moveTo(-7.5, 0);
+      ctx.lineTo(1.5, 0);
       ctx.stroke();
 
       ctx.restore();

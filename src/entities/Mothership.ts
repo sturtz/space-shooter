@@ -65,60 +65,66 @@ export class Mothership extends Entity {
 
     ctx.save();
 
-    // Draw sprite with spin
-    const sprite = ShipImages.mothership;
-    if (imageReady(sprite)) {
-      const size = SPRITE_SIZE * pulseScale;
-      if (this.damageFlash > 0) {
-        ctx.shadowColor = COLORS.mothershipDamaged;
-        ctx.shadowBlur = 18;
+    // Don't draw sprite or HP bar if destroyed — only death animation below
+    if (!this.isDestroyed) {
+      // Draw sprite with spin
+      const sprite = ShipImages.mothership;
+      if (imageReady(sprite)) {
+        const size = SPRITE_SIZE * pulseScale;
+        if (this.damageFlash > 0) {
+          ctx.shadowColor = COLORS.mothershipDamaged;
+          ctx.shadowBlur = 18;
+        } else {
+          ctx.shadowColor = COLORS.mothership;
+          ctx.shadowBlur = 10;
+        }
+        ctx.translate(cx, cy);
+        ctx.rotate(this.spinAngle);
+        ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+        if (this.damageFlash > 0) {
+          ctx.globalCompositeOperation = "source-atop";
+          ctx.fillStyle = "rgba(255,68,68,0.5)";
+          ctx.fillRect(-size / 2, -size / 2, size, size);
+          ctx.globalCompositeOperation = "source-over";
+        }
+        ctx.shadowBlur = 0;
+        ctx.rotate(-this.spinAngle);
+        ctx.translate(-cx, -cy);
       } else {
-        ctx.shadowColor = COLORS.mothership;
-        ctx.shadowBlur = 10;
+        // Fallback: simple circle
+        ctx.strokeStyle = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cx, cy, 18 * mob, 0, Math.PI * 2);
+        ctx.stroke();
       }
-      ctx.translate(cx, cy);
-      ctx.rotate(this.spinAngle);
-      ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
-      if (this.damageFlash > 0) {
-        ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255,68,68,0.5)";
-        ctx.fillRect(-size / 2, -size / 2, size, size);
-        ctx.globalCompositeOperation = "source-over";
-      }
-      ctx.shadowBlur = 0;
-      ctx.rotate(-this.spinAngle);
-      ctx.translate(-cx, -cy);
-    } else {
-      // Fallback: simple circle
-      ctx.strokeStyle = this.damageFlash > 0 ? COLORS.mothershipDamaged : COLORS.mothership;
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 18 * mob, 0, Math.PI * 2);
-      ctx.stroke();
     }
 
-    // HP bar below
-    const barWidth = 40 * mob;
-    const barHeight = 3 * mob;
-    const barX = cx - barWidth / 2;
-    const barY = cy + 28 * mob;
-    const hpRatio = this.hp / this.maxHp;
+    // HP bar below (hide when destroyed)
+    if (!this.isDestroyed) {
+      const barWidth = 40 * mob;
+      const barHeight = 3 * mob;
+      const barX = cx - barWidth / 2;
+      const barY = cy + 28 * mob;
+      const hpRatio = this.hp / this.maxHp;
 
-    // HP bar outline style
-    ctx.strokeStyle = "#444";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(barX, barY, barWidth, barHeight);
+      // HP bar outline style
+      ctx.strokeStyle = "#444";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(barX, barY, barWidth, barHeight);
 
-    const hpColor = hpRatio > 0.5 ? COLORS.hpBar : hpRatio > 0.25 ? "#ffaa00" : COLORS.hpBarDamage;
-    ctx.fillStyle = hpColor;
-    ctx.fillRect(barX, barY, barWidth * hpRatio, barHeight);
+      const hpColor =
+        hpRatio > 0.5 ? COLORS.hpBar : hpRatio > 0.25 ? "#ffaa00" : COLORS.hpBarDamage;
+      ctx.fillStyle = hpColor;
+      ctx.fillRect(barX, barY, barWidth * hpRatio, barHeight);
 
-    // HP numbers
-    ctx.fillStyle = "#fff";
-    ctx.font = `${8 * mob}px Tektur`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "top";
-    ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);
+      // HP numbers
+      ctx.fillStyle = "#fff";
+      ctx.font = `${8 * mob}px Tektur`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);
+    }
 
     // ── DEATH ANIMATION GIF ────────────────────────────────────────
     if (this.isDestroyed && this.deathAnimTimer > 0) {

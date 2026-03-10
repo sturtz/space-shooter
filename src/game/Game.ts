@@ -4,7 +4,7 @@ import { ParticleSystem } from "../systems/ParticleSystem";
 import { CollisionSystem } from "../systems/CollisionSystem";
 import { SpawnSystem } from "../systems/SpawnSystem";
 import { PlayerStats } from "../upgrades/UpgradeManager";
-import { saveGame } from "../utils/SaveManager";
+import { saveGame, hasAbility, addAbility } from "../utils/SaveManager";
 import { Player } from "../entities/Player";
 import { Mothership } from "../entities/Mothership";
 import { Bullet } from "../entities/Bullet";
@@ -33,12 +33,30 @@ import {
   CONE_FIRE_EVERY,
   MISSILE_SPEED,
   MISSILE_FIRE_EVERY,
+  PLAYER_BASE_HP,
+  BOMB_DAMAGE_MULT,
+  isMobileDevice,
+  MOBILE_CAMERA_ZOOM,
 } from "../utils/Constants";
 import { HUD } from "../ui/HUD";
 import type { ScreenManager } from "./ScreenManager";
 import { IGame } from "./GameInterface";
-import { saveGame as persistSave } from "../utils/SaveManager";
 import type { MusicTrack } from "../utils/SaveManager";
+
+/**
+ * In-place array compaction — removes dead entities without allocating a new array.
+ * Replaces `.filter(e => e.alive)` which creates a new array every frame (GC pressure).
+ */
+function compactAlive<T extends { alive: boolean }>(arr: T[]): void {
+  let writeIdx = 0;
+  for (let i = 0; i < arr.length; i++) {
+    if (arr[i].alive) {
+      if (i !== writeIdx) arr[writeIdx] = arr[i];
+      writeIdx++;
+    }
+  }
+  arr.length = writeIdx;
+}
 
 export type GameState = "playing" | "bossReward" | "gameover";
 
@@ -91,7 +109,7 @@ const BOSS_REWARD_CHOICES: BossRewardChoice[] = [
   {
     id: "laser",
     name: "TARGETING LASER",
-    lines: ["Fires at nearest enemy", "every 2.5 seconds", "Deals 3× weapon damage"],
+    lines: ["Fires where you aim", "every 2.5 seconds", "Deals 3× weapon damage"],
     color: "#ff4444",
     borderColor: "rgba(255,68,68,0.7)",
     glowColor: "rgba(255,68,68,0.15)",
@@ -99,7 +117,7 @@ const BOSS_REWARD_CHOICES: BossRewardChoice[] = [
   {
     id: "bomb_dash",
     name: "DASH BOMB",
-    lines: ["Dash drops a bomb at", "landing point", "5× damage, 80px blast"],
+    lines: ["Dash drops a bomb at", "start point", "2× damage, 80px blast"],
     color: "#ffaa00",
     borderColor: "rgba(255,170,0,0.7)",
     glowColor: "rgba(255,170,0,0.15)",
@@ -146,6 +164,12 @@ export class Game implements IGame {
   private _stats!: PlayerStats;
 
   state: GameState = "playing";
+  deathCause: "mothership" | "player" | "time" | "" = "";
+  /** Countdown before transitioning to gameover — lets explosion play out */
+  private deathDelay: number = 0;
+  private deathDelayActive: boolean = false;
+  /** Timestamp (gameTime) when state last changed — used to block accidental taps */
+  private stateChangeTime: number = 0;
   player!: Player;
   mothership!: Mothership;
   bullets: Bullet[] = [];
@@ -193,6 +217,9 @@ export class Game implements IGame {
   private readonly PAUSE_PANEL_W = 420;
   private readonly PAUSE_PANEL_H = 480;
 
+  // Track whether user is dragging the pause menu volume bar (touch)
+  private volumeDragActive = false;
+
   constructor(canvas: HTMLCanvasElement, renderer: Renderer, manager: ScreenManager) {
     this.renderer = renderer;
     this.manager = manager;
@@ -224,6 +251,8 @@ export class Game implements IGame {
           return;
         }
       }
+      // Guard: ignore taps for 0.6s after state changes (prevents touchend → instant screen skip)
+      if (this.gameTime - this.stateChangeTime < 0.6) return;
       if (this.state === "bossReward") {
         this.handleBossRewardClick(mx, my);
       } else if (this.state === "gameover") {
@@ -240,9 +269,49 @@ export class Game implements IGame {
       "touchend",
       (e) => {
         e.preventDefault();
+        // End volume drag if active
+        if (this.volumeDragActive) {
+          this.volumeDragActive = false;
+          // Still handle the final position as a volume set
+          const touch = e.changedTouches[0];
+          const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+          this.handlePauseVolumeTouch(mx, my);
+          return;
+        }
         const touch = e.changedTouches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
         handleUIInteraction(mx, my);
+      },
+      { passive: false }
+    );
+
+    // Touch start — detect volume bar drag initiation in pause menu
+    canvas.addEventListener(
+      "touchstart",
+      (e) => {
+        if (!this.paused || this.state !== "playing") return;
+        const touch = e.changedTouches[0];
+        const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
+        const vb = this.getPauseMenuLayout().volumeBar;
+        // Generous hit area: extend 10px above/below for easier touch targeting
+        if (mx >= vb.x && mx <= vb.x + vb.w && my >= vb.y - 10 && my <= vb.y + vb.h + 10) {
+          this.volumeDragActive = true;
+          this.handlePauseVolumeTouch(mx, my);
+          e.preventDefault(); // prevent this touch from becoming a joystick
+        }
+      },
+      { passive: false }
+    );
+
+    // Touch move — update volume while dragging on volume bar
+    canvas.addEventListener(
+      "touchmove",
+      (e) => {
+        if (!this.volumeDragActive) return;
+        e.preventDefault();
+        const touch = e.changedTouches[0];
+        const { mx } = getScaledCoords(touch.clientX, touch.clientY);
+        this.handlePauseVolumeTouch(mx, 0); // y doesn't matter for volume
       },
       { passive: false }
     );
@@ -358,6 +427,15 @@ export class Game implements IGame {
     };
   }
 
+  /** Handle touch drag on the pause menu volume bar */
+  private handlePauseVolumeTouch(mx: number, _my: number) {
+    const vb = this.getPauseMenuLayout().volumeBar;
+    const ratio = Math.max(0, Math.min(1, (mx - vb.x) / vb.w));
+    this.audio.setMusicVolume(ratio);
+    this.save.musicVolume = ratio;
+    saveGame(this.save);
+  }
+
   /** Handle clicks within the pause menu */
   handlePauseMenuClick(mx: number, my: number) {
     const layout = this.getPauseMenuLayout();
@@ -376,7 +454,7 @@ export class Game implements IGame {
         }
         this.audio.switchTrack(tb.track);
         this.save.musicTrack = tb.track;
-        persistSave(this.save);
+        saveGame(this.save);
         this.audio.playClick();
         return;
       }
@@ -388,7 +466,7 @@ export class Game implements IGame {
       const ratio = Math.max(0, Math.min(1, (mx - vb.x) / vb.w));
       this.audio.setMusicVolume(ratio);
       this.save.musicVolume = ratio;
-      persistSave(this.save);
+      saveGame(this.save);
       return;
     }
 
@@ -480,7 +558,7 @@ export class Game implements IGame {
       }
     }
 
-    if (this.save.specialAbility === "flashbang") {
+    if (hasAbility(this.save, "flashbang")) {
       const stunRadius = ringRadius + 20;
       for (const enemy of this.enemies) {
         if (!enemy.alive) continue;
@@ -491,27 +569,16 @@ export class Game implements IGame {
       this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 12, "#44ccff", 80, 0.3, 2);
     }
 
-    if (this.save.specialAbility === "bomb_dash") {
-      // Bomb spawns at dash LANDING point (end of dash), not origin
-      const dashDist = this.player.DASH_BASE_DISTANCE * (this.player.stats?.dashDistMult ?? 1);
-      const dashDir = vecFromAngle(this.player.angle);
-      const margin = 20;
-      const landX = Math.max(
-        margin,
-        Math.min(GAME_WIDTH - margin, ringOrigin.x + dashDir.x * dashDist)
-      );
-      const landY = Math.max(
-        margin,
-        Math.min(GAME_HEIGHT - margin, ringOrigin.y + dashDir.y * dashDist)
-      );
+    if (hasAbility(this.save, "bomb_dash")) {
+      // Bomb spawns at dash START point (origin), not landing
       this.pendingBombs.push({
-        x: landX,
-        y: landY,
+        x: ringOrigin.x,
+        y: ringOrigin.y,
         timer: 1.5,
         maxTimer: 1.5,
         radius: 80,
       });
-      this.particles.emit(vec2(landX, landY), 4, "#ffaa00", 40, 0.15, 1.5);
+      this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 4, "#ffaa00", 40, 0.15, 1.5);
     }
 
     this.audio.playFlashbang();
@@ -535,6 +602,7 @@ export class Game implements IGame {
     this._stats = this.upgrades.computeStats();
     this.player = new Player();
     this.player.updateStats(this._stats);
+    this.player.resetHp(PLAYER_BASE_HP);
     this.mothership = new Mothership(this._stats.mothershipHP);
     this.bullets = [];
     this.enemies = [];
@@ -560,6 +628,10 @@ export class Game implements IGame {
     this.spawner.reset(this);
     this.state = "playing";
     this.paused = false;
+    this.deathDelayActive = false;
+    this.deathDelay = 0;
+    this.deathCause = "";
+    this.stateChangeTime = 0;
 
     const level = this.save.currentLevel;
     const initialRockCount = 5 + Math.floor(level * 0.5);
@@ -570,6 +642,16 @@ export class Game implements IGame {
       const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
       const rock = new Rock(x, y, 1, ROCK_BASE_SPEED, false, 0.65);
       this.enemies.push(rock);
+    }
+
+    // ── Camera: enable zoom on mobile ──
+    if (isMobileDevice) {
+      this.renderer.cameraZoom = MOBILE_CAMERA_ZOOM;
+      // Start camera centered on player
+      this.renderer.cameraX = this.player.pos.x;
+      this.renderer.cameraY = this.player.pos.y;
+    } else {
+      this.renderer.cameraZoom = 1.0;
     }
 
     this.coneBeatCount = 0;
@@ -733,6 +815,25 @@ export class Game implements IGame {
 
   updatePlaying(dt: number) {
     this._killedThisFrame.clear();
+
+    // Death delay countdown — let mothership explosion play out before transitioning
+    if (this.deathDelayActive) {
+      this.deathDelay -= dt;
+      this.particles.update(dt);
+      // Continue updating enemies/coins visually during the delay
+      for (const enemy of this.enemies) enemy.update(dt);
+      this.coins.forEach((c) => {
+        c.attractTo(this.player.pos, this._stats.coinMagnetRange);
+        c.update(dt);
+      });
+      this.collisions.checkCoinCollections(this);
+      compactAlive(this.coins);
+      if (this.deathDelay <= 0) {
+        this.endRound(true, this.deathCause as "mothership" | "player" | "time");
+      }
+      return;
+    }
+
     this.roundTimer -= dt;
     if (this.roundTimer <= 0) {
       this.endRound(false);
@@ -749,6 +850,16 @@ export class Game implements IGame {
 
     this.player.move(this.input, dt);
     this.player.update(dt);
+
+    // ── Camera follow player (smooth lerp) ──
+    if (this.renderer.cameraZoom > 1) {
+      const lerpSpeed = 0.08;
+      // Bias camera slightly toward center-bottom to keep mothership partially visible
+      const targetX = this.player.pos.x;
+      const targetY = this.player.pos.y + 40; // slight downward bias
+      this.renderer.cameraX += (targetX - this.renderer.cameraX) * lerpSpeed;
+      this.renderer.cameraY += (targetY - this.renderer.cameraY) * lerpSpeed;
+    }
 
     if (this.input.consumeDash() && this.state === "playing") {
       this.handleDash();
@@ -793,7 +904,7 @@ export class Game implements IGame {
       this.nextBossElapsed += interval;
     }
 
-    if (this.save.specialAbility === "laser") {
+    if (hasAbility(this.save, "laser")) {
       this.laserTimer -= dt;
       if (this.laserTimer <= 0) {
         this.fireLaser();
@@ -823,6 +934,7 @@ export class Game implements IGame {
       this.spawnTimer = currentSpawnRate;
     }
 
+    this.spawner.updateEnemyTargets(this);
     this.spawner.applySlowAura(this);
     this.spawner.updateTurret(this, dt);
     this.spawner.updateMothershipRegen(this, dt);
@@ -830,14 +942,15 @@ export class Game implements IGame {
 
     this.collisions.checkBulletEnemyCollisions(this);
     if (this.collisions.checkEnemyMothershipCollisions(this)) return;
+    if (this.collisions.checkEnemyBulletPlayerCollisions(this)) return;
     this.collisions.checkCoinCollections(this);
 
     this.spawner.handleEnemyShooting(this);
 
-    this.bullets = this.bullets.filter((b) => b.alive);
-    this.enemyBullets = this.enemyBullets.filter((b) => b.alive);
-    this.enemies = this.enemies.filter((e) => e.alive);
-    this.coins = this.coins.filter((c) => c.alive);
+    compactAlive(this.bullets);
+    compactAlive(this.enemyBullets);
+    compactAlive(this.enemies);
+    compactAlive(this.coins);
   }
 
   spawnDamageNumber(x: number, y: number, damage: number, isCrit: boolean = false) {
@@ -876,9 +989,9 @@ export class Game implements IGame {
     const bossHP = 5 + level * 5;
 
     if (level === 1) {
-      // Level 1: mega asteroid boss
+      // Level 1: mega asteroid boss — big and imposing
       const megaRock = new Rock(x, y, bossHP, 15, true, 2, true);
-      megaRock.radius = 30;
+      megaRock.radius = 45;
       megaRock.coinValue = 10;
       megaRock.isBoss = true;
       this.bossEnemy = megaRock;
@@ -935,20 +1048,21 @@ export class Game implements IGame {
         const level = this.save.currentLevel - 1; // level that was just beaten
         this.save.lifetimeKills += this.roundKills;
         // Auto-grant abilities for first 3 bosses; level 4+ shows choice screen
-        if (level === 1 && !this.save.specialAbility) {
-          this.save.specialAbility = "bomb_dash";
+        if (level === 1 && !hasAbility(this.save, "bomb_dash")) {
+          addAbility(this.save, "bomb_dash");
           this.autoGrantedAbility = "bomb_dash";
-        } else if (level === 2) {
-          this.save.specialAbility = "laser";
+        } else if (level === 2 && !hasAbility(this.save, "laser")) {
+          addAbility(this.save, "laser");
           this.autoGrantedAbility = "laser";
-        } else if (level === 3) {
-          this.save.specialAbility = "bomb_dash";
-          this.autoGrantedAbility = "bomb_dash";
+        } else if (level === 3 && !hasAbility(this.save, "flashbang")) {
+          addAbility(this.save, "flashbang");
+          this.autoGrantedAbility = "flashbang";
         } else {
           this.autoGrantedAbility = null;
         }
         saveGame(this.save);
         this.state = "bossReward";
+        this.stateChangeTime = this.gameTime;
       }
       if (this.save.currentLevel > this.save.highestLevel) {
         this.save.highestLevel = this.save.currentLevel;
@@ -968,8 +1082,7 @@ export class Game implements IGame {
     const baseValue = enemy.coinValue + 1 + this._stats.extraCoinPerKill;
     let value = Math.max(1, baseValue);
 
-    const luckyChance = this.upgrades.getLevel("econ_lucky") * 0.04;
-    if (Math.random() < luckyChance) {
+    if (Math.random() < this._stats.luckyChance) {
       value *= 5;
     }
 
@@ -977,9 +1090,26 @@ export class Game implements IGame {
     this.coins.push(coin);
   }
 
-  endRound(mothershipDestroyed: boolean) {
+  endRound(mothershipDestroyed: boolean, cause?: "mothership" | "player" | "time") {
+    // For mothership destruction: start a 1.2s delay so explosion plays out
+    // (only if there's still time left on the round timer)
+    if (cause === "mothership" && this.roundTimer > 0 && !this.deathDelayActive) {
+      this.deathDelayActive = true;
+      this.deathDelay = 1.2;
+      this.deathCause = cause;
+      this.audio.stopConeTrack();
+      // Big mothership explosion particles
+      this.particles.emit(this.mothership.pos, 50, "#ff4444", 200, 0.8, 6);
+      this.particles.emit(this.mothership.pos, 30, "#ffaa00", 160, 0.6, 5);
+      this.particles.emit(this.mothership.pos, 20, "#ffffff", 120, 0.4, 3);
+      this.renderer.shake(10);
+      return; // don't transition yet — delay will handle it
+    }
+
     this.audio.stopConeTrack();
-    void mothershipDestroyed;
+    this.deathDelayActive = false;
+    this.deathCause = cause || (mothershipDestroyed ? "mothership" : "time");
+
     // Apply round-end coin bonus (econ_combo upgrade)
     if (this._stats.roundCoinBonus > 0 && this.roundCoins > 0) {
       const bonus = Math.round(this.roundCoins * this._stats.roundCoinBonus);
@@ -990,6 +1120,7 @@ export class Game implements IGame {
     this.save.lifetimeKills += this.roundKills;
     saveGame(this.save);
     this.state = "gameover";
+    this.stateChangeTime = this.gameTime;
   }
 
   goToUpgradeScreen() {
@@ -1237,6 +1368,9 @@ export class Game implements IGame {
     }
     this.renderer.ctx.globalAlpha = 1;
 
+    // ── Switch to screen-space for HUD, mobile controls, overlays ──
+    this.renderer.pushScreenSpace();
+
     const streakBonus = 1; // kill streak bonus removed — econ_combo is now round-end %
 
     this.hud.render(this.renderer, {
@@ -1249,23 +1383,29 @@ export class Game implements IGame {
       level: this.save.currentLevel,
       mothershipHp: this.mothership.hp,
       mothershipMaxHp: this.mothership.maxHp,
+      playerHp: this.player.hp,
+      playerMaxHp: this.player.maxHp,
       streakCoinBonus: streakBonus,
       dashReady: this.player.dashReady,
       dashCooldownRatio: this.player.dashCooldownRatio,
       isMobile: this.input.isTouchDevice,
     });
 
-    if (this.save.specialAbility) {
-      const choice = BOSS_REWARD_CHOICES.find((c) => c.id === this.save.specialAbility);
-      if (choice) {
-        const ctx = this.renderer.ctx;
+    if (this.save.specialAbilities.length > 0) {
+      const ctx = this.renderer.ctx;
+      const abilityNames = this.save.specialAbilities
+        .map((id) => BOSS_REWARD_CHOICES.find((c) => c.id === id))
+        .filter(Boolean);
+      if (abilityNames.length > 0) {
+        const label = abilityNames.map((c) => `⚡ ${c!.name}`).join("  ");
+        const color = abilityNames[abilityNames.length - 1]!.color;
         ctx.save();
         ctx.globalAlpha = 0.55;
         ctx.font = `bold 8px Tektur`;
-        ctx.fillStyle = choice.color;
+        ctx.fillStyle = color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
-        ctx.fillText(`⚡ ${choice.name}`, GAME_WIDTH / 2, GAME_HEIGHT - 14);
+        ctx.fillText(label, GAME_WIDTH / 2, GAME_HEIGHT - 14);
         ctx.restore();
       }
     }
@@ -1275,6 +1415,9 @@ export class Game implements IGame {
     }
     // Pause button always visible (mobile + desktop)
     this.renderMobilePauseButton();
+
+    // ── End screen-space pass ──
+    this.renderer.popScreenSpace();
   }
 
   renderMobileControls() {
@@ -1586,24 +1729,73 @@ export class Game implements IGame {
 
   private fireLaser() {
     if (this.state !== "playing" || this.paused) return;
-    const target = this.findNearestEnemy();
-    if (!target) return;
 
-    const laserDmg = this._stats.damage * 3;
-    const wasAlive = target.alive;
-    target.takeDamage(laserDmg);
-    this.spawnDamageNumber(target.pos.x, target.pos.y, laserDmg, false);
-    this.particles.emit(target.pos, 5, "#ff4444", 80, 0.2, 2);
+    // Fire toward where the player is pointing (mouse/touch aim direction)
+    const aimPos = this.input.mousePos;
+    const dir = vecNormalize(vecSub(aimPos, this.player.pos));
 
-    if (wasAlive && !target.alive) {
-      this.onEnemyKilled(target);
+    // If aim is exactly on player (zero-length dir), skip
+    if (dir.x === 0 && dir.y === 0) return;
+
+    // Raycast: find the closest enemy along the aim direction
+    // For each enemy, check perpendicular distance to the ray and pick the nearest hit
+    let hitEnemy: Enemy | null = null;
+    let hitDist = Infinity;
+    const LASER_MAX_RANGE = 1600; // extends well past screen bounds
+
+    for (const enemy of this.enemies) {
+      if (!enemy.alive) continue;
+
+      // Vector from player to enemy
+      const toEnemy = vecSub(enemy.pos, this.player.pos);
+
+      // Project enemy onto ray direction (dot product)
+      const alongRay = toEnemy.x * dir.x + toEnemy.y * dir.y;
+
+      // Enemy must be in front of player (positive projection)
+      if (alongRay < 0) continue;
+      if (alongRay > LASER_MAX_RANGE) continue;
+
+      // Perpendicular distance from enemy center to the ray line
+      const perpDist = Math.abs(toEnemy.x * dir.y - toEnemy.y * dir.x);
+
+      // Hit if the ray passes within the enemy's radius (generous hitbox)
+      if (perpDist <= enemy.radius + 4) {
+        if (alongRay < hitDist) {
+          hitDist = alongRay;
+          hitEnemy = enemy;
+        }
+      }
+    }
+
+    // Calculate beam endpoint — either the hit enemy or extend to max range
+    let endX: number;
+    let endY: number;
+
+    if (hitEnemy) {
+      endX = hitEnemy.pos.x;
+      endY = hitEnemy.pos.y;
+
+      const laserDmg = this._stats.damage * 3;
+      const wasAlive = hitEnemy.alive;
+      hitEnemy.takeDamage(laserDmg);
+      this.spawnDamageNumber(hitEnemy.pos.x, hitEnemy.pos.y, laserDmg, false);
+      this.particles.emit(hitEnemy.pos, 5, "#ff4444", 80, 0.2, 2);
+
+      if (wasAlive && !hitEnemy.alive) {
+        this.onEnemyKilled(hitEnemy);
+      }
+    } else {
+      // No enemy hit — beam extends to max range in aim direction
+      endX = this.player.pos.x + dir.x * LASER_MAX_RANGE;
+      endY = this.player.pos.y + dir.y * LASER_MAX_RANGE;
     }
 
     this.laserBeams.push({
       x1: this.player.pos.x,
       y1: this.player.pos.y,
-      x2: target.pos.x,
-      y2: target.pos.y,
+      x2: endX,
+      y2: endY,
       life: 0.22,
       maxLife: 0.22,
     });
@@ -1616,7 +1808,7 @@ export class Game implements IGame {
       const bomb = this.pendingBombs[i];
       bomb.timer -= dt;
       if (bomb.timer <= 0) {
-        const bombDmg = this._stats.damage * 5;
+        const bombDmg = this._stats.damage * BOMB_DAMAGE_MULT;
         const bPos = vec2(bomb.x, bomb.y);
         this.particles.emit(bPos, 45, "#ff8800", 200, 0.65, 6);
         this.particles.emit(bPos, 25, COLORS.engineGlow, 150, 0.45, 4);
@@ -1660,7 +1852,7 @@ export class Game implements IGame {
   }
 
   private selectSpecialAbility(id: string) {
-    this.save.specialAbility = id;
+    addAbility(this.save, id);
     this.save.lifetimeKills += this.roundKills;
     saveGame(this.save);
     this.audio.playClick();
@@ -1792,25 +1984,26 @@ export class Game implements IGame {
       "middle"
     );
 
-    if (this.save.specialAbility) {
-      const existing = BOSS_REWARD_CHOICES.find((c) => c.id === this.save.specialAbility);
-      if (existing) {
-        ctx.save();
-        ctx.font = `8px Tektur`;
-        ctx.fillStyle = existing.color;
-        ctx.globalAlpha = 0.7;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(`Currently equipped: ${existing.name} — choose again to switch`, cx, 242);
-        ctx.restore();
-      }
+    if (this.save.specialAbilities.length > 0) {
+      const owned = this.save.specialAbilities
+        .map((id) => BOSS_REWARD_CHOICES.find((c) => c.id === id)?.name)
+        .filter(Boolean)
+        .join(", ");
+      ctx.save();
+      ctx.font = `8px Tektur`;
+      ctx.fillStyle = "#aabbcc";
+      ctx.globalAlpha = 0.7;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`Owned: ${owned} — pick a new one to add`, cx, 242);
+      ctx.restore();
     }
 
     const layout = this.getBossRewardLayout();
     for (let i = 0; i < BOSS_REWARD_CHOICES.length; i++) {
       const choice = BOSS_REWARD_CHOICES[i];
       const card = layout[i];
-      const isCurrent = this.save.specialAbility === choice.id;
+      const isCurrent = hasAbility(this.save, choice.id);
 
       this.renderer.drawPanel(card.x, card.y, card.w, card.h, {
         bg: isCurrent ? "rgba(25,25,55,0.96)" : "rgba(10,10,28,0.94)",
@@ -1961,16 +2154,51 @@ export class Game implements IGame {
     ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    const title = "ROUND COMPLETE";
-    const titleColor = "#00d4ff";
+    // Death cause determines title, subtitle, and color
+    let title: string;
+    let subtitle: string;
+    let titleColor: string;
+    let panelBorder: string;
+    let panelGlow: string;
+
+    switch (this.deathCause) {
+      case "mothership":
+        title = "MOTHERSHIP DESTROYED";
+        subtitle = "The mothership exploded!";
+        titleColor = "#ff4444";
+        panelBorder = "rgba(255, 68, 68, 0.3)";
+        panelGlow = "rgba(255, 68, 68, 0.15)";
+        break;
+      case "player":
+        title = "SHIP DESTROYED";
+        subtitle = "Killed by enemy fire!";
+        titleColor = "#ff6644";
+        panelBorder = "rgba(255, 100, 68, 0.3)";
+        panelGlow = "rgba(255, 100, 68, 0.15)";
+        break;
+      case "time":
+        title = "TIME EXPIRED";
+        subtitle = "The clock ran out!";
+        titleColor = "#ffaa00";
+        panelBorder = "rgba(255, 170, 0, 0.3)";
+        panelGlow = "rgba(255, 170, 0, 0.15)";
+        break;
+      default:
+        title = "ROUND COMPLETE";
+        subtitle = `Level ${this.save.currentLevel}`;
+        titleColor = "#00d4ff";
+        panelBorder = "rgba(0, 180, 255, 0.3)";
+        panelGlow = "rgba(0, 180, 255, 0.15)";
+        break;
+    }
 
     const panelW = 320;
-    const panelH = 200;
+    const panelH = 220;
     this.renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
       bg: "rgba(6, 6, 20, 0.92)",
-      border: "rgba(68, 255, 136, 0.3)",
+      border: panelBorder,
       radius: 12,
-      glow: "rgba(68, 255, 136, 0.15)",
+      glow: panelGlow,
       glowBlur: 20,
     });
 
@@ -1980,7 +2208,7 @@ export class Game implements IGame {
     this.renderer.drawTitleTextOutline(
       title,
       cx,
-      cy - 72,
+      cy - 82,
       titleColor,
       "#000",
       18,
@@ -1989,26 +2217,25 @@ export class Game implements IGame {
     );
     ctx.restore();
 
-    this.renderer.drawTitleText(
-      `Level ${this.save.currentLevel}`,
-      cx,
-      cy - 42,
-      COLORS.textPrimary,
-      14,
-      "center",
-      "middle"
-    );
+    // Subtitle (cause description)
+    ctx.save();
+    ctx.font = `11px Tektur`;
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(subtitle, cx, cy - 56);
+    ctx.restore();
 
     ctx.save();
     ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx - 100, cy - 28);
-    ctx.lineTo(cx + 100, cy - 28);
+    ctx.moveTo(cx - 100, cy - 40);
+    ctx.lineTo(cx + 100, cy - 40);
     ctx.stroke();
     ctx.restore();
 
-    const statY = cy - 10;
+    const statY = cy - 22;
     const lineH = 22;
 
     ctx.save();
@@ -2038,19 +2265,25 @@ export class Game implements IGame {
 
     ctx.restore();
 
+    // Continue button — cyan START RUN style
     const blink = Math.sin(this.gameTime * 3) > 0;
-    const btnW = 220;
-    const btnH = 32;
+    const playPulse = (Math.sin(this.gameTime * 2.5) + 1) / 2;
+    const btnW = 260;
+    const btnH = 44;
     const btnX = cx - btnW / 2;
-    const btnY = cy + 62;
+    const btnY = cy + 60;
 
-    this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
-      bg: blink ? "rgba(61, 180, 150, 0.9)" : "rgba(10, 20, 15, 0.8)",
-      border: blink ? "rgba(38, 180, 180, 0.4)" : "rgba(100, 200, 150, 0.2)",
-      textColor: blink ? "#fff" : "rgba(255,255,255,0.5)",
-      fontSize: 12,
-      radius: 8,
-      glow: blink ? "rgba(15, 210, 228, 0.15)" : undefined,
+    ctx.save();
+    ctx.shadowColor = `rgba(0, 200, 255, ${0.15 + playPulse * 0.15})`;
+    ctx.shadowBlur = 12 + playPulse * 8;
+    this.renderer.drawButton(btnX, btnY, btnW, btnH, "▶  CONTINUE", {
+      bg: blink ? "rgba(0, 50, 110, 0.9)" : "rgba(0, 30, 70, 0.8)",
+      border: `rgba(0, 180, 255, ${0.4 + playPulse * 0.2})`,
+      textColor: COLORS.player,
+      fontSize: 14,
+      radius: 10,
+      glow: `rgba(0, 170, 255, ${0.1 + playPulse * 0.1})`,
     });
+    ctx.restore();
   }
 }

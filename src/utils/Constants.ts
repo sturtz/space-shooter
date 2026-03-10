@@ -1,12 +1,21 @@
 // === GAME CONSTANTS ===
 
+/**
+ * App version injected at build-time from package.json.
+ * Bump with `npm version patch` (or minor/major) to wipe stale saves.
+ */
+export const APP_VERSION: string = __APP_VERSION__;
+
 // Mobile detection (resolved once at module load)
 export const isMobileDevice =
   typeof globalThis !== "undefined" &&
   ("ontouchstart" in globalThis || (navigator && navigator.maxTouchPoints > 0));
 
-/** Visual sprite scale multiplier for mobile devices */
-export const MOBILE_SPRITE_SCALE = 1.75;
+/** Visual sprite scale multiplier for mobile devices — disabled (1×), desktop and mobile render identically */
+export const MOBILE_SPRITE_SCALE = 1;
+
+/** Camera zoom level on mobile — shows a zoomed-in portion of the 1200×800 world that follows the player */
+export const MOBILE_CAMERA_ZOOM = 1.5;
 
 // Canvas
 export const GAME_WIDTH = 1200;
@@ -23,6 +32,12 @@ export const MOTHERSHIP_COLLISION_RADIUS = 12;
 export const MOTHERSHIP_BASE_HP = 1;
 export const MOTHERSHIP_TIME_PENALTY = 2; // seconds lost per hit
 
+// Player health
+export const PLAYER_BASE_HP = 2; // player can take 3 hits before dying
+export const PLAYER_HIT_INVULN = 1.0; // seconds of invulnerability after taking damage
+export const BOSS_MOTHERSHIP_DAMAGE = 3; // boss body collision deals 3× damage to mothership
+export const BOSS_BULLET_DAMAGE = 2; // boss bullets deal 2× damage to mothership
+
 // Bullets
 export const BULLET_SPEED = 400;
 export const BULLET_SIZE = 4;
@@ -36,7 +51,7 @@ export const ROCK_SIZE = 10;
 export const ROCK_BIG_SIZE = 22;
 export const ENEMY_SHIP_BASE_HP = 4;
 export const ENEMY_SHIP_BASE_SPEED = 25;
-export const ENEMY_SHIP_SIZE = 12;
+export const ENEMY_SHIP_SIZE = 18;
 
 // Coins
 export const COIN_SIZE = 6;
@@ -59,7 +74,7 @@ export const LASER_INTERVAL = 2.5; // seconds between laser shots
 export const LASER_DAMAGE_MULT = 3; // laser deals N× weapon damage
 export const BOMB_FUSE = 1.5; // seconds before bomb detonates
 export const BOMB_RADIUS = 80; // blast radius in px
-export const BOMB_DAMAGE_MULT = 5; // bomb deals N× weapon damage
+export const BOMB_DAMAGE_MULT = 2; // bomb deals N× weapon damage
 export const DASH_RING_LIFE = 0.3; // visual ring duration (seconds)
 export const DASH_DAMAGE_MULT = 0.5; // dash ring deals fraction of weapon damage
 export const STUN_DURATION = 2.0; // flashbang stun seconds

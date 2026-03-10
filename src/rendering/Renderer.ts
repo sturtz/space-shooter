@@ -16,6 +16,17 @@ export class Renderer {
   /** CSS display scale of the game area (game-coords → CSS pixels) */
   gameScale = 1;
 
+  // ── Camera (world-space zoom + follow) ──────────────────────────
+  /** Camera center in world coordinates */
+  cameraX = GAME_WIDTH / 2;
+  cameraY = GAME_HEIGHT / 2;
+  /** 1.0 = see full 1200×800; 1.5 = zoomed in, see ~800×533 */
+  cameraZoom = 1.0;
+  /** Whether the camera transform is currently active (between beginFrame/endFrame) */
+  private cameraActive = false;
+  /** Base transform set by resize() — stored so pushScreenSpace can restore it */
+  private baseTransform: DOMMatrix | null = null;
+
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d")!;
@@ -62,6 +73,8 @@ export class Renderer {
     const txPx = offsetX * dpr;
     const tyPx = offsetY * dpr;
     this.ctx.setTransform(scaleX, 0, 0, scaleY, txPx, tyPx);
+    // Store the base transform so pushScreenSpace() can restore it without calling resize()
+    this.baseTransform = this.ctx.getTransform();
 
     this.ctx.imageSmoothingEnabled = false;
   }
@@ -72,6 +85,14 @@ export class Renderer {
 
   beginFrame(dt: number = 1 / 60) {
     this.ctx.save();
+    // Clear the entire logical area (need to clear wider when zoomed in)
+    if (this.cameraZoom > 1) {
+      // Clear a region large enough to cover the full canvas regardless of camera
+      this.ctx.clearRect(-GAME_WIDTH, -GAME_HEIGHT, GAME_WIDTH * 3, GAME_HEIGHT * 3);
+    } else {
+      this.ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    }
+
     if (this.shakeAmount > 0.5) {
       const sx = (Math.random() - 0.5) * this.shakeAmount * 2;
       const sy = (Math.random() - 0.5) * this.shakeAmount * 2;
@@ -80,11 +101,65 @@ export class Renderer {
     } else {
       this.shakeAmount = 0;
     }
-    this.ctx.clearRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+
+    // Apply camera zoom + follow
+    if (this.cameraZoom > 1) {
+      const vw = GAME_WIDTH / this.cameraZoom;
+      const vh = GAME_HEIGHT / this.cameraZoom;
+      // Clamp camera so it doesn't show outside the world
+      const cx = Math.max(vw / 2, Math.min(GAME_WIDTH - vw / 2, this.cameraX));
+      const cy = Math.max(vh / 2, Math.min(GAME_HEIGHT - vh / 2, this.cameraY));
+      // Translate so camera center maps to screen center, then zoom
+      this.ctx.translate(GAME_WIDTH / 2, GAME_HEIGHT / 2);
+      this.ctx.scale(this.cameraZoom, this.cameraZoom);
+      this.ctx.translate(-cx, -cy);
+      this.cameraActive = true;
+    } else {
+      this.cameraActive = false;
+    }
   }
 
   endFrame() {
+    this.cameraActive = false;
     this.ctx.restore();
+  }
+
+  /**
+   * Push a screen-space context — removes camera transform so UI elements
+   * render at fixed positions (0,0 = top-left of 1200×800 logical space).
+   * Must be paired with popScreenSpace().
+   */
+  pushScreenSpace() {
+    this.ctx.save();
+    if (this.cameraActive && this.baseTransform) {
+      // Reset to the base viewport transform (no camera zoom/offset)
+      this.ctx.setTransform(this.baseTransform);
+    }
+  }
+
+  /** Restore the camera transform after screen-space rendering. */
+  popScreenSpace() {
+    this.ctx.restore();
+  }
+
+  /**
+   * Convert screen-space coordinates (in game logical coords, post-viewport mapping)
+   * to world-space coordinates accounting for camera zoom + position.
+   * Use this for input mapping (touch/mouse → world position).
+   */
+  screenToWorld(screenX: number, screenY: number): { worldX: number; worldY: number } {
+    if (this.cameraZoom <= 1) {
+      return { worldX: screenX, worldY: screenY };
+    }
+    const vw = GAME_WIDTH / this.cameraZoom;
+    const vh = GAME_HEIGHT / this.cameraZoom;
+    const cx = Math.max(vw / 2, Math.min(GAME_WIDTH - vw / 2, this.cameraX));
+    const cy = Math.max(vh / 2, Math.min(GAME_HEIGHT - vh / 2, this.cameraY));
+    // screenX is in 0..GAME_WIDTH logical space
+    // The camera maps world region [cx-vw/2..cx+vw/2] to [0..GAME_WIDTH]
+    const worldX = cx - vw / 2 + (screenX / GAME_WIDTH) * vw;
+    const worldY = cy - vh / 2 + (screenY / GAME_HEIGHT) * vh;
+    return { worldX, worldY };
   }
 
   drawCircle(pos: Vec2, radius: number, color: string) {

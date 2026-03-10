@@ -45,9 +45,48 @@ export class AudioManager {
     this.musicEl.loop = true;
     this.musicEl.volume = 0.05;
 
-    // Wire mute toggle immediately
+    // Wire mute toggle immediately — both click and touch for mobile
     const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
-    if (icon) icon.addEventListener("click", () => this.toggleMute());
+    if (icon) {
+      icon.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.toggleMute();
+      });
+      // Touch support for mute icon on mobile
+      icon.addEventListener(
+        "touchend",
+        (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          this.toggleMute();
+        },
+        { passive: false }
+      );
+    }
+
+    // Wire volume slider immediately (not just in init()) so it works from menu screen
+    const slider = document.getElementById("music-volume") as HTMLInputElement | null;
+    if (slider) {
+      slider.value = String(this.musicEl.volume);
+
+      const handleSliderChange = () => {
+        if (this.muted) this.muted = false;
+        const volIcon = document.getElementById("volume-icon") as HTMLImageElement | null;
+        if (volIcon) volIcon.src = "./assets/items/volume-on.svg";
+        this.setMusicVolume(parseFloat(slider.value));
+        if (this.onVolumeChange) this.onVolumeChange(this.musicEl.volume);
+      };
+
+      // 'input' fires during drag on desktop
+      slider.addEventListener("input", handleSliderChange);
+      // 'change' fires on touch release — ensures mobile gets the final value
+      slider.addEventListener("change", handleSliderChange);
+
+      // Prevent touch events on the slider from propagating to the game canvas
+      slider.addEventListener("touchstart", (e) => e.stopPropagation(), { passive: true });
+      slider.addEventListener("touchmove", (e) => e.stopPropagation(), { passive: true });
+      slider.addEventListener("touchend", (e) => e.stopPropagation(), { passive: true });
+    }
   }
 
   /** Initialize audio context + start music. Call on first user interaction. */
@@ -72,17 +111,10 @@ export class AudioManager {
       this.musicEl.play().catch(() => {});
     }
 
-    // Wire up volume slider if present
+    // Sync slider value (already wired in constructor, just ensure value is current)
     const slider = document.getElementById("music-volume") as HTMLInputElement | null;
     if (slider) {
       slider.value = String(this.musicEl.volume);
-      slider.addEventListener("input", () => {
-        if (this.muted) this.muted = false;
-        const icon = document.getElementById("volume-icon") as HTMLImageElement | null;
-        if (icon) icon.src = "./assets/items/volume-on.svg";
-        this.setMusicVolume(parseFloat(slider.value));
-        if (this.onVolumeChange) this.onVolumeChange(this.musicEl.volume);
-      });
     }
   }
 
@@ -202,7 +234,8 @@ export class AudioManager {
       if (slider) slider.value = "0";
     } else {
       this.musicEl.volume = this.volumeBeforeMute;
-      if (this.masterGain) this.masterGain.gain.value = this.volumeBeforeMute;
+      // Restore SFX master gain to its original value (0.2), not the music volume
+      if (this.masterGain) this.masterGain.gain.value = 0.2;
       if (icon) icon.src = "./assets/items/volume-on.svg";
       if (slider) slider.value = String(this.volumeBeforeMute);
     }
@@ -210,6 +243,35 @@ export class AudioManager {
 
   get isMuted(): boolean {
     return this.muted;
+  }
+
+  // ── Suspend / Resume (for visibility changes) ─────────────────
+
+  /** Suspend audio when page loses focus — saves CPU/battery */
+  onSuspend() {
+    this.musicEl.pause();
+    if (this.ctx && this.ctx.state === "running") {
+      this.ctx.suspend().catch(() => {});
+    }
+    // Stop cone track beat polling (uses rAF)
+    if (this.coneTrackTimer !== null) {
+      cancelAnimationFrame(this.coneTrackTimer);
+      this.coneTrackTimer = null;
+    }
+  }
+
+  /** Resume audio when page regains focus */
+  onResume() {
+    if (this.ctx && this.ctx.state === "suspended") {
+      this.ctx.resume().catch(() => {});
+    }
+    if (this.musicStarted && !this.muted) {
+      this.musicEl.play().catch(() => {});
+    }
+    // Restart cone track beat polling if it was active
+    if (this.coneTrackPlaying && this.coneTrackTimer === null) {
+      this.scheduleMusicSyncLoop();
+    }
   }
 
   private get ready(): boolean {
@@ -439,7 +501,7 @@ export class AudioManager {
     for (const n of this.coneTrackNodes) {
       try {
         n.stop();
-      } catch (_e) {
+      } catch {
         /* already stopped */
       }
     }

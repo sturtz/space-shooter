@@ -63,8 +63,8 @@ export class SpawnSystem {
       const sizeScale = isMed ? 1.4 : 1.0;
       const rock = new Rock(x, y, hp, speed, isBig, sizeScale);
 
-      // Coin values: small=1, medium=2, large=3
-      rock.coinValue = isBig ? 3 : isMed ? 2 : 1;
+      // Coin values: small=1, medium=3, large=5
+      rock.coinValue = isBig ? 5 : isMed ? 3 : 1;
 
       // Elite check
       if (level >= 3 && Math.random() < 0.05) {
@@ -86,7 +86,7 @@ export class SpawnSystem {
         ? ENEMY_SHIP_BASE_SPEED * 3 + level * 4 // really fast!
         : ENEMY_SHIP_BASE_SPEED + level * 2;
       const canShoot = isPulseShip ? false : level >= 4; // pulse ships are melee-only
-      const variant = isPulseShip ? "pulse" as const : "normal" as const;
+      const variant = isPulseShip ? ("pulse" as const) : ("normal" as const);
       const ship = new EnemyShip(x, y, hp, speed, canShoot, variant);
       ship.coinValue = isPulseShip ? 1 : 2 + Math.floor(level * 0.3);
 
@@ -112,6 +112,18 @@ export class SpawnSystem {
         const bullet = new Bullet(enemy.pos.x, enemy.pos.y, dir, 200, 1, false, 0, true);
         game.enemyBullets.push(bullet);
       }
+    }
+  }
+
+  /** Pulse enemies chase the player; all others head for the mothership */
+  updateEnemyTargets(game: IGame) {
+    for (const enemy of game.enemies) {
+      if (!enemy.alive) continue;
+      if (enemy instanceof EnemyShip && enemy.variant === "pulse") {
+        // Pulse enemies hunt the player
+        enemy.targetPos = { x: game.player.pos.x, y: game.player.pos.y };
+      }
+      // All other enemies keep the default targetPos (mothership / center)
     }
   }
 

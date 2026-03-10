@@ -1,7 +1,15 @@
 import { IGame } from "../game/GameInterface";
 import { Enemy } from "../entities/Enemy";
 import { Vec2, vecDist, circleCollision, randomAngle } from "../utils/Math";
-import { COIN_SIZE, COLORS, CHAIN_RANGE, SPLASH_DAMAGE_MULT } from "../utils/Constants";
+import {
+  COIN_SIZE,
+  COLORS,
+  CHAIN_RANGE,
+  SPLASH_DAMAGE_MULT,
+  BOSS_MOTHERSHIP_DAMAGE,
+  BOSS_BULLET_DAMAGE,
+  PLAYER_COLLISION_RADIUS,
+} from "../utils/Constants";
 
 /**
  * Handles all collision detection and resolution, extracted from Game.ts.
@@ -146,13 +154,19 @@ export class CollisionSystem {
           continue; // hit absorbed — no damage, no time penalty
         }
 
-        const destroyed = game.mothership.takeDamage(1);
-        game.roundTimer -= game.stats.timePenaltyPerHit;
-        game.renderer.shake(5);
+        // Bosses deal much more damage to mothership
+        const dmg = enemy.isBoss ? BOSS_MOTHERSHIP_DAMAGE : 1;
+        const destroyed = game.mothership.takeDamage(dmg);
+        game.roundTimer -= game.stats.timePenaltyPerHit * dmg;
+        game.renderer.shake(enemy.isBoss ? 8 : 5);
         game.audio.playMothershipHit();
 
-        if (destroyed || game.roundTimer <= 0) {
-          game.endRound(true);
+        if (destroyed) {
+          game.endRound(true, "mothership");
+          return true;
+        }
+        if (game.roundTimer <= 0) {
+          game.endRound(true, "time");
           return true;
         }
       }
@@ -172,13 +186,19 @@ export class CollisionSystem {
           continue; // hit absorbed
         }
 
-        const destroyed = game.mothership.takeDamage(1);
-        game.roundTimer -= game.stats.timePenaltyPerHit;
-        game.renderer.shake(4);
+        // Boss bullets deal extra damage
+        const bulletDmg = bullet.damage > 1 ? BOSS_BULLET_DAMAGE : 1;
+        const destroyed = game.mothership.takeDamage(bulletDmg);
+        game.roundTimer -= game.stats.timePenaltyPerHit * bulletDmg;
+        game.renderer.shake(bulletDmg > 1 ? 6 : 4);
         game.audio.playMothershipHit();
 
-        if (destroyed || game.roundTimer <= 0) {
-          game.endRound(true);
+        if (destroyed) {
+          game.endRound(true, "mothership");
+          return true;
+        }
+        if (game.roundTimer <= 0) {
+          game.endRound(true, "time");
           return true;
         }
       }
@@ -213,5 +233,41 @@ export class CollisionSystem {
         game.audio.playCoinPickup();
       }
     }
+  }
+
+  /**
+   * Enemy bullets hitting the player.
+   * Player takes 1 HP damage per hit. Invulnerability frames prevent rapid hits.
+   * Returns true if player is killed (round should end).
+   */
+  checkEnemyBulletPlayerCollisions(game: IGame): boolean {
+    if (game.player.isInvulnerable) return false; // skip check entirely during i-frames
+
+    const playerHitRadius = PLAYER_COLLISION_RADIUS + 6; // slightly generous hitbox for bullets
+
+    for (const bullet of game.enemyBullets) {
+      if (!bullet.alive) continue;
+      if (circleCollision(bullet.pos, bullet.radius, game.player.pos, playerHitRadius)) {
+        bullet.destroy();
+
+        const killed = game.player.takeDamage(1);
+        game.particles.emit(game.player.pos, 8, COLORS.playerHp, 60, 0.25, 2);
+        game.particles.emit(game.player.pos, 4, "#ffffff", 30, 0.15, 1);
+        game.renderer.shake(4);
+        game.audio.playMothershipHit(); // reuse hit SFX
+
+        if (killed) {
+          // Player destroyed — end round
+          game.particles.emit(game.player.pos, 30, COLORS.playerHp, 120, 0.5, 4);
+          game.particles.emit(game.player.pos, 20, COLORS.player, 100, 0.4, 3);
+          game.endRound(true, "player");
+          return true;
+        }
+
+        break; // only process one hit per frame (i-frames kick in)
+      }
+    }
+
+    return false;
   }
 }

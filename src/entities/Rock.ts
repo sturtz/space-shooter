@@ -1,13 +1,7 @@
 import { Enemy } from "./Enemy";
 import { Renderer } from "../rendering/Renderer";
 import { Vec2, vec2, vecSub, vecNormalize, vecAdd, vecScale, randomRange } from "../utils/Math";
-import {
-  ROCK_SIZE,
-  ROCK_BIG_SIZE,
-  COLORS,
-  isMobileDevice,
-  MOBILE_SPRITE_SCALE,
-} from "../utils/Constants";
+import { ROCK_SIZE, ROCK_BIG_SIZE, COLORS } from "../utils/Constants";
 import { AsteroidImages, pickRandom, imageReady } from "../utils/Assets";
 
 export class Rock extends Enemy {
@@ -33,8 +27,7 @@ export class Rock extends Enemy {
     // Pick sprite based on size — no tiny pool, all small rocks use the small pool
     if (mega) {
       this.sprite = AsteroidImages.mega;
-    }
-    if (isBig) {
+    } else if (isBig) {
       this.sprite = pickRandom(AsteroidImages.big);
     } else {
       this.sprite = pickRandom(AsteroidImages.small);
@@ -70,8 +63,7 @@ export class Rock extends Enemy {
     const ctx = renderer.ctx;
     const isFlashing = this.flashTimer > 0;
     const isPoisoned = this.poisonTimer > 0;
-    const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
-    const drawSize = this.radius * 3.5 * mob; // sprite draw size — 3× on mobile
+    const drawSize = this.radius * 2.2; // sprite draw size — closely matches collision radius
 
     ctx.save();
     ctx.translate(this.pos.x, this.pos.y);
@@ -90,6 +82,7 @@ export class Rock extends Enemy {
         glowGrad.addColorStop(1, "rgba(0,0,0,0)");
         ctx.fillStyle = glowGrad;
         ctx.beginPath();
+        ctx.arc(0, 0, this.radius * 1.7, 0, Math.PI * 2);
         ctx.fill();
       }
 

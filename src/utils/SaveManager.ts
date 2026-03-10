@@ -1,3 +1,5 @@
+import { APP_VERSION } from "./Constants";
+
 const SAVE_KEY = "space_shooter_save";
 
 export type MusicTrack = "fire" | "chill" | "trap";
@@ -12,14 +14,16 @@ export interface SaveData {
   lifetimeKills: number;
   prestigeCount: number;
   highestLevel: number;
-  /** Special ability earned by defeating the boss — persists between runs */
-  specialAbility: string | null;
+  /** Special abilities earned by defeating bosses — stacks, persists between runs */
+  specialAbilities: string[];
   /** Whether the first-load tutorial has been completed */
   tutorialSeen: boolean;
   /** Selected background music track */
   musicTrack: MusicTrack;
   /** Music volume (0–1) */
   musicVolume: number;
+  /** App version — save is wiped when this doesn't match the current version */
+  appVersion: string;
 }
 
 export function getDefaultSave(): SaveData {
@@ -33,10 +37,11 @@ export function getDefaultSave(): SaveData {
     lifetimeKills: 0,
     prestigeCount: 0,
     highestLevel: 1,
-    specialAbility: null,
+    specialAbilities: [],
     tutorialSeen: false,
     musicTrack: "fire",
     musicVolume: 0.07,
+    appVersion: APP_VERSION,
   };
 }
 
@@ -53,7 +58,26 @@ export function loadGame(): SaveData {
     const raw = localStorage.getItem(SAVE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
-      return { ...getDefaultSave(), ...parsed };
+
+      // Wipe save if version doesn't match (also catches old buildNumber-based saves)
+      const savedVersion = parsed.appVersion ?? parsed.buildNumber?.toString();
+      if (savedVersion !== APP_VERSION) {
+        console.info(
+          `Version mismatch (save: ${savedVersion}, current: ${APP_VERSION}) — wiping save.`
+        );
+        clearSave();
+        return getDefaultSave();
+      }
+
+      const save = { ...getDefaultSave(), ...parsed };
+
+      // Migrate old specialAbility (string) → specialAbilities (array)
+      if (parsed.specialAbility && !parsed.specialAbilities) {
+        save.specialAbilities = [parsed.specialAbility];
+        delete (save as Record<string, unknown>).specialAbility;
+      }
+
+      return save;
     }
   } catch (e) {
     console.warn("Failed to load game:", e);
@@ -63,4 +87,16 @@ export function loadGame(): SaveData {
 
 export function clearSave(): void {
   localStorage.removeItem(SAVE_KEY);
+}
+
+/** Helper: check if a specific ability has been earned */
+export function hasAbility(save: SaveData, id: string): boolean {
+  return save.specialAbilities.includes(id);
+}
+
+/** Helper: add an ability if not already present (stacking) */
+export function addAbility(save: SaveData, id: string): void {
+  if (!save.specialAbilities.includes(id)) {
+    save.specialAbilities.push(id);
+  }
 }

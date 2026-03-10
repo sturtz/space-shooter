@@ -11,6 +11,8 @@ export interface HUDData {
   level: number;
   mothershipHp: number;
   mothershipMaxHp: number;
+  playerHp: number;
+  playerMaxHp: number;
   streakCoinBonus: number;
   dashReady: boolean;
   dashCooldownRatio: number;
@@ -120,6 +122,58 @@ export class HUD {
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
       ctx.fillText(`🔥 ${data.killStreak}x STREAK${multStr}`, pad + 8, streakY);
+      ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // PLAYER HP — hearts displayed below the top bar
+    // ═══════════════════════════════════════════════════════════
+    if (data.playerMaxHp > 0) {
+      const hpY = pad + topBarH + 8;
+      const heartSize = 10;
+      const heartGap = 4;
+      const hpStartX = pad + 4;
+
+      ctx.save();
+      // Label
+      ctx.font = `bold 8px Tektur`;
+      ctx.fillStyle = COLORS.textSecondary;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.fillText("HP", hpStartX, hpY + heartSize / 2);
+
+      const heartsX = hpStartX + 18;
+      for (let i = 0; i < data.playerMaxHp; i++) {
+        const x = heartsX + i * (heartSize + heartGap);
+        const filled = i < data.playerHp;
+
+        if (filled) {
+          // Filled heart — red with glow
+          ctx.fillStyle = COLORS.playerHp;
+          ctx.shadowColor = COLORS.playerHp;
+          ctx.shadowBlur = 4;
+        } else {
+          // Empty heart — dark outline
+          ctx.fillStyle = "rgba(80, 30, 30, 0.6)";
+          ctx.shadowBlur = 0;
+        }
+
+        // Draw diamond-heart shape
+        ctx.beginPath();
+        ctx.moveTo(x + heartSize / 2, hpY + heartSize - 1); // bottom point
+        ctx.lineTo(x + heartSize - 1, hpY + heartSize / 3); // right
+        ctx.lineTo(x + heartSize / 2, hpY); // top
+        ctx.lineTo(x + 1, hpY + heartSize / 3); // left
+        ctx.closePath();
+        ctx.fill();
+
+        if (!filled) {
+          ctx.strokeStyle = "rgba(120, 50, 50, 0.4)";
+          ctx.lineWidth = 1;
+          ctx.stroke();
+        }
+      }
+      ctx.shadowBlur = 0;
       ctx.restore();
     }
 

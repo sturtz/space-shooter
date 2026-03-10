@@ -1,7 +1,15 @@
 import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
 import { Vec2, vecAdd, vecScale, vecAngle } from "../utils/Math";
-import { GAME_WIDTH, GAME_HEIGHT, BULLET_SIZE, BULLET_LIFETIME, COLORS } from "../utils/Constants";
+import {
+  GAME_WIDTH,
+  GAME_HEIGHT,
+  BULLET_SIZE,
+  BULLET_LIFETIME,
+  COLORS,
+  isMobileDevice,
+  MOBILE_SPRITE_SCALE,
+} from "../utils/Constants";
 
 export class Bullet extends Entity {
   damage: number;
@@ -66,11 +74,20 @@ export class Bullet extends Entity {
     ctx.rotate(this.angle);
 
     if (this.isEnemy) {
-      // Enemy bullet: red-orange style
+      // Enemy bullet: red-orange style — scaled up on mobile for visibility
+      const mob = isMobileDevice ? MOBILE_SPRITE_SCALE : 1;
       ctx.fillStyle = COLORS.enemyBullet;
-      ctx.fillRect(-2, -1.5, 4, 3);
+      ctx.fillRect(-3 * mob, -2 * mob, 6 * mob, 4 * mob);
       ctx.fillStyle = COLORS.enemyBulletFront;
-      ctx.fillRect(1, -1, 2, 2);
+      ctx.fillRect(1 * mob, -1.5 * mob, 3 * mob, 3 * mob);
+      // Glow for mobile visibility
+      if (mob > 1) {
+        ctx.shadowColor = COLORS.enemyBullet;
+        ctx.shadowBlur = 6;
+        ctx.fillStyle = COLORS.enemyBullet;
+        ctx.fillRect(-2 * mob, -1.5 * mob, 4 * mob, 3 * mob);
+        ctx.shadowBlur = 0;
+      }
       ctx.restore();
       return;
     }

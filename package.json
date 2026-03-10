@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "space-shooter",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Incremental space shooter - defend your mothership!",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
-    "format": "prettier --write src"
+    "format": "prettier --write src",
+    "finish": "npm run build && npm run lint:fix && npm run format"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

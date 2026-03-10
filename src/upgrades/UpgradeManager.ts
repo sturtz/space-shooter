@@ -3,7 +3,6 @@ import { getUpgradeCost, UpgradeNode, StarUpgrade } from "./UpgradeTree";
 import {
   PLAYER_BASE_SPEED,
   PLAYER_BASE_FIRE_RATE,
-  PLAYER_BASE_DAMAGE,
   BASE_ROUND_DURATION,
   MOTHERSHIP_BASE_HP,
   MOTHERSHIP_TIME_PENALTY,
@@ -44,6 +43,8 @@ export interface PlayerStats {
   extraCoinPerKill: number;
   /** Round-end bonus: multiply total round coins by (1 + this) */
   roundCoinBonus: number;
+  /** Chance (0-1) for a kill to drop 5x coins (econ_lucky) */
+  luckyChance: number;
   enemySpawnMultiplier: number;
   // === Kept for compatibility (unused since player is invincible) ===
   bulletSpeed: number;
@@ -238,6 +239,10 @@ export class UpgradeManager {
     // Star fortune multiplies the bonus
     const roundCoinBonus = this.getLevel("econ_combo") * 0.1 * starFortune;
 
+    // ── LUCKY CHANCE ──────────────────────────────────────────────────────
+    // econ_lucky: +4% chance per level (max 3) → max 12% chance for 5× coins
+    const luckyChance = this.getLevel("econ_lucky") * 0.04;
+
     // ── ENEMY SPAWN ───────────────────────────────────────────────────────
     // Natural level scaling: +50% per game level
     // econ_swarm: +40% per level (max 2) on top of natural scaling
@@ -280,6 +285,7 @@ export class UpgradeManager {
       coinMagnetRange,
       extraCoinPerKill,
       roundCoinBonus,
+      luckyChance,
       enemySpawnMultiplier: enemySpawnMult,
       timePenaltyPerHit: timePenalty,
       // Compat stubs (player is invincible — these are all inactive)

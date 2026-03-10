@@ -64,7 +64,7 @@
       function setup() {
         let canvas = createCanvas(BG_CW, BG_CH);
         canvas.parent("bg-canvas");
-        frameRate(60);
+        frameRate(30); // 30fps is plenty for cosmetic background — saves CPU/battery
         bgInitializeSystem();
       }
 
