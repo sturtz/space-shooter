@@ -266,7 +266,20 @@ export class AudioManager {
       this.ctx.resume().catch(() => {});
     }
     if (this.musicStarted && !this.muted) {
-      this.musicEl.play().catch(() => {});
+      this.musicEl.play().catch(() => {
+        // play() rejected (no user gesture context on mobile) — queue a
+        // one-shot touch/click listener so the next interaction resumes music.
+        const resumeOnTouch = () => {
+          this.musicEl.play().catch(() => {});
+          if (this.ctx && this.ctx.state === "suspended") {
+            this.ctx.resume().catch(() => {});
+          }
+          document.removeEventListener("touchstart", resumeOnTouch, true);
+          document.removeEventListener("click", resumeOnTouch, true);
+        };
+        document.addEventListener("touchstart", resumeOnTouch, { once: true, capture: true });
+        document.addEventListener("click", resumeOnTouch, { once: true, capture: true });
+      });
     }
     // Restart cone track beat polling if it was active
     if (this.coneTrackPlaying && this.coneTrackTimer === null) {

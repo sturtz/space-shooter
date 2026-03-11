@@ -84,6 +84,12 @@ export class Renderer {
   }
 
   beginFrame(dt: number = 1 / 60) {
+    // Always re-apply the base transform before saving — this ensures that if a
+    // resize() happened mid-frame (between save/restore), we start from the
+    // correct base rather than the stale transform that restore() popped back to.
+    if (this.baseTransform) {
+      this.ctx.setTransform(this.baseTransform);
+    }
     this.ctx.save();
     // Clear the entire logical area (need to clear wider when zoomed in)
     if (this.cameraZoom > 1) {

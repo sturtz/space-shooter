@@ -892,6 +892,24 @@ Implemented a renderer-level camera system that zooms into the game world on mob
 
 ---
 
+### 2026-03-11 — Mobile Fixes: Touch Coord Sync, Dash in Landscape, Music Resume
+
+1. **Fixed joystick/dash rendering position on mobile** — `InputManager.setCoordTransform()` was only called once in the `Game` constructor. After orientation changes or window resizes, `Renderer.resize()` updated `gameOffsetX/Y/gameScale` but `InputManager` kept stale values, causing touch→game coordinate mapping to be wrong. Fixed by calling `setCoordTransform()` in the `ScreenManager` resize handler and when switching to the game screen.
+
+2. **Fixed dash not working in landscape** — Same root cause as above. The dash zone detection (`gameX > GAME_WIDTH * 0.75 && gameY > GAME_HEIGHT * 0.6`) used stale coordinate transforms after orientation change, so taps in the dash area were mapped to wrong game coordinates. Now works correctly with the synced transforms.
+
+3. **Fixed music disappearing on mobile** — `window.blur`/`focus` events fired aggressively on mobile during normal interactions (notification bar, orientation change, keyboard appearance). `blur` → `onSuspend()` → `musicEl.pause()`, then `focus` → `onResume()` → `musicEl.play()` was rejected by mobile autoplay policy (no user gesture context). Fixed by:
+   - Removed `blur`/`focus` listeners entirely — now using only `visibilitychange` which is the standard API and works reliably on both desktop and mobile, only firing on actual tab/app switches.
+   - Making `onResume()` resilient: if `play()` is rejected, a one-shot `touchstart`/`click` listener is queued so the next user interaction resumes music automatically.
+
+4. **Fixed UI disappearing on window resize** — `Renderer.resize()` calls `ctx.setTransform()` to set the new base transform, but if resize fires mid-frame (between `beginFrame`'s `ctx.save()` and `endFrame`'s `ctx.restore()`), the restore pops back the old pre-resize transform. All subsequent frames then draw with the stale transform, making the entire UI invisible. Fixed by re-applying `baseTransform` via `ctx.setTransform()` at the start of every `beginFrame()` before `ctx.save()`, ensuring the correct transform is always used regardless of when resize fired.
+
+5. **Fixed joystick input using CSS pixel space instead of game coords** — Joystick direction and magnitude were computed from game-coordinate deltas, but on small screens the game scale compresses those coords, making the joystick feel wrong (thumb far left, had to drag to screen center to turn right). Refactored so direction/magnitude are calculated from raw CSS pixel deltas (`touch.clientX/Y` relative to base), with a fixed `JOYSTICK_CSS_RADIUS = 80px` physical radius. Game-coord positions (`baseX/Y`, `thumbX/Y`) are still computed for rendering but are derived from the CSS-space calculations. This makes the joystick feel identical regardless of screen size or game scale.
+
+*Last updated by agent — 2026-03-11. Mobile touch coord sync, landscape dash, music resume, resize transform fix, joystick radius scaling.*
+
+---
+
 ## TODO — Deferred
 
 - [ ] **Interactive tutorial demo** — Let the user practice movement with the real joystick and dash on a safe target before starting. Lower priority now that the visual tutorial shows the actual controls layout.

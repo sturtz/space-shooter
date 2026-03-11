@@ -81,11 +81,17 @@ export class ScreenManager {
       this.show("menu");
     }
 
-    // Handle window resize — resize all renderers
+    // Handle window resize — resize all renderers + sync input coordinate mapping
     window.addEventListener("resize", () => {
       this.menuRenderer.resize();
       this.gameRenderer.resize();
       this.upgradeRenderer.resize();
+      // Keep input coordinate transform in sync with the game renderer's new layout
+      this.gameScreen.input.setCoordTransform(
+        this.gameRenderer.gameOffsetX,
+        this.gameRenderer.gameOffsetY,
+        this.gameRenderer.gameScale
+      );
     });
   }
 
@@ -107,6 +113,12 @@ export class ScreenManager {
       case "game":
         this.gameCanvas.style.display = "block";
         this.gameRenderer.resize();
+        // Sync input coords after resize (canvas layout may have changed)
+        this.gameScreen.input.setCoordTransform(
+          this.gameRenderer.gameOffsetX,
+          this.gameRenderer.gameOffsetY,
+          this.gameRenderer.gameScale
+        );
         break;
       case "upgrade":
         this.upgradeCanvas.style.display = "block";

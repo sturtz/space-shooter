@@ -73,6 +73,10 @@ export class InputManager {
   readonly JOYSTICK_RADIUS = 50; // max distance thumb can move from base (game coords)
   readonly JOYSTICK_DEAD_ZONE = 0.1; // ignore tiny movements
 
+  // Raw screen-space start position of the joystick touch (CSS pixels)
+  private _startCssX = 0;
+  private _startCssY = 0;
+
   // Store bound handlers for cleanup
   private onKeyDown: (e: KeyboardEvent) => void;
   private onKeyUp: (e: KeyboardEvent) => void;
@@ -142,8 +146,13 @@ export class InputManager {
           if (this.touchMoveId === null) {
             this.touchMoveId = touch.identifier;
             this.touchTargetActive = true;
-            // Place joystick base at touch point, clamped so it doesn't go off-screen
-            const pad = this.JOYSTICK_RADIUS + 16; // extra padding for thumb visual
+
+            // Remember where the thumb landed in CSS pixels — direction is relative to this
+            this._startCssX = touch.clientX;
+            this._startCssY = touch.clientY;
+
+            // Place joystick base at touch point (game coords for rendering)
+            const pad = this.JOYSTICK_RADIUS + 16;
             const clampedX = Math.max(pad, Math.min(GAME_WIDTH - pad, gameX));
             const clampedY = Math.max(pad, Math.min(GAME_HEIGHT - pad, gameY));
             this.joystick.active = true;
@@ -167,33 +176,33 @@ export class InputManager {
         const touch = e.changedTouches[i];
 
         if (touch.identifier === this.touchMoveId) {
-          const { gameX, gameY } = this.touchToGame(touch);
+          // ── Direction from raw CSS pixels (where thumb actually is on screen) ──
+          const cssDx = touch.clientX - this._startCssX;
+          const cssDy = touch.clientY - this._startCssY;
+          const cssDist = Math.sqrt(cssDx * cssDx + cssDy * cssDy);
+          const cssClamped = Math.min(cssDist, this.JOYSTICK_RADIUS);
 
-          // Calculate joystick displacement from base
-          const dx = gameX - this.joystick.baseX;
-          const dy = gameY - this.joystick.baseY;
-          const dist = Math.sqrt(dx * dx + dy * dy);
-
-          // Clamp thumb to joystick radius
-          const clampedDist = Math.min(dist, this.JOYSTICK_RADIUS);
-          if (dist > 0) {
-            this.joystick.thumbX = this.joystick.baseX + (dx / dist) * clampedDist;
-            this.joystick.thumbY = this.joystick.baseY + (dy / dist) * clampedDist;
-          }
-
-          // Normalized direction and magnitude
-          const normalizedDist = clampedDist / this.JOYSTICK_RADIUS;
-          if (normalizedDist > this.JOYSTICK_DEAD_ZONE) {
-            this.joystick.dirX = dx / dist;
-            this.joystick.dirY = dy / dist;
-            this.joystick.magnitude = normalizedDist;
+          // Normalized direction and magnitude from screen-space
+          const norm = cssClamped / this.JOYSTICK_RADIUS;
+          if (cssDist > 0 && norm > this.JOYSTICK_DEAD_ZONE) {
+            this.joystick.dirX = cssDx / cssDist;
+            this.joystick.dirY = cssDy / cssDist;
+            this.joystick.magnitude = norm;
           } else {
             this.joystick.dirX = 0;
             this.joystick.dirY = 0;
             this.joystick.magnitude = 0;
           }
 
+          // ── Thumb position in game coords (for rendering only) ──
+          const gameClamped = Math.min(cssDist / this._gameScale, this.JOYSTICK_RADIUS);
+          if (cssDist > 0) {
+            this.joystick.thumbX = this.joystick.baseX + (cssDx / cssDist) * gameClamped;
+            this.joystick.thumbY = this.joystick.baseY + (cssDy / cssDist) * gameClamped;
+          }
+
           // Update mousePos for compatibility (aim direction)
+          const { gameX, gameY } = this.touchToGame(touch);
           this.mousePos = vec2(gameX, gameY);
         }
       }
