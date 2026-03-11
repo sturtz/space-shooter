@@ -22,6 +22,8 @@ export interface SaveData {
   musicTrack: MusicTrack;
   /** Music volume (0–1) */
   musicVolume: number;
+  /** Whether algorithmic art effects are enabled (sacred geometry, geometric bursts, formations) */
+  algoArtEnabled: boolean;
   /** App version — save is wiped when this doesn't match the current version */
   appVersion: string;
 }
@@ -41,6 +43,7 @@ export function getDefaultSave(): SaveData {
     tutorialSeen: false,
     musicTrack: "fire",
     musicVolume: 0.07,
+    algoArtEnabled: true,
     appVersion: APP_VERSION,
   };
 }

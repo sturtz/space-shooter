@@ -4,6 +4,28 @@ import { Vec2, vec2, vecSub, vecNormalize, vecAdd, vecScale, randomRange } from 
 import { ROCK_SIZE, ROCK_BIG_SIZE, COLORS } from "../utils/Constants";
 import { AsteroidImages, pickRandom, imageReady } from "../utils/Assets";
 
+// ── Offscreen canvas for safe source-atop tinting ───────────────────
+let _tintCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+let _tintCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+
+function getTintCtx(
+  w: number,
+  h: number
+): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  if (!_tintCanvas || _tintCanvas.width < w || _tintCanvas.height < h) {
+    const size = Math.max(w, h, 128);
+    if (typeof OffscreenCanvas !== "undefined") {
+      _tintCanvas = new OffscreenCanvas(size, size);
+    } else {
+      _tintCanvas = document.createElement("canvas");
+      _tintCanvas.width = size;
+      _tintCanvas.height = size;
+    }
+    _tintCtx = _tintCanvas.getContext("2d")!;
+  }
+  return _tintCtx!;
+}
+
 export class Rock extends Enemy {
   rotSpeed: number;
   vertices: Vec2[];
@@ -70,41 +92,45 @@ export class Rock extends Enemy {
     ctx.rotate(this.angle);
 
     if (imageReady(this.sprite)) {
-      // ── Glow halo behind sprite so rocks read against dark bg ──
+      // ── Red glow halo behind sprite — marks rocks as dangerous ──
+      // Uses cached offscreen glow texture instead of creating a gradient every frame
       if (!isFlashing) {
         const glowColor = this.isElite
           ? "rgba(255,200,0,0.7)"
           : isPoisoned
             ? "rgba(80,255,80,0.7)"
-            : "rgba(220,160,90,0.7)";
-        const glowGrad = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, this.radius * 1.7);
-        glowGrad.addColorStop(0, glowColor);
-        glowGrad.addColorStop(1, "rgba(0,0,0,0)");
-        ctx.fillStyle = glowGrad;
-        ctx.beginPath();
-        ctx.arc(0, 0, this.radius * 1.7, 0, Math.PI * 2);
-        ctx.fill();
+            : "rgba(255,20,20,0.9)";
+        const midColor = glowColor.replace(/[\d.]+\)$/, "0.2)");
+        const halo = renderer.getGlowHalo(
+          glowColor,
+          this.radius * 0.2,
+          this.radius * 2.5,
+          midColor
+        );
+        ctx.drawImage(halo.canvas, -halo.size / 2, -halo.size / 2);
       }
 
-      // ── SPRITE RENDER ──────────────────────────────────────────
-      if (isPoisoned) {
-        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(1.5)";
-        ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.filter = "none";
+      // ── SPRITE RENDER — use offscreen canvas for tint overlays to avoid
+      // source-atop bleeding onto the main canvas (Bug #1 fix) ────────────
+      if (isPoisoned || this.isElite) {
+        const s = Math.ceil(drawSize);
+        const tCtx = getTintCtx(s, s);
+        tCtx.clearRect(0, 0, s, s);
+        tCtx.globalCompositeOperation = "source-over";
+        tCtx.drawImage(this.sprite, 0, 0, s, s);
+        if (isPoisoned) {
+          tCtx.globalCompositeOperation = "source-atop";
+          tCtx.fillStyle = "rgba(0, 255, 50, 0.35)";
+          tCtx.fillRect(0, 0, s, s);
+        }
+        if (this.isElite) {
+          tCtx.globalCompositeOperation = "source-atop";
+          tCtx.fillStyle = "rgba(255, 220, 0, 0.30)";
+          tCtx.fillRect(0, 0, s, s);
+        }
+        ctx.drawImage(tCtx.canvas, 0, 0, s, s, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
       } else {
-        // Slightly brighten all rocks so they pop against the dark bg
-        ctx.filter =
-          "brightness(1.5) contrast(1) drop-shadow(1px 1px 5px rgba(255, 255, 255, 0.4))";
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.filter = "none";
-      }
-
-      // Elite gold tint overlay
-      if (this.isElite) {
-        ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255, 220, 0, 0.30)";
-        ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.globalCompositeOperation = "source-over";
       }
     } else {
       // ── CANVAS FALLBACK (while image loads) ──────────────────────

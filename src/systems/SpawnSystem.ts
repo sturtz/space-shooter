@@ -138,6 +138,17 @@ export class SpawnSystem {
     }
   }
 
+  /** Mothership gravity well — slow enemies near the mothership (ms_slow upgrade) */
+  applyMothershipSlow(game: IGame) {
+    if (game.stats.msSlowRadius <= 0) return;
+    for (const enemy of game.enemies) {
+      if (!enemy.alive) continue;
+      if (vecDist(game.mothership.pos, enemy.pos) <= game.stats.msSlowRadius) {
+        enemy.applySlow(game.stats.msSlowStrength, 0.5); // re-apply each frame
+      }
+    }
+  }
+
   /** Mothership defense turret auto-fire (ms_turret upgrade) */
   updateTurret(game: IGame, dt: number) {
     if (game.stats.turretLevel <= 0) return;

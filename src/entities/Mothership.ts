@@ -10,6 +10,28 @@ import {
 } from "../utils/Constants";
 import { ShipImages, imageReady } from "../utils/Assets";
 
+// ── Offscreen canvas for safe source-atop tinting ───────────────────
+let _tintCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+let _tintCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+
+function getTintCtx(
+  w: number,
+  h: number
+): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  if (!_tintCanvas || _tintCanvas.width < w || _tintCanvas.height < h) {
+    const size = Math.max(w, h, 128);
+    if (typeof OffscreenCanvas !== "undefined") {
+      _tintCanvas = new OffscreenCanvas(size, size);
+    } else {
+      _tintCanvas = document.createElement("canvas");
+      _tintCanvas.width = size;
+      _tintCanvas.height = size;
+    }
+    _tintCtx = _tintCanvas.getContext("2d")!;
+  }
+  return _tintCtx!;
+}
+
 export class Mothership extends Entity {
   maxHp: number;
   hp: number;
@@ -80,12 +102,20 @@ export class Mothership extends Entity {
         }
         ctx.translate(cx, cy);
         ctx.rotate(this.spinAngle);
-        ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
+        // Use offscreen canvas for damage flash tint to avoid
+        // source-atop bleeding onto the main canvas (Bug #1 fix)
         if (this.damageFlash > 0) {
-          ctx.globalCompositeOperation = "source-atop";
-          ctx.fillStyle = "rgba(255,68,68,0.5)";
-          ctx.fillRect(-size / 2, -size / 2, size, size);
-          ctx.globalCompositeOperation = "source-over";
+          const s = Math.ceil(size);
+          const tCtx = getTintCtx(s, s);
+          tCtx.clearRect(0, 0, s, s);
+          tCtx.globalCompositeOperation = "source-over";
+          tCtx.drawImage(sprite, 0, 0, s, s);
+          tCtx.globalCompositeOperation = "source-atop";
+          tCtx.fillStyle = "rgba(255,68,68,0.5)";
+          tCtx.fillRect(0, 0, s, s);
+          ctx.drawImage(tCtx.canvas, 0, 0, s, s, -size / 2, -size / 2, size, size);
+        } else {
+          ctx.drawImage(sprite, -size / 2, -size / 2, size, size);
         }
         ctx.shadowBlur = 0;
         ctx.rotate(-this.spinAngle);
@@ -120,7 +150,7 @@ export class Mothership extends Entity {
 
       // HP numbers
       ctx.fillStyle = "#fff";
-      ctx.font = `${8 * mob}px Tektur`;
+      ctx.font = renderer.getFont(8 * mob);
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       ctx.fillText(`${this.hp}/${this.maxHp}`, cx, barY + barHeight + 2);

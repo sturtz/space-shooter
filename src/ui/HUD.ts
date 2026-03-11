@@ -77,7 +77,7 @@ export class HUD {
       "rgba(255,255,255,0.08)"
     );
     ctx.save();
-    ctx.font = `bold 9px Tektur`;
+    ctx.font = renderer.getFont(9, true);
     ctx.fillStyle = COLORS.textPrimary;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
@@ -91,12 +91,12 @@ export class HUD {
     // Coins (right)
     const coinX = GAME_WIDTH - pad - pauseSpace - 6;
     ctx.save();
-    ctx.font = `bold 11px Tektur`;
+    ctx.font = renderer.getFont(11, true);
     ctx.fillStyle = COLORS.textGold;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
     ctx.fillText(`💰 ${data.coins}`, coinX, pad + topBarH / 2 - 2);
-    ctx.font = `9px Tektur`;
+    ctx.font = renderer.getFont(9);
     ctx.fillStyle = "rgba(255, 221, 0, 0.5)";
     ctx.fillText(`+${data.roundCoins}`, coinX, pad + topBarH / 2 + 10);
     ctx.restore();
@@ -117,7 +117,7 @@ export class HUD {
         radius: 4,
       });
       ctx.save();
-      ctx.font = `bold 11px Tektur`;
+      ctx.font = renderer.getFont(11, true);
       ctx.fillStyle = streakColor;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -136,7 +136,7 @@ export class HUD {
 
       ctx.save();
       // Label
-      ctx.font = `bold 8px Tektur`;
+      ctx.font = renderer.getFont(8, true);
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
@@ -179,7 +179,7 @@ export class HUD {
 
     const killY = GAME_HEIGHT - 14;
     ctx.save();
-    ctx.font = `bold 11px Tektur`;
+    ctx.font = renderer.getFont(11, true);
     ctx.fillStyle = COLORS.textSecondary;
     ctx.textAlign = "right";
     ctx.textBaseline = "middle";
@@ -188,7 +188,7 @@ export class HUD {
 
     if (data.isMobile) {
       ctx.save();
-      ctx.font = `8px Tektur`;
+      ctx.font = renderer.getFont(8);
       ctx.fillStyle = "rgba(255,255,255,0.15)";
       ctx.textAlign = "right";
       ctx.textBaseline = "bottom";

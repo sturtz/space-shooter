@@ -25,6 +25,13 @@ export class AudioManager {
   private muted = false;
   private volumeBeforeMute = 0.07;
 
+  // Cached noise buffer for cone blast (P4: avoid allocating new AudioBuffer every 1.2s)
+  private cachedNoiseBuffer: AudioBuffer | null = null;
+
+  // SFX throttle: prevent too many explosion sounds per frame (P4)
+  private lastExplosionTime = 0;
+  private static readonly EXPLOSION_THROTTLE = 0.05; // max 1 explosion SFX per 50ms
+
   /** Optional callback when volume changes from HTML slider — used to persist to save */
   onVolumeChange: ((volume: number) => void) | null = null;
 
@@ -310,10 +317,13 @@ export class AudioManager {
     osc.stop(ctx.currentTime + 0.08);
   }
 
-  /** Explosion sound for enemy death */
+  /** Explosion sound for enemy death (P4: throttled to max ~20/sec) */
   playExplosion() {
     if (!this.ready) return;
     const ctx = this.ctx!;
+    const now = ctx.currentTime;
+    if (now - this.lastExplosionTime < AudioManager.EXPLOSION_THROTTLE) return;
+    this.lastExplosionTime = now;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = "sawtooth";
@@ -586,15 +596,17 @@ export class AudioManager {
     sub.start(t);
     sub.stop(t + 0.22);
 
-    // ── Splash/reverb tail: noise burst through bandpass + delay feedback ──
-    const bufferSize = ctx.sampleRate * 0.35;
-    const noiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const noiseData = noiseBuffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.08));
+    // ── Splash/reverb tail: noise burst through bandpass (P4: cached noise buffer) ──
+    if (!this.cachedNoiseBuffer || this.cachedNoiseBuffer.sampleRate !== ctx.sampleRate) {
+      const bufferSize = Math.ceil(ctx.sampleRate * 0.35);
+      this.cachedNoiseBuffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const noiseData = this.cachedNoiseBuffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        noiseData[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.08));
+      }
     }
     const noiseSrc = ctx.createBufferSource();
-    noiseSrc.buffer = noiseBuffer;
+    noiseSrc.buffer = this.cachedNoiseBuffer;
     const noiseBand = ctx.createBiquadFilter();
     noiseBand.type = "bandpass";
     noiseBand.frequency.setValueAtTime(300, t);

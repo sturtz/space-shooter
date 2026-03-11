@@ -13,6 +13,7 @@ import { Rock } from "../entities/Rock";
 import { EnemyShip } from "../entities/EnemyShip";
 import { Enemy } from "../entities/Enemy";
 import { Coin } from "../entities/Coin";
+import { Debris } from "../entities/Debris";
 import {
   vec2,
   vecDist,
@@ -23,6 +24,7 @@ import {
   randomAngle,
   randomRange,
 } from "../utils/Math";
+import { compactAlive } from "../utils/Array";
 import {
   GAME_WIDTH,
   GAME_HEIGHT,
@@ -39,26 +41,28 @@ import {
   MOBILE_CAMERA_ZOOM,
 } from "../utils/Constants";
 import { HUD } from "../ui/HUD";
+import { PauseMenu } from "../ui/PauseMenu";
+import { BossRewardScreen, BOSS_REWARD_CHOICES } from "../ui/BossRewardScreen";
+import { GameOverScreen } from "../ui/GameOverScreen";
+import { MobileControls } from "../ui/MobileControls";
 import type { ScreenManager } from "./ScreenManager";
 import { IGame } from "./GameInterface";
-import type { MusicTrack } from "../utils/SaveManager";
+import { TutorialSystem } from "./TutorialSystem";
+import {
+  SacredGeometryBg,
+  emitFibonacciSpiral,
+  emitSpirograph,
+  emitGoldenRings,
+  emitSymmetricStar,
+  generateFormation,
+  randomFormationType,
+  renderFormationPreview,
+  type FormationSlot,
+  type FormationPreview,
+  type FormationType,
+} from "../systems/AlgoArt";
 
-/**
- * In-place array compaction — removes dead entities without allocating a new array.
- * Replaces `.filter(e => e.alive)` which creates a new array every frame (GC pressure).
- */
-function compactAlive<T extends { alive: boolean }>(arr: T[]): void {
-  let writeIdx = 0;
-  for (let i = 0; i < arr.length; i++) {
-    if (arr[i].alive) {
-      if (i !== writeIdx) arr[writeIdx] = arr[i];
-      writeIdx++;
-    }
-  }
-  arr.length = writeIdx;
-}
-
-export type GameState = "playing" | "bossReward" | "gameover";
+export type GameState = "playing" | "bossReward" | "gameover" | "tutorial";
 
 interface DamageNumber {
   x: number;
@@ -96,41 +100,14 @@ interface PendingBomb {
   radius: number;
 }
 
-interface BossRewardChoice {
-  id: string;
-  name: string;
-  lines: string[];
+/* ── pulse shockwave — same system as upgrade screen purchase shockwave ── */
+interface PulseShockwave {
+  x: number;
+  y: number;
+  timer: number;
+  maxTimer: number;
   color: string;
-  borderColor: string;
-  glowColor: string;
 }
-
-const BOSS_REWARD_CHOICES: BossRewardChoice[] = [
-  {
-    id: "laser",
-    name: "TARGETING LASER",
-    lines: ["Fires where you aim", "every 2.5 seconds", "Deals 3× weapon damage"],
-    color: "#ff4444",
-    borderColor: "rgba(255,68,68,0.7)",
-    glowColor: "rgba(255,68,68,0.15)",
-  },
-  {
-    id: "bomb_dash",
-    name: "DASH BOMB",
-    lines: ["Dash drops a bomb at", "start point", "2× damage, 80px blast"],
-    color: "#ffaa00",
-    borderColor: "rgba(255,170,0,0.7)",
-    glowColor: "rgba(255,170,0,0.15)",
-  },
-  {
-    id: "flashbang",
-    name: "STUN FIELD",
-    lines: ["Dash EMP freezes all", "enemies for 2 seconds", "+20px EMP range bonus"],
-    color: "#44ccff",
-    borderColor: "rgba(68,200,255,0.7)",
-    glowColor: "rgba(68,200,255,0.15)",
-  },
-];
 
 /**
  * Game screen — handles active gameplay, boss reward, and game over.
@@ -176,6 +153,8 @@ export class Game implements IGame {
   enemies: (Rock | EnemyShip)[] = [];
   coins: Coin[] = [];
   enemyBullets: Bullet[] = [];
+  debris: Debris[] = [];
+  private debrisTimer: number = 0;
 
   roundTimer: number = 0;
   roundDuration: number = 20;
@@ -209,16 +188,32 @@ export class Game implements IGame {
   laserTimer: number = 0;
   laserBeams: LaserBeam[] = [];
   pendingBombs: PendingBomb[] = [];
+  pulseShockwaves: PulseShockwave[] = [];
 
   // Boss reward state — tracks what was auto-granted (null = show choice screen)
   private autoGrantedAbility: string | null = null;
 
-  // Pause menu layout constants — scaled up for mobile fat-finger usability
-  private readonly PAUSE_PANEL_W = 420;
-  private readonly PAUSE_PANEL_H = 480;
+  // ── Tutorial ──
+  private tutorial: TutorialSystem | null = null;
 
-  // Track whether user is dragging the pause menu volume bar (touch)
-  private volumeDragActive = false;
+  // ── Algorithmic Art ──
+  private sacredGeometry = new SacredGeometryBg();
+  private formationTimer = 0;
+  private formationCooldown = 12; // seconds between formation waves
+  private activeFormation: {
+    slots: FormationSlot[];
+    type: FormationType;
+    spawnedCount: number;
+    elapsed: number;
+  } | null = null;
+  private formationPreview: FormationPreview | null = null;
+  private algoKillCounter = 0; // cycles through geometric burst patterns
+
+  // ── Extracted UI modules ──
+  private pauseMenu = new PauseMenu();
+  private bossRewardUI = new BossRewardScreen();
+  private gameOverUI = new GameOverScreen();
+  private mobileControlsUI = new MobileControls();
 
   constructor(canvas: HTMLCanvasElement, renderer: Renderer, manager: ScreenManager) {
     this.renderer = renderer;
@@ -231,22 +226,30 @@ export class Game implements IGame {
     this._stats = this.upgrades.computeStats();
     this.hud = new HUD();
 
-    const getScaledCoords = (clientX: number, clientY: number) => {
-      return {
-        mx: (clientX - this.renderer.gameOffsetX) / this.renderer.gameScale,
-        my: (clientY - this.renderer.gameOffsetY) / this.renderer.gameScale,
-      };
-    };
+    const getScaledCoords = (clientX: number, clientY: number) =>
+      this.renderer.screenToGame(clientX, clientY);
 
     const handleUIInteraction = (mx: number, my: number) => {
       // Pause menu click handling (while paused)
       if (this.paused && this.state === "playing") {
-        this.handlePauseMenuClick(mx, my);
+        const action = this.pauseMenu.handleClick(mx, my, this.audio, this.save);
+        if (action === "resume") this.togglePause();
+        else if (action === "tutorial") {
+          this.paused = false;
+          this.audio.stopConeTrack();
+          this.startTutorial("playing");
+        } else if (action === "forfeit") {
+          this.paused = false;
+          this.audio.stopConeTrack();
+          this.save.lifetimeKills += this.roundKills;
+          saveGame(this.save);
+          this.manager.goToUpgradeScreen();
+        }
         return;
       }
       // Pause button (top-right, during gameplay — works on mobile + desktop)
       if (this.state === "playing" && !this.paused) {
-        if (this.hitTestPauseButton(mx, my)) {
+        if (this.pauseMenu.hitTestPauseButton(mx, my)) {
           this.togglePause();
           return;
         }
@@ -270,12 +273,11 @@ export class Game implements IGame {
       (e) => {
         e.preventDefault();
         // End volume drag if active
-        if (this.volumeDragActive) {
-          this.volumeDragActive = false;
-          // Still handle the final position as a volume set
+        if (this.pauseMenu.volumeDragActive) {
+          this.pauseMenu.volumeDragActive = false;
           const touch = e.changedTouches[0];
-          const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
-          this.handlePauseVolumeTouch(mx, my);
+          const { mx } = getScaledCoords(touch.clientX, touch.clientY);
+          this.pauseMenu.handleVolumeTouch(mx, this.audio, this.save);
           return;
         }
         const touch = e.changedTouches[0];
@@ -292,12 +294,11 @@ export class Game implements IGame {
         if (!this.paused || this.state !== "playing") return;
         const touch = e.changedTouches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
-        const vb = this.getPauseMenuLayout().volumeBar;
-        // Generous hit area: extend 10px above/below for easier touch targeting
+        const vb = this.pauseMenu.getLayout().volumeBar;
         if (mx >= vb.x && mx <= vb.x + vb.w && my >= vb.y - 10 && my <= vb.y + vb.h + 10) {
-          this.volumeDragActive = true;
-          this.handlePauseVolumeTouch(mx, my);
-          e.preventDefault(); // prevent this touch from becoming a joystick
+          this.pauseMenu.volumeDragActive = true;
+          this.pauseMenu.handleVolumeTouch(mx, this.audio, this.save);
+          e.preventDefault();
         }
       },
       { passive: false }
@@ -307,18 +308,23 @@ export class Game implements IGame {
     canvas.addEventListener(
       "touchmove",
       (e) => {
-        if (!this.volumeDragActive) return;
+        if (!this.pauseMenu.volumeDragActive) return;
         e.preventDefault();
         const touch = e.changedTouches[0];
         const { mx } = getScaledCoords(touch.clientX, touch.clientY);
-        this.handlePauseVolumeTouch(mx, 0); // y doesn't matter for volume
+        this.pauseMenu.handleVolumeTouch(mx, this.audio, this.save);
       },
       { passive: false }
     );
 
-    // Keyboard handlers for pause and dash
+    // Keyboard handlers for pause, dash, and tutorial skip
     window.addEventListener("keydown", (e) => {
       if (this.manager.active !== "game") return;
+      // ESC skips tutorial
+      if (e.key === "Escape" && this.state === "tutorial" && this.tutorial) {
+        this.tutorial.skip();
+        return;
+      }
       if (
         (e.key === "Escape" || e.key.toLowerCase() === "p" || e.key === " ") &&
         this.state === "playing"
@@ -351,143 +357,22 @@ export class Game implements IGame {
 
   /** Resume gameplay — restart cone track with beat callback */
   private resumeFromPause() {
-    this.audio.startConeTrack(() => {
-      this.coneBeatCount++;
-      if (this.coneBeatCount % CONE_FIRE_EVERY === 0) {
-        this.fireConeWeapon();
-      }
-      this.missileBeatCount++;
-      if (this.missileBeatCount % MISSILE_FIRE_EVERY === 0) {
-        this.fireMissile();
-      }
-    });
+    this.audio.startConeTrack(() => this.onBeat());
   }
 
-  /** Pause button (top-right, beside HUD) — big for easy tapping on mobile + desktop */
-  private readonly PAUSE_BTN_X = GAME_WIDTH - 72;
-  private readonly PAUSE_BTN_Y = 6;
-  private readonly PAUSE_BTN_W = 64;
-  private readonly PAUSE_BTN_H = 36;
-
-  hitTestPauseButton(mx: number, my: number): boolean {
-    return (
-      mx >= this.PAUSE_BTN_X &&
-      mx <= this.PAUSE_BTN_X + this.PAUSE_BTN_W &&
-      my >= this.PAUSE_BTN_Y &&
-      my <= this.PAUSE_BTN_Y + this.PAUSE_BTN_H
-    );
-  }
-
-  /** Get pause menu layout rects — scaled up for mobile */
-  private getPauseMenuLayout() {
-    const cx = GAME_WIDTH / 2;
-    const cy = GAME_HEIGHT / 2;
-    const pw = this.PAUSE_PANEL_W;
-    const ph = this.PAUSE_PANEL_H;
-    const px = cx - pw / 2;
-    const py = cy - ph / 2;
-
-    const btnW = pw - 50;
-    const btnH = 40; // taller buttons for fat fingers
-    const btnX = cx - btnW / 2;
-
-    // Track buttons — wider with more gap
-    const tracks: MusicTrack[] = ["fire", "chill", "trap"];
-    const trackBtnW = 90;
-    const trackBtnH = 38;
-    const trackGap = 14;
-    const totalTrackW = trackBtnW * tracks.length + trackGap * (tracks.length - 1);
-    const trackStartX = cx - totalTrackW / 2;
-    const trackY = py + 100;
-
-    // Volume bar — much thicker for mobile
-    const volBarX = px + 35;
-    const volBarY = py + 210;
-    const volBarW = pw - 70;
-    const volBarH = 30;
-
-    // Resume button — more spacing
-    const resumeY = py + 280;
-
-    // Forfeit button — more spacing from resume
-    const forfeitY = py + 340;
-
-    return {
-      panel: { x: px, y: py, w: pw, h: ph },
-      tracks: tracks.map((t, i) => ({
-        track: t,
-        x: trackStartX + i * (trackBtnW + trackGap),
-        y: trackY,
-        w: trackBtnW,
-        h: trackBtnH,
-      })),
-      volumeBar: { x: volBarX, y: volBarY, w: volBarW, h: volBarH },
-      resume: { x: btnX, y: resumeY, w: btnW, h: btnH },
-      forfeit: { x: btnX, y: forfeitY, w: btnW, h: btnH },
-    };
-  }
-
-  /** Handle touch drag on the pause menu volume bar */
-  private handlePauseVolumeTouch(mx: number, _my: number) {
-    const vb = this.getPauseMenuLayout().volumeBar;
-    const ratio = Math.max(0, Math.min(1, (mx - vb.x) / vb.w));
-    this.audio.setMusicVolume(ratio);
-    this.save.musicVolume = ratio;
-    saveGame(this.save);
-  }
-
-  /** Handle clicks within the pause menu */
-  handlePauseMenuClick(mx: number, my: number) {
-    const layout = this.getPauseMenuLayout();
-
-    // Track buttons — only allow switching to unlocked tracks
-    for (const tb of layout.tracks) {
-      if (mx >= tb.x && mx <= tb.x + tb.w && my >= tb.y && my <= tb.y + tb.h) {
-        const unlocked = this.audio.isTrackUnlocked(
-          tb.track,
-          this.save.upgradeLevels,
-          this.save.prestigeCount
-        );
-        if (!unlocked) {
-          this.audio.playError();
-          return;
-        }
-        this.audio.switchTrack(tb.track);
-        this.save.musicTrack = tb.track;
-        saveGame(this.save);
-        this.audio.playClick();
-        return;
-      }
+  /** Shared beat callback — used by both startRun() and resumeFromPause() */
+  private onBeat() {
+    // Pulse sacred geometry on every beat (not just cone fire beats)
+    if (this.save.algoArtEnabled) {
+      this.sacredGeometry.pulse();
     }
-
-    // Volume bar — click to set volume
-    const vb = layout.volumeBar;
-    if (mx >= vb.x && mx <= vb.x + vb.w && my >= vb.y && my <= vb.y + vb.h) {
-      const ratio = Math.max(0, Math.min(1, (mx - vb.x) / vb.w));
-      this.audio.setMusicVolume(ratio);
-      this.save.musicVolume = ratio;
-      saveGame(this.save);
-      return;
+    this.coneBeatCount++;
+    if (this.coneBeatCount % CONE_FIRE_EVERY === 0) {
+      this.fireConeWeapon();
     }
-
-    // Resume button
-    const rb = layout.resume;
-    if (mx >= rb.x && mx <= rb.x + rb.w && my >= rb.y && my <= rb.y + rb.h) {
-      this.audio.playClick();
-      this.togglePause();
-      return;
-    }
-
-    // Forfeit button
-    const fb = layout.forfeit;
-    if (mx >= fb.x && mx <= fb.x + fb.w && my >= fb.y && my <= fb.y + fb.h) {
-      this.audio.playClick();
-      this.paused = false;
-      this.audio.stopConeTrack();
-      this.save.lifetimeKills += this.roundKills;
-      saveGame(this.save);
-      this.manager.goToUpgradeScreen();
-      return;
+    this.missileBeatCount++;
+    if (this.missileBeatCount % MISSILE_FIRE_EVERY === 0) {
+      this.fireMissile();
     }
   }
 
@@ -598,6 +483,27 @@ export class Game implements IGame {
     return nearest;
   }
 
+  /** Start the interactive tutorial on the game canvas */
+  startTutorial(returnTo: "menu" | "playing") {
+    this._stats = this.upgrades.computeStats();
+    this.state = "tutorial";
+    this.paused = false;
+    this.tutorial = new TutorialSystem(this.renderer, this.input, this._stats, () => {
+      // Tutorial complete callback
+      this.tutorial = null;
+      this.save.tutorialSeen = true;
+      saveGame(this.save);
+      if (returnTo === "playing") {
+        // Resume the current run — restore state
+        this.state = "playing";
+        this.resumeFromPause();
+      } else {
+        // Go to upgrade screen / start first run
+        this.manager.startGame();
+      }
+    });
+  }
+
   startRun() {
     this._stats = this.upgrades.computeStats();
     this.player = new Player();
@@ -622,10 +528,17 @@ export class Game implements IGame {
     this.dashRings = [];
     this.laserBeams = [];
     this.pendingBombs = [];
+    this.debris = [];
+    this.debrisTimer = 0;
     this.laserTimer = 2.5;
     this.coneFlashTimer = 0;
     this.particles.clear();
     this.spawner.reset(this);
+    this.formationTimer = 0;
+    this.formationCooldown = 12;
+    this.activeFormation = null;
+    this.formationPreview = null;
+    this.algoKillCounter = 0;
     this.state = "playing";
     this.paused = false;
     this.deathDelayActive = false;
@@ -657,16 +570,7 @@ export class Game implements IGame {
     this.coneBeatCount = 0;
     this.missileBeatCount = 0;
     // Music-synced: fires locked to beat crossings (100 BPM fire, every other beat = 1.2s)
-    this.audio.startConeTrack(() => {
-      this.coneBeatCount++;
-      if (this.coneBeatCount % CONE_FIRE_EVERY === 0) {
-        this.fireConeWeapon();
-      }
-      this.missileBeatCount++;
-      if (this.missileBeatCount % MISSILE_FIRE_EVERY === 0) {
-        this.fireMissile();
-      }
-    });
+    this.audio.startConeTrack(() => this.onBeat());
   }
 
   fireMissile() {
@@ -703,6 +607,23 @@ export class Game implements IGame {
     );
   }
 
+  /** Check if enemy is within pulse range, accounting for forward pulse upgrade */
+  private isInPulseRange(enemy: Enemy): boolean {
+    const dist = vecDist(this.player.pos, enemy.pos);
+    const edgeDist = dist - enemy.radius;
+    if (edgeDist <= CONE_RANGE) return true; // always hit in base range
+    if (!this._stats.forwardPulse) return false;
+    // Forward pulse: extend range in the player's facing direction
+    const dx = enemy.pos.x - this.player.pos.x;
+    const dy = enemy.pos.y - this.player.pos.y;
+    const facingX = Math.cos(this.player.angle);
+    const facingY = Math.sin(this.player.angle);
+    const dot = dx * facingX + dy * facingY; // how "forward" is the enemy
+    if (dot <= 0) return false; // behind the player — no extended range
+    const forwardRange = CONE_RANGE * 2.5;
+    return edgeDist <= forwardRange;
+  }
+
   /** Dash cone hit — deals damage but does NOT reset the beat loader or timing */
   private fireDashConeHit() {
     if (this.state !== "playing") return;
@@ -710,8 +631,7 @@ export class Game implements IGame {
     const coneDmg = this._stats.damage;
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
-      const dist = vecDist(this.player.pos, enemy.pos);
-      if (dist > CONE_RANGE) continue;
+      if (!this.isInPulseRange(enemy)) continue;
 
       const isCrit = Math.random() < this._stats.critChance;
       const dmg = isCrit ? coneDmg * this._stats.critMultiplier : coneDmg;
@@ -742,13 +662,21 @@ export class Game implements IGame {
     this.coneTimeSinceLastFire = 0;
     this.coneFlashTimer = 0.18; // longer flash for more prominent effect
 
+    // Push purchase-style shockwave (same as upgrade screen buy animation)
+    this.pulseShockwaves.push({
+      x: this.player.pos.x,
+      y: this.player.pos.y,
+      timer: 0.35,
+      maxTimer: 0.35,
+      color: COLORS.player,
+    });
+
     const coneDmg = this._stats.damage;
     let hitCount = 0;
 
     for (const enemy of this.enemies) {
       if (!enemy.alive) continue;
-      const dist = vecDist(this.player.pos, enemy.pos);
-      if (dist > CONE_RANGE) continue;
+      if (!this.isInPulseRange(enemy)) continue;
 
       const isCrit = Math.random() < this._stats.critChance;
       const dmg = isCrit ? coneDmg * this._stats.critMultiplier : coneDmg;
@@ -765,16 +693,45 @@ export class Game implements IGame {
       }
     }
 
-    // ── Shockwave ring particles (expanding outward from player) ──
-    const ringCount = 16;
+    // ── Forward pulse directional particles ──
+    if (this._stats.forwardPulse) {
+      const fwd = this.player.angle;
+      const forwardRange = CONE_RANGE * 2.5;
+      for (let i = 0; i < 8; i++) {
+        const spread = (i - 3.5) * 0.08;
+        const a = fwd + spread;
+        const px = this.player.pos.x + Math.cos(a) * 8;
+        const py = this.player.pos.y + Math.sin(a) * 8;
+        this.particles.emitDirectional(
+          vec2(px, py),
+          a,
+          0.15,
+          1,
+          "#ff6688",
+          forwardRange * 0.6,
+          0.25,
+          2
+        );
+      }
+    }
+
+    // ── Death pulse shockwave particles — expanding ring burst ──
+    const ringCount = 20;
     for (let i = 0; i < ringCount; i++) {
       const a = (i / ringCount) * Math.PI * 2;
-      const px = this.player.pos.x + Math.cos(a) * CONE_RANGE * 0.3;
-      const py = this.player.pos.y + Math.sin(a) * CONE_RANGE * 0.3;
-      this.particles.emitDirectional(vec2(px, py), a, 0.15, 1, "#aaddff", 70, 0.18, 1.5);
+      const px = this.player.pos.x + Math.cos(a) * 4;
+      const py = this.player.pos.y + Math.sin(a) * 4;
+      this.particles.emitDirectional(vec2(px, py), a, 0.12, 1, COLORS.player, 120, 0.25, 2);
     }
-    // Inner burst — bright white splash
-    this.particles.emit(this.player.pos, 6, "#ffffff", 50, 0.12, 2);
+    // Outer ring — fainter, wider
+    for (let i = 0; i < 12; i++) {
+      const a = ((i + 0.5) / 12) * Math.PI * 2;
+      const px = this.player.pos.x + Math.cos(a) * 6;
+      const py = this.player.pos.y + Math.sin(a) * 6;
+      this.particles.emitDirectional(vec2(px, py), a, 0.08, 1, "#aaddff", 160, 0.2, 1.2);
+    }
+    // Inner burst — bright white core flash
+    this.particles.emit(this.player.pos, 8, "#ffffff", 60, 0.15, 2.5);
 
     // Screen shake on hit for impact feel
     if (hitCount > 0) {
@@ -804,6 +761,11 @@ export class Game implements IGame {
           this.updatePlaying(dt);
         }
         break;
+      case "tutorial":
+        if (this.tutorial) {
+          this.tutorial.update(dt);
+        }
+        break;
       case "bossReward":
         this.particles.update(dt);
         break;
@@ -819,6 +781,7 @@ export class Game implements IGame {
     // Death delay countdown — let mothership explosion play out before transitioning
     if (this.deathDelayActive) {
       this.deathDelay -= dt;
+      this.mothership.update(dt); // tick death animation (expand + fade)
       this.particles.update(dt);
       // Continue updating enemies/coins visually during the delay
       for (const enemy of this.enemies) enemy.update(dt);
@@ -850,6 +813,45 @@ export class Game implements IGame {
 
     this.player.move(this.input, dt);
     this.player.update(dt);
+
+    // ── Engine thruster trail particles (like the upgrade screen ship) ──
+    if (this.player.isMoving && !this.player.isDashing) {
+      const backAngle = this.player.angle + Math.PI;
+      // Emit ~20 particles/sec while moving
+      if (Math.random() < dt * 20) {
+        const spread = (Math.random() - 0.5) * 0.6;
+        const speed = 25 + Math.random() * 35;
+        this.particles.emitDirectional(
+          vec2(
+            this.player.pos.x + Math.cos(backAngle) * 8,
+            this.player.pos.y + Math.sin(backAngle) * 8
+          ),
+          backAngle + spread,
+          0.15,
+          1,
+          COLORS.engineGlow,
+          speed,
+          0.25,
+          1.5
+        );
+      }
+      // Occasional white core particle
+      if (Math.random() < dt * 8) {
+        this.particles.emitDirectional(
+          vec2(
+            this.player.pos.x + Math.cos(backAngle) * 6,
+            this.player.pos.y + Math.sin(backAngle) * 6
+          ),
+          backAngle + (Math.random() - 0.5) * 0.3,
+          0.1,
+          1,
+          "#ffffff",
+          20 + Math.random() * 20,
+          0.15,
+          0.8
+        );
+      }
+    }
 
     // ── Camera follow player (smooth lerp) ──
     if (this.renderer.cameraZoom > 1) {
@@ -923,6 +925,12 @@ export class Game implements IGame {
       }
     }
 
+    // ── Pulse shockwaves (same system as upgrade screen purchase shockwaves) ──
+    for (let i = this.pulseShockwaves.length - 1; i >= 0; i--) {
+      this.pulseShockwaves[i].timer -= dt;
+      if (this.pulseShockwaves[i].timer <= 0) this.pulseShockwaves.splice(i, 1);
+    }
+
     const progress = this.roundDuration > 0 ? Math.min(1, elapsed / this.roundDuration) : 0;
     const rampFactor = Math.pow(0.25, progress);
     const levelMult = this.save.currentLevel >= 2 ? 0.5 : 1;
@@ -936,16 +944,57 @@ export class Game implements IGame {
 
     this.spawner.updateEnemyTargets(this);
     this.spawner.applySlowAura(this);
+    this.spawner.applyMothershipSlow(this);
     this.spawner.updateTurret(this, dt);
     this.spawner.updateMothershipRegen(this, dt);
     this.spawner.updateMothershipBarrier(this, dt);
 
     this.collisions.checkBulletEnemyCollisions(this);
+    this.collisions.checkBulletDebrisCollisions(this);
     if (this.collisions.checkEnemyMothershipCollisions(this)) return;
     if (this.collisions.checkEnemyBulletPlayerCollisions(this)) return;
     this.collisions.checkCoinCollections(this);
 
     this.spawner.handleEnemyShooting(this);
+
+    // ── Sacred Geometry background animation ──
+    if (this.save.algoArtEnabled) this.sacredGeometry.update(dt);
+
+    // ── Formation Spawning (algorithmic enemy patterns) ──
+    this.updateFormations(dt);
+
+    // ── Formation preview fade-out ──
+    if (this.formationPreview) {
+      this.formationPreview.life -= dt;
+      if (this.formationPreview.life <= 0) {
+        this.formationPreview = null;
+      }
+    }
+
+    // ── Debris (harmless background asteroids) ──
+    this.debrisTimer -= dt;
+    if (this.debrisTimer <= 0 && this.debris.length < 40) {
+      // Spawn from random positions along all edges (wide spread to avoid trail effect)
+      const edge = Math.random();
+      let dx: number, dy: number;
+      if (edge < 0.5) {
+        // top edge — full width with overshoot
+        dx = randomRange(-80, GAME_WIDTH + 80);
+        dy = randomRange(-50, -20);
+      } else if (edge < 0.75) {
+        // left edge — upper half
+        dx = randomRange(-50, -20);
+        dy = randomRange(-50, GAME_HEIGHT * 0.4);
+      } else {
+        // right edge — upper half
+        dx = GAME_WIDTH + randomRange(20, 50);
+        dy = randomRange(-50, GAME_HEIGHT * 0.4);
+      }
+      this.debris.push(new Debris(dx, dy));
+      this.debrisTimer = randomRange(0.3, 0.7);
+    }
+    for (const d of this.debris) d.update(dt);
+    compactAlive(this.debris);
 
     compactAlive(this.bullets);
     compactAlive(this.enemyBullets);
@@ -1046,7 +1095,6 @@ export class Game implements IGame {
         this.save.currentLevel++;
         this.save.starCoins++;
         const level = this.save.currentLevel - 1; // level that was just beaten
-        this.save.lifetimeKills += this.roundKills;
         // Auto-grant abilities for first 3 bosses; level 4+ shows choice screen
         if (level === 1 && !hasAbility(this.save, "bomb_dash")) {
           addAbility(this.save, "bomb_dash");
@@ -1066,12 +1114,33 @@ export class Game implements IGame {
       }
       if (this.save.currentLevel > this.save.highestLevel) {
         this.save.highestLevel = this.save.currentLevel;
+        saveGame(this.save); // Bug #18 fix: persist highestLevel immediately
       }
       return;
     }
 
-    this.particles.emit(enemy.pos, 12, COLORS.explosion, 100, 0.4, 3);
-    this.particles.emit(enemy.pos, 6, COLORS.particle, 60, 0.3, 2);
+    // ── Death burst particles ──
+    if (this.save.algoArtEnabled) {
+      // Algorithmic geometric death burst — cycles through 4 patterns
+      const pattern = this.algoKillCounter % 4;
+      const isBigEnemy = enemy.isBoss || enemy.isElite || enemy.coinValue >= 5;
+      if (isBigEnemy) {
+        emitSpirograph(this.particles, enemy.pos, 40, COLORS.explosion, 120, 0.8, 2.5, 0.33);
+        emitGoldenRings(this.particles, enemy.pos, 3, 8, "#ffaa00", 100, 0.6, 2);
+      } else if (pattern === 0) {
+        emitFibonacciSpiral(this.particles, enemy.pos, 18, COLORS.explosion, 80, 0.45, 1.8);
+      } else if (pattern === 1) {
+        emitSpirograph(this.particles, enemy.pos, 20, COLORS.particle, 70, 0.5, 1.5, 0.4);
+      } else if (pattern === 2) {
+        emitSymmetricStar(this.particles, enemy.pos, 5, COLORS.explosion, 75, 0.45, 1.6);
+      } else {
+        emitGoldenRings(this.particles, enemy.pos, 2, 6, COLORS.particle, 65, 0.4, 1.5);
+      }
+      this.algoKillCounter++;
+    } else {
+      // Simple fallback explosion
+      this.particles.emit(enemy.pos, 10, COLORS.explosion, 80, 0.4, 2.5);
+    }
     this.renderer.shake(2);
     this.audio.playExplosion();
 
@@ -1119,6 +1188,9 @@ export class Game implements IGame {
     }
     this.save.lifetimeKills += this.roundKills;
     saveGame(this.save);
+    // Clear lingering particles so mothership explosion debris doesn't
+    // render behind the gameover screen as a visual artifact cloud
+    this.particles.clear();
     this.state = "gameover";
     this.stateChangeTime = this.gameTime;
   }
@@ -1128,21 +1200,40 @@ export class Game implements IGame {
   }
 
   render() {
+    // Tutorial has its own render pipeline (calls beginFrame/endFrame internally)
+    if (this.state === "tutorial" && this.tutorial) {
+      this.tutorial.render();
+      return;
+    }
+
     this.renderer.beginFrame(this.lastDt);
 
     switch (this.state) {
       case "playing":
         this.renderPlaying();
         if (this.paused) {
-          this.renderPauseOverlay();
+          this.pauseMenu.renderOverlay(
+            this.renderer,
+            this.audio,
+            this.save,
+            this.input.isTouchDevice
+          );
         }
         break;
       case "bossReward":
         this.renderPlaying();
-        this.renderBossReward();
+        this.bossRewardUI.render(this.renderer, this.save, this.autoGrantedAbility, this.gameTime);
         break;
       case "gameover":
-        this.renderGameOver();
+        this.particles.render(this.renderer);
+        this.gameOverUI.render(this.renderer, {
+          deathCause: this.deathCause,
+          roundCoins: this.roundCoins,
+          roundKills: this.roundKills,
+          totalCoins: this.save.coins,
+          currentLevel: this.save.currentLevel,
+          gameTime: this.gameTime,
+        });
         break;
     }
 
@@ -1152,6 +1243,49 @@ export class Game implements IGame {
   // ── Gameplay Rendering ────────────────────────────────────────────────
 
   renderPlaying() {
+    // Background debris (harmless asteroids) — rendered behind everything
+    for (const d of this.debris) d.render(this.renderer);
+
+    // ── Sacred geometry mandala (behind entities, very faint) ──
+    if (this.save.algoArtEnabled) {
+      this.sacredGeometry.render(this.renderer);
+    }
+
+    // ── Formation preview (ghostly dots showing incoming pattern) ──
+    if (this.save.algoArtEnabled && this.formationPreview) {
+      renderFormationPreview(this.renderer, this.formationPreview);
+    }
+
+    // ── Mothership gravity well visual (ms_slow upgrade) ──
+    if (this._stats.msSlowRadius > 0 && !this.mothership.isDestroyed) {
+      const ctx = this.renderer.ctx;
+      const mx = this.mothership.pos.x;
+      const my = this.mothership.pos.y;
+      const r = this._stats.msSlowRadius;
+      const pulse = 0.12 + 0.04 * Math.sin(this.gameTime * 3);
+      ctx.save();
+      ctx.globalAlpha = pulse;
+      const grad = ctx.createRadialGradient(mx, my, r * 0.6, mx, my, r);
+      grad.addColorStop(0, "rgba(68, 136, 255, 0)");
+      grad.addColorStop(0.7, "rgba(68, 136, 255, 0.15)");
+      grad.addColorStop(1, "rgba(68, 136, 255, 0)");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.fill();
+      // Dashed ring at edge
+      ctx.globalAlpha = pulse * 1.5;
+      ctx.strokeStyle = "#4488ff";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([4, 6]);
+      ctx.lineDashOffset = -this.gameTime * 15;
+      ctx.beginPath();
+      ctx.arc(mx, my, r, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+    }
+
     this.mothership.render(this.renderer);
     for (const coin of this.coins) coin.render(this.renderer);
     for (const enemy of this.enemies) enemy.render(this.renderer);
@@ -1183,8 +1317,6 @@ export class Game implements IGame {
       const px = this.player.pos.x;
       const py = this.player.pos.y;
       const range = CONE_RANGE;
-      const isFiring = this.coneFlashTimer > 0;
-      const flashPower = isFiring ? this.coneFlashTimer / 0.18 : 0;
 
       ctx.save();
       const loaderProgress = Math.min(1, this.coneTimeSinceLastFire / this.coneMeasuredInterval);
@@ -1213,62 +1345,38 @@ export class Game implements IGame {
         ctx.fill();
       }
 
-      if (isFiring) {
-        // ── Expanding shockwave ring ──
-        const expandProgress = 1 - flashPower; // 0→1 over flash duration
-        const shockRadius = range * (0.4 + expandProgress * 0.8);
-        const ringAlpha = flashPower * 0.7;
-
-        // Outer shockwave ring (cyan)
-        ctx.globalAlpha = ringAlpha;
-        ctx.strokeStyle = COLORS.player;
-        ctx.lineWidth = 3 * flashPower;
-        ctx.shadowColor = COLORS.player;
-        ctx.shadowBlur = 12 * flashPower;
-        ctx.beginPath();
-        ctx.arc(px, py, shockRadius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Inner bright ring (white)
-        ctx.globalAlpha = ringAlpha * 0.6;
-        ctx.strokeStyle = "#ffffff";
-        ctx.lineWidth = 1.5 * flashPower;
-        ctx.shadowColor = "#ffffff";
-        ctx.shadowBlur = 8 * flashPower;
-        ctx.beginPath();
-        ctx.arc(px, py, shockRadius * 0.7, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-
-        // ── Central flash fill — bright splash ──
-        const splashGrad = ctx.createRadialGradient(px, py, 0, px, py, range);
-        splashGrad.addColorStop(0, `rgba(136, 238, 255, ${flashPower * 0.3})`);
-        splashGrad.addColorStop(0.3, `rgba(0, 212, 255, ${flashPower * 0.15})`);
-        splashGrad.addColorStop(0.6, `rgba(100, 180, 220, ${flashPower * 0.05})`);
-        splashGrad.addColorStop(1, "rgba(0, 0, 0, 0)");
-        ctx.globalAlpha = 1;
-        ctx.fillStyle = splashGrad;
-        ctx.beginPath();
-        ctx.arc(px, py, range, 0, Math.PI * 2);
-        ctx.fill();
-
-        // ── Radial spike lines for "splash" feel ──
-        ctx.globalAlpha = flashPower * 0.35;
-        ctx.strokeStyle = "#aaeeff";
-        ctx.lineWidth = 1;
-        const spikeCount = 12;
-        for (let i = 0; i < spikeCount; i++) {
-          const a = (i / spikeCount) * Math.PI * 2 + expandProgress * 0.3;
-          const innerR = range * 0.15;
-          const outerR = range * (0.5 + expandProgress * 0.5);
-          ctx.beginPath();
-          ctx.moveTo(px + Math.cos(a) * innerR, py + Math.sin(a) * innerR);
-          ctx.lineTo(px + Math.cos(a) * outerR, py + Math.sin(a) * outerR);
-          ctx.stroke();
-        }
-      }
-
       ctx.restore();
+    }
+
+    // ── Pulse shockwaves — exact same render as upgrade screen purchase shockwaves ──
+    {
+      const ctx = this.renderer.ctx;
+      const NODE_RADIUS = CONE_RANGE; // use cone range as the base radius
+      for (const sw of this.pulseShockwaves) {
+        const progress = 1 - sw.timer / sw.maxTimer;
+        const radius = NODE_RADIUS * (1 + progress * 2.5);
+        const alpha = 1 - progress;
+
+        ctx.save();
+        // Outer ring
+        ctx.strokeStyle = sw.color;
+        ctx.globalAlpha = alpha * 0.8;
+        ctx.shadowColor = sw.color;
+        ctx.shadowBlur = 10;
+        ctx.lineWidth = 3 * (1 - progress);
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, radius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Inner ring
+        ctx.globalAlpha = alpha * 0.4;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, radius * 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+
+        ctx.restore();
+      }
     }
 
     this.particles.render(this.renderer);
@@ -1401,7 +1509,7 @@ export class Game implements IGame {
         const color = abilityNames[abilityNames.length - 1]!.color;
         ctx.save();
         ctx.globalAlpha = 0.55;
-        ctx.font = `bold 8px Tektur`;
+        ctx.font = this.renderer.getFont(8, true);
         ctx.fillStyle = color;
         ctx.textAlign = "center";
         ctx.textBaseline = "middle";
@@ -1411,320 +1519,18 @@ export class Game implements IGame {
     }
 
     if (this.input.isTouchDevice) {
-      this.renderMobileControls();
+      this.mobileControlsUI.render(
+        this.renderer,
+        this.input,
+        this.player.dashReady,
+        this.player.dashCooldownRatio
+      );
     }
     // Pause button always visible (mobile + desktop)
-    this.renderMobilePauseButton();
+    this.pauseMenu.renderPauseButton(this.renderer);
 
     // ── End screen-space pass ──
     this.renderer.popScreenSpace();
-  }
-
-  renderMobileControls() {
-    const ctx = this.renderer.ctx;
-    const joy = this.input.joystick;
-
-    // Floating virtual joystick
-    if (joy.active) {
-      const baseR = this.input.JOYSTICK_RADIUS;
-      const thumbR = 14;
-
-      ctx.save();
-      // Outer ring (base)
-      ctx.globalAlpha = 0.12;
-      ctx.fillStyle = COLORS.player;
-      ctx.beginPath();
-      ctx.arc(joy.baseX, joy.baseY, baseR, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.globalAlpha = 0.2;
-      ctx.strokeStyle = COLORS.player;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(joy.baseX, joy.baseY, baseR, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Inner ring (thumb)
-      ctx.globalAlpha = 0.35;
-      ctx.fillStyle = COLORS.player;
-      ctx.beginPath();
-      ctx.arc(joy.thumbX, joy.thumbY, thumbR, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.globalAlpha = 0.5;
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.arc(joy.thumbX, joy.thumbY, thumbR, 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Center dot on base
-      ctx.globalAlpha = 0.15;
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(joy.baseX, joy.baseY, 3, 0, Math.PI * 2);
-      ctx.fill();
-
-      ctx.restore();
-    }
-
-    // Dash button: bigger + more central for mobile fat-finger usability
-    const dashX = GAME_WIDTH - 120;
-    const dashY = GAME_HEIGHT - 120;
-    const dashR = 48;
-    ctx.save();
-
-    if (this.player.dashReady) {
-      ctx.globalAlpha = 0.1;
-      const dashGlow = ctx.createRadialGradient(dashX, dashY, 0, dashX, dashY, dashR * 1.5);
-      dashGlow.addColorStop(0, COLORS.dashReady);
-      dashGlow.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = dashGlow;
-      ctx.beginPath();
-      ctx.arc(dashX, dashY, dashR * 1.5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.25;
-      ctx.strokeStyle = COLORS.dashReady;
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(dashX, dashY, dashR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.45;
-      ctx.font = `bold 14px Tektur`;
-      ctx.fillStyle = COLORS.dashReady;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("DASH", dashX, dashY);
-    } else {
-      ctx.globalAlpha = 0.1;
-      ctx.strokeStyle = "#445";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(dashX, dashY, dashR, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.globalAlpha = 0.25;
-      ctx.strokeStyle = COLORS.dashReady;
-      ctx.lineWidth = 3;
-      const arc = this.player.dashCooldownRatio * Math.PI * 2;
-      ctx.beginPath();
-      ctx.arc(dashX, dashY, dashR, -Math.PI / 2, -Math.PI / 2 + arc);
-      ctx.stroke();
-      const pct = Math.floor(this.player.dashCooldownRatio * 100);
-      ctx.globalAlpha = 0.25;
-      ctx.font = `bold 14px Tektur`;
-      ctx.fillStyle = COLORS.dashCooldown;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`${pct}%`, dashX, dashY);
-    }
-    ctx.restore();
-  }
-
-  renderPauseOverlay() {
-    const ctx = this.renderer.ctx;
-    const cx = GAME_WIDTH / 2;
-    const layout = this.getPauseMenuLayout();
-    const p = layout.panel;
-
-    // Dim background
-    ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
-    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    // Main panel
-    this.renderer.drawPanel(p.x, p.y, p.w, p.h, {
-      bg: "rgba(8, 8, 24, 0.94)",
-      border: "rgba(100, 120, 180, 0.4)",
-      radius: 14,
-      glow: "rgba(100, 150, 255, 0.1)",
-      glowBlur: 18,
-    });
-
-    // Title
-    ctx.save();
-    ctx.shadowColor = "#fff";
-    ctx.shadowBlur = 12;
-    this.renderer.drawTitleTextOutline(
-      "PAUSED",
-      cx,
-      p.y + 36,
-      "#fff",
-      "#000",
-      22,
-      "center",
-      "middle"
-    );
-    ctx.restore();
-
-    // Divider
-    ctx.save();
-    ctx.strokeStyle = "rgba(255,255,255,0.06)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(p.x + 20, p.y + 60);
-    ctx.lineTo(p.x + p.w - 20, p.y + 60);
-    ctx.stroke();
-    ctx.restore();
-
-    // ── Music Track Section ──
-    ctx.save();
-    ctx.font = `bold 11px Tektur`;
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("MUSIC TRACK", cx, p.y + 80);
-    ctx.restore();
-
-    // Track label colors
-    const trackColors: Record<string, string> = {
-      fire: "#ff6644",
-      chill: "#44ccff",
-      trap: "#cc44ff",
-    };
-    const trackEmojis: Record<string, string> = {
-      fire: "🔥",
-      chill: "❄️",
-      trap: "🎵",
-    };
-
-    for (const tb of layout.tracks) {
-      const isActive = this.audio.track === tb.track;
-      const isUnlocked = this.audio.isTrackUnlocked(
-        tb.track,
-        this.save.upgradeLevels,
-        this.save.prestigeCount
-      );
-      const color = trackColors[tb.track] || "#fff";
-
-      if (!isUnlocked) {
-        // Locked track — show 🔒 with dimmed styling
-        const lockHint = tb.track === "chill" ? "Scythe" : "Prestige";
-        this.renderer.drawButton(tb.x, tb.y, tb.w, tb.h, `🔒 ${tb.track.toUpperCase()}`, {
-          bg: "rgba(10, 10, 20, 0.85)",
-          border: "rgba(60, 60, 80, 0.3)",
-          textColor: "rgba(100, 100, 120, 0.5)",
-          fontSize: 11,
-          radius: 8,
-        });
-        // Lock hint below button
-        ctx.save();
-        ctx.font = `8px Tektur`;
-        ctx.fillStyle = "rgba(100, 100, 130, 0.45)";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "top";
-        ctx.fillText(`Req: ${lockHint}`, tb.x + tb.w / 2, tb.y + tb.h + 2);
-        ctx.restore();
-      } else {
-        this.renderer.drawButton(
-          tb.x,
-          tb.y,
-          tb.w,
-          tb.h,
-          `${trackEmojis[tb.track]} ${tb.track.toUpperCase()}`,
-          {
-            bg: isActive ? "rgba(40, 40, 80, 0.95)" : "rgba(15, 15, 35, 0.85)",
-            border: isActive ? color : "rgba(100, 110, 140, 0.35)",
-            textColor: isActive ? color : "rgba(180, 180, 200, 0.7)",
-            fontSize: 11,
-            radius: 8,
-            glow: isActive ? color.replace(")", ",0.2)").replace("rgb", "rgba") : undefined,
-          }
-        );
-      }
-    }
-
-    // ── Volume Section ──
-    ctx.save();
-    ctx.font = `bold 11px Tektur`;
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("VOLUME", cx, p.y + 195);
-    ctx.restore();
-
-    const vb = layout.volumeBar;
-    const vol = this.audio.getMusicVolume();
-    this.renderer.drawGradientBar(
-      vb.x,
-      vb.y,
-      vb.w,
-      vb.h,
-      vol,
-      "#4488ff",
-      "#00d4ff",
-      "rgba(20, 20, 40, 0.8)",
-      "rgba(80, 100, 160, 0.3)",
-      vb.h / 2
-    );
-
-    // Volume percentage
-    ctx.save();
-    ctx.font = `bold 11px Tektur`;
-    ctx.fillStyle = "#aabbcc";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(`${Math.round(vol * 100)}%`, cx, vb.y + vb.h / 2);
-    ctx.restore();
-
-    // ── Resume Button ──
-    const rb = layout.resume;
-    this.renderer.drawButton(rb.x, rb.y, rb.w, rb.h, "▶  RESUME", {
-      bg: "rgba(20, 60, 50, 0.9)",
-      border: "rgba(68, 255, 136, 0.45)",
-      textColor: "#44ff88",
-      fontSize: 14,
-      radius: 8,
-      glow: "rgba(68, 255, 136, 0.12)",
-    });
-
-    // ── Forfeit Button ──
-    const fb = layout.forfeit;
-    this.renderer.drawButton(fb.x, fb.y, fb.w, fb.h, "↩  BACK TO UPGRADES", {
-      bg: "rgba(50, 20, 20, 0.85)",
-      border: "rgba(255, 80, 80, 0.3)",
-      textColor: "rgba(255, 120, 120, 0.8)",
-      fontSize: 12,
-      radius: 8,
-    });
-
-    // Keyboard hint (only for non-mobile)
-    if (!this.input.isTouchDevice) {
-      ctx.save();
-      ctx.font = `8px Tektur`;
-      ctx.fillStyle = "rgba(120, 130, 160, 0.5)";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("P / ESC to resume  ·  K to forfeit", cx, p.y + p.h - 14);
-      ctx.restore();
-    }
-  }
-
-  /** Render mobile pause button (top-right, always visible during gameplay) */
-  private renderMobilePauseButton() {
-    const ctx = this.renderer.ctx;
-    const bx = this.PAUSE_BTN_X;
-    const by = this.PAUSE_BTN_Y;
-    const bw = this.PAUSE_BTN_W;
-    const bh = this.PAUSE_BTN_H;
-
-    ctx.save();
-    // Background pill
-    ctx.globalAlpha = 0.35;
-    this.renderer.drawRoundedRect(bx, by, bw, bh, 6, "rgba(8, 8, 24, 0.85)");
-    ctx.globalAlpha = 0.25;
-    this.renderer.drawRoundedRectStroke(bx, by, bw, bh, 6, "rgba(100, 120, 180, 0.4)", 1);
-
-    // Pause icon — two thick vertical bars
-    ctx.globalAlpha = 0.75;
-    ctx.fillStyle = "#ffffff";
-    const iconX = bx + bw / 2;
-    const iconY = by + bh / 2;
-    const barW = 5;
-    const barH = 20;
-    const barGap = 6;
-    ctx.fillRect(iconX - barGap - barW, iconY - barH / 2, barW, barH);
-    ctx.fillRect(iconX + barGap, iconY - barH / 2, barW, barH);
-
-    ctx.restore();
   }
 
   private fireLaser() {
@@ -1833,457 +1639,70 @@ export class Game implements IGame {
     }
   }
 
+  /** Manage algorithmic formation spawning — creates enemy waves in mathematical patterns */
+  private updateFormations(dt: number) {
+    const level = this.save.currentLevel;
+    // Formations start at level 2+, and get more frequent at higher levels
+    if (level < 2) return;
+
+    // If there's an active formation being spawned, tick its stagger timers
+    if (this.activeFormation) {
+      this.activeFormation.elapsed += dt;
+      const f = this.activeFormation;
+      // Spawn enemies whose delay has passed
+      while (f.spawnedCount < f.slots.length) {
+        const slot = f.slots[f.spawnedCount];
+        if (f.elapsed < slot.delay) break; // not yet time for this one
+        // Spawn a rock at the formation slot position
+        const hp = 1 + Math.floor(level * 0.3);
+        const speed = ROCK_BASE_SPEED + level * 2;
+        const rock = new Rock(slot.x, slot.y, hp, speed, false, 0.8);
+        rock.coinValue = 2;
+        this.enemies.push(rock);
+        f.spawnedCount++;
+      }
+      // Formation complete when all enemies spawned
+      if (f.spawnedCount >= f.slots.length) {
+        this.activeFormation = null;
+        // Next formation in 8–15 seconds (faster at higher levels)
+        this.formationCooldown = randomRange(8, 15) - Math.min(5, level * 0.5);
+        this.formationTimer = 0;
+      }
+      return;
+    }
+
+    // Count down to next formation
+    this.formationTimer += dt;
+    if (this.formationTimer >= this.formationCooldown) {
+      // Generate a new formation
+      const type = randomFormationType();
+      const count = Math.min(6 + level, 14); // 7–14 enemies depending on level
+      const slots = generateFormation(type, count);
+
+      this.activeFormation = { slots, type, spawnedCount: 0, elapsed: 0 };
+
+      // Show a ghostly preview of the formation shape for 2 seconds
+      this.formationPreview = { type, slots, life: 2.0, maxLife: 2.0 };
+
+      this.formationTimer = 0;
+    }
+  }
+
   private handleBossRewardClick(mx: number, my: number) {
-    // Auto-granted ability (bosses 1-3): any tap goes to upgrades
-    if (this.autoGrantedAbility) {
+    const result = this.bossRewardUI.handleClick(mx, my, this.autoGrantedAbility);
+    if (result === "continue") {
+      // Boss 1-3 auto-grant path — persist kills before leaving
+      this.save.lifetimeKills += this.roundKills;
+      saveGame(this.save);
       this.audio.playClick();
       this.manager.goToUpgradeScreen();
-      return;
+    } else if (result) {
+      // Boss 4+ choice path — equip chosen ability then persist kills
+      addAbility(this.save, result);
+      this.save.lifetimeKills += this.roundKills;
+      saveGame(this.save);
+      this.audio.playClick();
+      this.manager.goToUpgradeScreen();
     }
-    // Choice screen (boss 4+): tap a card to select, then go to upgrades
-    const layout = this.getBossRewardLayout();
-    for (let i = 0; i < BOSS_REWARD_CHOICES.length; i++) {
-      const card = layout[i];
-      if (mx >= card.x && mx <= card.x + card.w && my >= card.y && my <= card.y + card.h) {
-        this.selectSpecialAbility(BOSS_REWARD_CHOICES[i].id);
-        return;
-      }
-    }
-  }
-
-  private selectSpecialAbility(id: string) {
-    addAbility(this.save, id);
-    this.save.lifetimeKills += this.roundKills;
-    saveGame(this.save);
-    this.audio.playClick();
-    this.manager.goToUpgradeScreen();
-  }
-
-  private getBossRewardLayout(): Array<{ x: number; y: number; w: number; h: number }> {
-    const cardW = 155;
-    const cardH = 220;
-    const gap = 15;
-    const totalW = cardW * 3 + gap * 2;
-    const startX = (GAME_WIDTH - totalW) / 2;
-    const startY = 280;
-    return BOSS_REWARD_CHOICES.map((_, i) => ({
-      x: startX + i * (cardW + gap),
-      y: startY,
-      w: cardW,
-      h: cardH,
-    }));
-  }
-
-  private renderBossReward() {
-    const ctx = this.renderer.ctx;
-    const cx = GAME_WIDTH / 2;
-
-    ctx.fillStyle = "rgba(0,0,0,0.78)";
-    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    ctx.save();
-    ctx.shadowColor = COLORS.engineGlow;
-    ctx.shadowBlur = 22;
-    this.renderer.drawTitleTextOutline(
-      "BOSS DEFEATED!",
-      cx,
-      180,
-      COLORS.engineGlow,
-      "#000",
-      24,
-      "center",
-      "middle"
-    );
-    ctx.restore();
-
-    // Auto-granted ability (bosses 1-3): show single reward card
-    if (this.autoGrantedAbility) {
-      const choice = BOSS_REWARD_CHOICES.find((c) => c.id === this.autoGrantedAbility);
-      if (choice) {
-        this.renderer.drawTitleText(
-          "New Ability Unlocked!",
-          cx,
-          218,
-          "#ffffff",
-          14,
-          "center",
-          "middle"
-        );
-
-        // Single centered card — bigger than the 3-card layout
-        const cardW = 220;
-        const cardH = 260;
-        const cardX = cx - cardW / 2;
-        const cardY = 250;
-
-        this.renderer.drawPanel(cardX, cardY, cardW, cardH, {
-          bg: "rgba(25,25,55,0.96)",
-          border: choice.borderColor,
-          radius: 12,
-          glow: choice.glowColor,
-          glowBlur: 28,
-        });
-
-        this.drawAbilityIcon(ctx, choice.id, cx, cardY + 60, choice.color);
-
-        ctx.save();
-        ctx.font = `bold 16px Tektur`;
-        ctx.fillStyle = choice.color;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.shadowColor = choice.color;
-        ctx.shadowBlur = 12;
-        ctx.fillText(choice.name, cx, cardY + 110);
-        ctx.restore();
-
-        ctx.save();
-        ctx.font = `11px Tektur`;
-        ctx.fillStyle = COLORS.textSecondary;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        for (let j = 0; j < choice.lines.length; j++) {
-          ctx.fillText(choice.lines[j], cx, cardY + 140 + j * 20);
-        }
-        ctx.restore();
-
-        // "EQUIPPED ✓" badge
-        ctx.save();
-        ctx.font = `bold 12px Tektur`;
-        ctx.fillStyle = choice.color;
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText("✓ EQUIPPED", cx, cardY + cardH - 28);
-        ctx.restore();
-
-        // Continue hint
-        const blink = Math.sin(this.gameTime * 3) > 0;
-        const btnW = 260;
-        const btnH = 36;
-        const btnX = cx - btnW / 2;
-        const btnY = cardY + cardH + 20;
-        this.renderer.drawButton(btnX, btnY, btnW, btnH, "TAP TO CONTINUE", {
-          bg: blink ? "rgba(61, 180, 150, 0.9)" : "rgba(10, 20, 15, 0.8)",
-          border: blink ? "rgba(38, 180, 180, 0.4)" : "rgba(100, 200, 150, 0.2)",
-          textColor: blink ? "#fff" : "rgba(255,255,255,0.5)",
-          fontSize: 13,
-          radius: 8,
-          glow: blink ? "rgba(15, 210, 228, 0.15)" : undefined,
-        });
-      }
-      return;
-    }
-
-    // Choice screen (boss 4+): show 3 cards
-    this.renderer.drawTitleText(
-      "Choose your Special Ability",
-      cx,
-      218,
-      COLORS.textSecondary,
-      12,
-      "center",
-      "middle"
-    );
-
-    if (this.save.specialAbilities.length > 0) {
-      const owned = this.save.specialAbilities
-        .map((id) => BOSS_REWARD_CHOICES.find((c) => c.id === id)?.name)
-        .filter(Boolean)
-        .join(", ");
-      ctx.save();
-      ctx.font = `8px Tektur`;
-      ctx.fillStyle = "#aabbcc";
-      ctx.globalAlpha = 0.7;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText(`Owned: ${owned} — pick a new one to add`, cx, 242);
-      ctx.restore();
-    }
-
-    const layout = this.getBossRewardLayout();
-    for (let i = 0; i < BOSS_REWARD_CHOICES.length; i++) {
-      const choice = BOSS_REWARD_CHOICES[i];
-      const card = layout[i];
-      const isCurrent = hasAbility(this.save, choice.id);
-
-      this.renderer.drawPanel(card.x, card.y, card.w, card.h, {
-        bg: isCurrent ? "rgba(25,25,55,0.96)" : "rgba(10,10,28,0.94)",
-        border: isCurrent ? choice.borderColor : "rgba(120,120,160,0.35)",
-        radius: 10,
-        glow: choice.glowColor,
-        glowBlur: isCurrent ? 22 : 10,
-      });
-
-      this.drawAbilityIcon(ctx, choice.id, card.x + card.w / 2, card.y + 52, choice.color);
-
-      ctx.save();
-      ctx.font = `bold 12px Tektur`;
-      ctx.fillStyle = choice.color;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.shadowColor = choice.color;
-      ctx.shadowBlur = isCurrent ? 8 : 0;
-      ctx.fillText(choice.name, card.x + card.w / 2, card.y + 98);
-      ctx.restore();
-
-      ctx.save();
-      ctx.font = `8.5px Tektur`;
-      ctx.fillStyle = COLORS.textSecondary;
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      for (let j = 0; j < choice.lines.length; j++) {
-        ctx.fillText(choice.lines[j], card.x + card.w / 2, card.y + 122 + j * 16);
-      }
-      ctx.restore();
-
-      const btnY = card.y + card.h - 36;
-      const btnX = card.x + 12;
-      const btnW = card.w - 24;
-      this.renderer.drawButton(btnX, btnY, btnW, 24, isCurrent ? "EQUIPPED ✓" : "CHOOSE", {
-        bg: isCurrent ? "rgba(30,30,60,0.9)" : "rgba(10,20,35,0.85)",
-        border: choice.borderColor,
-        textColor: isCurrent ? choice.color : "#ffffff",
-        fontSize: 9,
-        radius: 5,
-      });
-    }
-
-    ctx.save();
-    ctx.font = `8px Tektur`;
-    ctx.fillStyle = "rgba(150,150,180,0.55)";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(
-      "Tap a card to equip — ability carries into future runs",
-      cx,
-      layout[0].y + layout[0].h + 22
-    );
-    ctx.restore();
-  }
-
-  private drawAbilityIcon(
-    ctx: CanvasRenderingContext2D,
-    id: string,
-    cx: number,
-    cy: number,
-    color: string
-  ) {
-    ctx.save();
-    ctx.strokeStyle = color;
-    ctx.fillStyle = color;
-    ctx.lineWidth = 2;
-    ctx.globalAlpha = 0.92;
-
-    if (id === "laser") {
-      ctx.beginPath();
-      ctx.arc(cx, cy, 14, 0, Math.PI * 2);
-      ctx.stroke();
-      for (let g = 0; g < 4; g++) {
-        const angle = (g / 4) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(angle) * 17, cy + Math.sin(angle) * 17);
-        ctx.lineTo(cx + Math.cos(angle) * 22, cy + Math.sin(angle) * 22);
-        ctx.stroke();
-      }
-      ctx.beginPath();
-      ctx.arc(cx, cy, 3, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.45;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(cx - 22, cy + 10);
-      ctx.lineTo(cx + 10, cy - 22);
-      ctx.stroke();
-    } else if (id === "bomb_dash") {
-      ctx.beginPath();
-      ctx.arc(cx, cy + 5, 14, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.4;
-      ctx.fillStyle = "#ffffff";
-      ctx.beginPath();
-      ctx.arc(cx - 5, cy - 1, 5, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = "#aaaaaa";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(cx + 8, cy - 8);
-      ctx.quadraticCurveTo(cx + 16, cy - 16, cx + 11, cy - 22);
-      ctx.stroke();
-      ctx.fillStyle = COLORS.engineGlow;
-      ctx.globalAlpha = 1;
-      ctx.beginPath();
-      ctx.arc(cx + 11, cy - 22, 3, 0, Math.PI * 2);
-      ctx.fill();
-    } else if (id === "flashbang") {
-      const spikes = 8;
-      for (let i = 0; i < spikes; i++) {
-        const angle = (i / spikes) * Math.PI * 2;
-        ctx.beginPath();
-        ctx.moveTo(cx + Math.cos(angle) * 7, cy + Math.sin(angle) * 7);
-        ctx.lineTo(cx + Math.cos(angle) * 18, cy + Math.sin(angle) * 18);
-        ctx.stroke();
-        const perpA = angle + Math.PI / 2;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(
-          cx + Math.cos(angle) * 18 + Math.cos(perpA) * 4,
-          cy + Math.sin(angle) * 18 + Math.sin(perpA) * 4
-        );
-        ctx.lineTo(
-          cx + Math.cos(angle) * 18 - Math.cos(perpA) * 4,
-          cy + Math.sin(angle) * 18 - Math.sin(perpA) * 4
-        );
-        ctx.stroke();
-        ctx.lineWidth = 2;
-      }
-      ctx.beginPath();
-      ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-      ctx.fill();
-    }
-
-    ctx.restore();
-  }
-
-  renderGameOver() {
-    const cx = GAME_WIDTH / 2;
-    const cy = GAME_HEIGHT / 2;
-    const ctx = this.renderer.ctx;
-
-    this.particles.render(this.renderer);
-
-    ctx.fillStyle = "rgba(0, 0, 0, 0.65)";
-    ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
-
-    // Death cause determines title, subtitle, and color
-    let title: string;
-    let subtitle: string;
-    let titleColor: string;
-    let panelBorder: string;
-    let panelGlow: string;
-
-    switch (this.deathCause) {
-      case "mothership":
-        title = "MOTHERSHIP DESTROYED";
-        subtitle = "The mothership exploded!";
-        titleColor = "#ff4444";
-        panelBorder = "rgba(255, 68, 68, 0.3)";
-        panelGlow = "rgba(255, 68, 68, 0.15)";
-        break;
-      case "player":
-        title = "SHIP DESTROYED";
-        subtitle = "Killed by enemy fire!";
-        titleColor = "#ff6644";
-        panelBorder = "rgba(255, 100, 68, 0.3)";
-        panelGlow = "rgba(255, 100, 68, 0.15)";
-        break;
-      case "time":
-        title = "TIME EXPIRED";
-        subtitle = "The clock ran out!";
-        titleColor = "#ffaa00";
-        panelBorder = "rgba(255, 170, 0, 0.3)";
-        panelGlow = "rgba(255, 170, 0, 0.15)";
-        break;
-      default:
-        title = "ROUND COMPLETE";
-        subtitle = `Level ${this.save.currentLevel}`;
-        titleColor = "#00d4ff";
-        panelBorder = "rgba(0, 180, 255, 0.3)";
-        panelGlow = "rgba(0, 180, 255, 0.15)";
-        break;
-    }
-
-    const panelW = 320;
-    const panelH = 220;
-    this.renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
-      bg: "rgba(6, 6, 20, 0.92)",
-      border: panelBorder,
-      radius: 12,
-      glow: panelGlow,
-      glowBlur: 20,
-    });
-
-    ctx.save();
-    ctx.shadowColor = titleColor;
-    ctx.shadowBlur = 15;
-    this.renderer.drawTitleTextOutline(
-      title,
-      cx,
-      cy - 82,
-      titleColor,
-      "#000",
-      18,
-      "center",
-      "middle"
-    );
-    ctx.restore();
-
-    // Subtitle (cause description)
-    ctx.save();
-    ctx.font = `11px Tektur`;
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(subtitle, cx, cy - 56);
-    ctx.restore();
-
-    ctx.save();
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-    ctx.lineWidth = 1;
-    ctx.beginPath();
-    ctx.moveTo(cx - 100, cy - 40);
-    ctx.lineTo(cx + 100, cy - 40);
-    ctx.stroke();
-    ctx.restore();
-
-    const statY = cy - 22;
-    const lineH = 22;
-
-    ctx.save();
-    ctx.font = `bold 11px Tektur`;
-    ctx.textBaseline = "middle";
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.fillText("Coins Earned", cx - 100, statY);
-    ctx.textAlign = "right";
-    ctx.fillStyle = COLORS.textGold;
-    ctx.fillText(`+${this.roundCoins}`, cx + 100, statY);
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.fillText("Enemies Defeated", cx - 100, statY + lineH);
-    ctx.textAlign = "right";
-    ctx.fillStyle = "#ff8866";
-    ctx.fillText(`${this.roundKills}`, cx + 100, statY + lineH);
-
-    ctx.textAlign = "left";
-    ctx.fillStyle = COLORS.textSecondary;
-    ctx.fillText("Total Coins", cx - 100, statY + lineH * 2);
-    ctx.textAlign = "right";
-    ctx.fillStyle = COLORS.coin;
-    ctx.fillText(`${this.save.coins}`, cx + 100, statY + lineH * 2);
-
-    ctx.restore();
-
-    // Continue button — cyan START RUN style
-    const blink = Math.sin(this.gameTime * 3) > 0;
-    const playPulse = (Math.sin(this.gameTime * 2.5) + 1) / 2;
-    const btnW = 260;
-    const btnH = 44;
-    const btnX = cx - btnW / 2;
-    const btnY = cy + 60;
-
-    ctx.save();
-    ctx.shadowColor = `rgba(0, 200, 255, ${0.15 + playPulse * 0.15})`;
-    ctx.shadowBlur = 12 + playPulse * 8;
-    this.renderer.drawButton(btnX, btnY, btnW, btnH, "▶  CONTINUE", {
-      bg: blink ? "rgba(0, 50, 110, 0.9)" : "rgba(0, 30, 70, 0.8)",
-      border: `rgba(0, 180, 255, ${0.4 + playPulse * 0.2})`,
-      textColor: COLORS.player,
-      fontSize: 14,
-      radius: 10,
-      glow: `rgba(0, 170, 255, ${0.1 + playPulse * 0.1})`,
-    });
-    ctx.restore();
   }
 }

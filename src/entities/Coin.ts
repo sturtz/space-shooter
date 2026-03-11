@@ -1,15 +1,6 @@
 import { Entity } from "./Entity";
 import { Renderer } from "../rendering/Renderer";
-import {
-  Vec2,
-  vec2,
-  vecSub,
-  vecNormalize,
-  vecAdd,
-  vecScale,
-  vecDist,
-  randomRange,
-} from "../utils/Math";
+import { Vec2, vec2, randomRange } from "../utils/Math";
 import { COIN_SIZE, COIN_LIFETIME, COIN_SPEED, COLORS } from "../utils/Constants";
 import { ItemImages, imageReady } from "../utils/Assets";
 
@@ -46,16 +37,26 @@ export class Coin extends Entity {
       this.vel.y *= 0.95;
     }
 
-    this.pos = vecAdd(this.pos, vecScale(this.vel, dt));
+    // Inline vecAdd + vecScale to avoid object allocations
+    this.pos.x += this.vel.x * dt;
+    this.pos.y += this.vel.y * dt;
   }
 
   attractTo(target: Vec2, magnetRange: number) {
-    const dist = vecDist(this.pos, target);
-    if (dist < magnetRange) {
-      this.attracted = true;
-      const dir = vecNormalize(vecSub(target, this.pos));
+    // Inline vecDist to avoid sqrt + Vec2 allocation when out of range
+    const dx = target.x - this.pos.x;
+    const dy = target.y - this.pos.y;
+    const distSq = dx * dx + dy * dy;
+    if (distSq >= magnetRange * magnetRange) return;
+
+    this.attracted = true;
+    const dist = Math.sqrt(distSq);
+    // Inline vecNormalize + vecScale
+    if (dist > 0) {
       const speed = COIN_SPEED * (1 + (magnetRange - dist) / magnetRange);
-      this.vel = vecScale(dir, speed);
+      const invDist = 1 / dist;
+      this.vel.x = dx * invDist * speed;
+      this.vel.y = dy * invDist * speed;
     }
   }
 

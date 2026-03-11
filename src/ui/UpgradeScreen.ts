@@ -8,8 +8,9 @@ import {
   BRANCH_COLORS,
 } from "../upgrades/UpgradeTree";
 import { saveGame, clearSave, getDefaultSave } from "../utils/SaveManager";
-import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, isMobileDevice } from "../utils/Constants";
 import { PlayerImages, imageReady } from "../utils/Assets";
+import { drawUpgradeIcon } from "./UpgradeIcons";
 import type { ScreenManager } from "../game/ScreenManager";
 
 interface ClickableArea {
@@ -49,6 +50,26 @@ interface PurchaseFlash {
   color: string;
 }
 
+/* ── purchase shockwave ── */
+interface PurchaseShockwave {
+  x: number;
+  y: number;
+  timer: number;
+  maxTimer: number;
+  color: string;
+}
+
+/* ── engine trail particle ── */
+interface TrailParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  life: number;
+  maxLife: number;
+  size: number;
+}
+
 export class UpgradeScreen {
   renderer: Renderer;
   manager: ScreenManager;
@@ -60,29 +81,65 @@ export class UpgradeScreen {
   cantAffordMessage: { text: string; timer: number } | null = null;
   iconImages: Map<string, HTMLImageElement> = new Map();
 
+  /* ── Layout constants (scaled up 2× from original) ── */
   readonly CX = GAME_WIDTH / 2;
   readonly CY = GAME_HEIGHT / 2 - 20;
-  readonly DEPTH_SPACING = 120;
-  readonly NODE_RADIUS = 22;
-  readonly BRANCH_SPREAD = 0.3;
+  readonly DEPTH_SPACING = 240;
+  readonly NODE_RADIUS = 32;
+  readonly BRANCH_SPREAD = 0.45;
 
   time = 0;
   private sparkles: Sparkle[] = [];
   private purchaseFlash: PurchaseFlash | null = null;
   private connectionDashOffset = 0;
 
+  /* ── Camera (driven by ship position) ── */
   panX = 0;
   panY = 0;
+  private cameraX = 0;
+  private cameraY = 0;
+  private readonly CAMERA_LERP = 0.08;
+
+  /* ── Manual pan (fallback for mouse drag) ── */
   private isPanning = false;
   private panStartX = 0;
   private panStartY = 0;
-  private panStartPanX = 0;
-  private panStartPanY = 0;
+  private panStartShipX = 0;
+  private panStartShipY = 0;
   private panMoved = 0;
 
   private mouseX = 0;
   private mouseY = 0;
   private touchActive = false;
+
+  /* ── Ship state ── */
+  private shipX = 0;
+  private shipY = 0;
+  private shipAngle = -Math.PI / 2; // facing up
+  private readonly SHIP_SPEED = 280;
+  private readonly SHIP_RADIUS = 12;
+  private overlappingNode: UpgradeNode | null = null;
+  private interactCooldown = 0;
+  private shockwaves: PurchaseShockwave[] = [];
+  private trailParticles: TrailParticle[] = [];
+  private shipMoving = false;
+  private shipPurchasePulse = 0; // timer for ship glow burst on upgrade buy
+  private shipPurchaseColor = ""; // branch color of last purchase
+
+  /* ── Ship input (keyboard — listens on document) ── */
+  private shipKeys: Set<string> = new Set();
+
+  /* ── Touch joystick for ship ── */
+  private touchShipActive = false;
+  private touchBaseX = 0;
+  private touchBaseY = 0;
+  private touchDirX = 0;
+  private touchDirY = 0;
+  private touchMoveId: number | null = null;
+  private touchStartCssX = 0;
+  private touchStartCssY = 0;
+  private readonly TOUCH_JOYSTICK_RADIUS = 80; // CSS pixels
+  private touchFireRequested = false;
 
   constructor(renderer: Renderer, manager: ScreenManager) {
     this.renderer = renderer;
@@ -99,6 +156,16 @@ export class UpgradeScreen {
       };
     };
 
+    /* ── Keyboard input for ship navigation ── */
+    document.addEventListener("keydown", (e) => {
+      const key = e.key.toLowerCase();
+      this.shipKeys.add(key);
+    });
+    document.addEventListener("keyup", (e) => {
+      this.shipKeys.delete(e.key.toLowerCase());
+    });
+
+    /* ── Mouse click (for bottom bar buttons + node click fallback) ── */
     canvas.addEventListener("click", (e) => {
       const { mx, my } = getScaledCoords(e.clientX, e.clientY);
       this.handleClick(mx, my);
@@ -110,53 +177,105 @@ export class UpgradeScreen {
       this.mouseY = my;
     });
 
-    canvas.addEventListener("mousedown", (e) => {
-      const { mx, my } = getScaledCoords(e.clientX, e.clientY);
-      this.beginPan(mx, my);
-    });
-    canvas.addEventListener("mousemove", (e) => {
-      if (this.isPanning) {
-        const { mx, my } = getScaledCoords(e.clientX, e.clientY);
-        this.updatePan(mx, my);
-      }
-    });
-    canvas.addEventListener("mouseup", () => {
-      this.endPan();
-    });
-
+    /* ── Touch handlers — joystick-style ship control ── */
     canvas.addEventListener(
       "touchstart",
       (e) => {
         const touch = e.touches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
-        this.beginPan(mx, my);
         this.touchActive = true;
         this.mouseX = mx;
         this.mouseY = my;
+
+        // Check if touching bottom bar buttons first
+        for (const area of this.clickables) {
+          if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
+            // Let touchend handle the click
+            return;
+          }
+        }
+
+        // Right side of screen = fire zone
+        if (mx > GAME_WIDTH * 0.7) {
+          this.touchFireRequested = true;
+          return;
+        }
+
+        // Otherwise, start ship joystick
+        if (this.touchMoveId === null) {
+          this.touchMoveId = touch.identifier;
+          this.touchShipActive = true;
+          this.touchStartCssX = touch.clientX;
+          this.touchStartCssY = touch.clientY;
+          this.touchBaseX = mx;
+          this.touchBaseY = my;
+          this.touchDirX = 0;
+          this.touchDirY = 0;
+        }
       },
       { passive: true }
     );
+
     canvas.addEventListener(
       "touchmove",
       (e) => {
         e.preventDefault();
         const touch = e.touches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
-        this.updatePan(mx, my);
         this.mouseX = mx;
         this.mouseY = my;
+
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const ct = e.changedTouches[i];
+          if (ct.identifier === this.touchMoveId) {
+            const cssDx = ct.clientX - this.touchStartCssX;
+            const cssDy = ct.clientY - this.touchStartCssY;
+            const cssDist = Math.sqrt(cssDx * cssDx + cssDy * cssDy);
+            const deadZone = 8;
+
+            if (cssDist > deadZone) {
+              const norm = Math.min(cssDist / this.TOUCH_JOYSTICK_RADIUS, 1);
+              this.touchDirX = (cssDx / cssDist) * norm;
+              this.touchDirY = (cssDy / cssDist) * norm;
+            } else {
+              this.touchDirX = 0;
+              this.touchDirY = 0;
+            }
+          }
+        }
       },
       { passive: false }
     );
+
     canvas.addEventListener(
       "touchend",
       (e) => {
         e.preventDefault();
         const touch = e.changedTouches[0];
         const { mx, my } = getScaledCoords(touch.clientX, touch.clientY);
-        this.endPan();
+
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          const ct = e.changedTouches[i];
+          if (ct.identifier === this.touchMoveId) {
+            this.touchMoveId = null;
+            this.touchShipActive = false;
+            this.touchDirX = 0;
+            this.touchDirY = 0;
+          }
+        }
+
         this.touchActive = false;
-        this.handleClick(mx, my);
+        this.touchFireRequested = false;
+
+        // Check bottom bar buttons only — no tap-on-node purchasing
+        for (const area of this.clickables) {
+          if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
+            area.action();
+            saveGame(this.upgrades.save);
+            return;
+          }
+        }
+        this.panMoved = 0;
       },
       { passive: false }
     );
@@ -180,38 +299,30 @@ export class UpgradeScreen {
     this.clickables = [];
     this.hoveredNode = null;
     this.tooltip = null;
-    this.panX = 0;
-    this.panY = 0;
     this.isPanning = false;
     this.panMoved = 0;
     this.computeNodePositions();
-  }
 
-  beginPan(mx: number, my: number) {
-    this.isPanning = true;
-    this.panStartX = mx;
-    this.panStartY = my;
-    this.panStartPanX = this.panX;
-    this.panStartPanY = this.panY;
-    this.panMoved = 0;
-  }
+    // Place ship at root node
+    const rootPos = this.nodePositions.get("root");
+    if (rootPos) {
+      this.shipX = rootPos.x;
+      this.shipY = rootPos.y;
+      this.cameraX = rootPos.x;
+      this.cameraY = rootPos.y;
+      this.panX = GAME_WIDTH / 2 - this.cameraX;
+      this.panY = GAME_HEIGHT / 2 - this.cameraY;
+    }
 
-  updatePan(mx: number, my: number) {
-    if (!this.isPanning) return;
-    const dx = mx - this.panStartX;
-    const dy = my - this.panStartY;
-    this.panMoved = Math.sqrt(dx * dx + dy * dy);
-    const margin = 50;
-    const minX = -(this.CX - margin);
-    const maxX = GAME_WIDTH - this.CX - margin;
-    const minY = -(this.CY - margin);
-    const maxY = GAME_HEIGHT - this.CY - margin;
-    this.panX = Math.max(minX, Math.min(maxX, this.panStartPanX + dx));
-    this.panY = Math.max(minY, Math.min(maxY, this.panStartPanY + dy));
-  }
-
-  endPan() {
-    this.isPanning = false;
+    this.shipAngle = -Math.PI / 2;
+    this.overlappingNode = null;
+    this.interactCooldown = 0;
+    this.shockwaves = [];
+    this.trailParticles = [];
+    this.touchDirX = 0;
+    this.touchDirY = 0;
+    this.touchShipActive = false;
+    this.touchMoveId = null;
   }
 
   private hasDragged(): boolean {
@@ -246,27 +357,11 @@ export class UpgradeScreen {
     this.panMoved = 0;
     if (dragged) return;
 
+    // Check bottom bar buttons only — nodes are purchased via ship overlap + fire
     for (const area of this.clickables) {
       if (mx >= area.x && mx <= area.x + area.w && my >= area.y && my <= area.y + area.h) {
         area.action();
         saveGame(this.upgrades.save);
-        return;
-      }
-    }
-
-    const wmx = mx - this.panX;
-    const wmy = my - this.panY;
-
-    for (const node of UPGRADE_TREE) {
-      if (node.id === "root") continue;
-      if (!this.isParentMaxed(node)) continue;
-      const pos = this.nodePositions.get(node.id);
-      if (!pos) continue;
-      const dx = wmx - pos.x;
-      const dy = wmy - pos.y;
-      const hitRadius = this.NODE_RADIUS * 1.8;
-      if (dx * dx + dy * dy <= hitRadius * hitRadius) {
-        this.tryPurchaseNode(node);
         return;
       }
     }
@@ -285,24 +380,53 @@ export class UpgradeScreen {
         color: BRANCH_COLORS[node.branch],
       };
 
-      // Spawn celebration sparkles
+      // Purchase shockwave
       const pos = this.nodePositions.get(node.id);
       if (pos) {
-        for (let i = 0; i < 12; i++) {
-          const angle = (Math.PI * 2 * i) / 12 + Math.random() * 0.3;
-          const speed = 30 + Math.random() * 50;
+        this.shockwaves.push({
+          x: pos.x,
+          y: pos.y,
+          timer: 0.35,
+          maxTimer: 0.35,
+          color: BRANCH_COLORS[node.branch],
+        });
+
+        // Celebration sparkles
+        for (let i = 0; i < 16; i++) {
+          const angle = (Math.PI * 2 * i) / 16 + Math.random() * 0.3;
+          const speed = 40 + Math.random() * 60;
           this.sparkles.push({
             x: pos.x,
             y: pos.y,
             vx: Math.cos(angle) * speed,
             vy: Math.sin(angle) * speed,
-            life: 0.5 + Math.random() * 0.4,
-            maxLife: 0.9,
-            size: 1.5 + Math.random() * 2,
+            life: 0.6 + Math.random() * 0.4,
+            maxLife: 1.0,
+            size: 1.5 + Math.random() * 2.5,
           });
         }
       }
 
+      // Ship purchase pulse — makes the player ship glow with the branch color
+      this.shipPurchasePulse = 0.5;
+      this.shipPurchaseColor = BRANCH_COLORS[node.branch];
+
+      // Emit sparkles around the ship too
+      for (let i = 0; i < 10; i++) {
+        const angle = (Math.PI * 2 * i) / 10 + Math.random() * 0.4;
+        const speed = 30 + Math.random() * 50;
+        this.sparkles.push({
+          x: this.shipX,
+          y: this.shipY,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 0.4 + Math.random() * 0.3,
+          maxLife: 0.7,
+          size: 1.5 + Math.random() * 2,
+        });
+      }
+
+      // Auto-switch to chill on Scythe purchase
       if (node.id === "dmg_overclock" && this.manager.audio) {
         const audio = this.manager.audio;
         if (audio.track !== "chill") {
@@ -337,6 +461,109 @@ export class UpgradeScreen {
     this.time += dt;
     this.connectionDashOffset += dt * 12;
 
+    /* ── Ship movement from keyboard ── */
+    let dx = 0;
+    let dy = 0;
+    if (this.shipKeys.has("w") || this.shipKeys.has("arrowup")) dy -= 1;
+    if (this.shipKeys.has("s") || this.shipKeys.has("arrowdown")) dy += 1;
+    if (this.shipKeys.has("a") || this.shipKeys.has("arrowleft")) dx -= 1;
+    if (this.shipKeys.has("d") || this.shipKeys.has("arrowright")) dx += 1;
+
+    // Touch joystick overrides keyboard if active
+    if (
+      this.touchShipActive &&
+      (Math.abs(this.touchDirX) > 0.05 || Math.abs(this.touchDirY) > 0.05)
+    ) {
+      dx = this.touchDirX;
+      dy = this.touchDirY;
+    }
+
+    // Mouse-follow: ship moves toward cursor in world-space (desktop only, no keyboard/touch active)
+    const hasKeyboard = dx !== 0 || dy !== 0;
+    if (!hasKeyboard && !this.touchShipActive) {
+      const worldMouseX = this.mouseX - this.panX;
+      const worldMouseY = this.mouseY - this.panY;
+      const toMouseX = worldMouseX - this.shipX;
+      const toMouseY = worldMouseY - this.shipY;
+      const mouseDist = Math.sqrt(toMouseX * toMouseX + toMouseY * toMouseY);
+      const deadZone = 8; // don't jitter when very close
+      if (mouseDist > deadZone) {
+        dx = toMouseX / mouseDist;
+        dy = toMouseY / mouseDist;
+        // Slow down as we approach to avoid overshooting
+        const approachSpeed = Math.min(1, mouseDist / 60);
+        dx *= approachSpeed;
+        dy *= approachSpeed;
+      }
+    }
+
+    const len = Math.sqrt(dx * dx + dy * dy);
+    if (len > 1) {
+      dx /= len;
+      dy /= len;
+    }
+
+    this.shipMoving = len > 0.05;
+    if (this.shipMoving) {
+      this.shipX += dx * this.SHIP_SPEED * dt;
+      this.shipY += dy * this.SHIP_SPEED * dt;
+      this.shipAngle = Math.atan2(dy, dx);
+
+      // Engine trail particles
+      if (Math.random() < dt * 30) {
+        const backAngle = this.shipAngle + Math.PI;
+        const spread = (Math.random() - 0.5) * 0.8;
+        this.trailParticles.push({
+          x: this.shipX + Math.cos(backAngle) * 12,
+          y: this.shipY + Math.sin(backAngle) * 12,
+          vx: Math.cos(backAngle + spread) * (30 + Math.random() * 40),
+          vy: Math.sin(backAngle + spread) * (30 + Math.random() * 40),
+          life: 0.3 + Math.random() * 0.2,
+          maxLife: 0.5,
+          size: 1.2 + Math.random() * 1.5,
+        });
+      }
+    }
+
+    // Clamp ship to world bounds
+    const extent = this.DEPTH_SPACING * 5 + 300;
+    this.shipX = Math.max(this.CX - extent, Math.min(this.CX + extent, this.shipX));
+    this.shipY = Math.max(this.CY - extent, Math.min(this.CY + extent, this.shipY));
+
+    /* ── Camera follow ── */
+    this.cameraX += (this.shipX - this.cameraX) * this.CAMERA_LERP;
+    this.cameraY += (this.shipY - this.cameraY) * this.CAMERA_LERP;
+    this.panX = GAME_WIDTH / 2 - this.cameraX;
+    this.panY = GAME_HEIGHT / 2 - this.cameraY;
+
+    /* ── Ship-to-node collision ── */
+    this.overlappingNode = null;
+    this.interactCooldown = Math.max(0, this.interactCooldown - dt);
+
+    for (const node of UPGRADE_TREE) {
+      if (node.id === "root") continue;
+      if (!this.isParentMaxed(node)) continue;
+      const pos = this.nodePositions.get(node.id);
+      if (!pos) continue;
+      const ddx = this.shipX - pos.x;
+      const ddy = this.shipY - pos.y;
+      const touchDist = this.SHIP_RADIUS + this.NODE_RADIUS;
+      if (ddx * ddx + ddy * ddy <= touchDist * touchDist) {
+        this.overlappingNode = node;
+        this.tooltip = { node, x: pos.x, y: pos.y };
+        break;
+      }
+    }
+
+    // Fire to purchase (space/enter on keyboard, or touch fire zone)
+    const firePressed =
+      this.shipKeys.has("shift") || this.shipKeys.has("enter") || this.touchFireRequested;
+    if (this.overlappingNode && firePressed && this.interactCooldown <= 0) {
+      this.tryPurchaseNode(this.overlappingNode);
+      this.interactCooldown = 0.4;
+    }
+
+    /* ── Timers ── */
     if (this.cantAffordShake && this.cantAffordShake.timer > 0) {
       this.cantAffordShake.timer -= dt;
       if (this.cantAffordShake.timer <= 0) this.cantAffordShake = null;
@@ -350,7 +577,29 @@ export class UpgradeScreen {
       if (this.purchaseFlash.timer <= 0) this.purchaseFlash = null;
     }
 
-    // Update sparkles
+    /* ── Ship purchase pulse ── */
+    if (this.shipPurchasePulse > 0) {
+      this.shipPurchasePulse -= dt;
+    }
+
+    /* ── Shockwaves ── */
+    for (let i = this.shockwaves.length - 1; i >= 0; i--) {
+      this.shockwaves[i].timer -= dt;
+      if (this.shockwaves[i].timer <= 0) this.shockwaves.splice(i, 1);
+    }
+
+    /* ── Trail particles ── */
+    for (let i = this.trailParticles.length - 1; i >= 0; i--) {
+      const p = this.trailParticles[i];
+      p.life -= dt;
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+      p.vx *= 0.92;
+      p.vy *= 0.92;
+      if (p.life <= 0) this.trailParticles.splice(i, 1);
+    }
+
+    /* ── Sparkles ── */
     for (let i = this.sparkles.length - 1; i >= 0; i--) {
       const s = this.sparkles[i];
       s.life -= dt;
@@ -361,7 +610,7 @@ export class UpgradeScreen {
       if (s.life <= 0) this.sparkles.splice(i, 1);
     }
 
-    // Spawn ambient sparkles on maxed nodes
+    // Ambient sparkles on maxed nodes
     if (Math.random() < dt * 3) {
       for (const node of UPGRADE_TREE) {
         if (node.id === "root") continue;
@@ -379,7 +628,7 @@ export class UpgradeScreen {
           vy: -10 - Math.random() * 20,
           life: 0.6 + Math.random() * 0.6,
           maxLife: 1.2,
-          size: 1 + Math.random() * 1.5,
+          size: 1.2 + Math.random() * 2.0,
         });
       }
     }
@@ -395,7 +644,7 @@ export class UpgradeScreen {
     // Subtle dark vignette overlay — lets cosmic bg shine through
     this.renderBackdrop(ctx);
 
-    // Header
+    // Header (screen-space)
     this.renderHeader(renderer, ctx);
 
     // Pan offset for world-space tree
@@ -403,13 +652,26 @@ export class UpgradeScreen {
     ctx.translate(this.panX, this.panY);
     this.renderConnections(ctx);
     this.renderNodes(renderer, ctx);
+    this.renderShockwaves(ctx);
     this.renderSparkles(ctx);
+    this.renderTrailParticles(ctx);
+    this.renderShip(ctx);
     ctx.restore();
 
     // Tooltip (screen-space)
     this.renderTooltip(renderer, ctx);
 
-    // Bottom bar
+    // Touch joystick indicator (screen-space)
+    if (this.touchShipActive) {
+      this.renderTouchJoystick(ctx);
+    }
+
+    // Overlapping node prompt (screen-space)
+    if (this.overlappingNode) {
+      this.renderInteractPrompt(ctx);
+    }
+
+    // Bottom bar (screen-space)
     this.renderBottomBar(renderer, ctx);
 
     // Can't-afford message
@@ -422,11 +684,9 @@ export class UpgradeScreen {
    *  BACKDROP — soft vignette over cosmic bg
    * ──────────────────────────────────────────── */
   private renderBackdrop(ctx: CanvasRenderingContext2D) {
-    // Very subtle dark wash — most of the cosmic bg shows through
     ctx.fillStyle = "rgba(4, 4, 14, 0.45)";
     ctx.fillRect(0, 0, GAME_WIDTH, GAME_HEIGHT);
 
-    // Radial vignette — darker at edges, lighter at center where tree is
     const vignette = ctx.createRadialGradient(
       GAME_WIDTH / 2,
       GAME_HEIGHT / 2,
@@ -446,16 +706,14 @@ export class UpgradeScreen {
    *  HEADER — title + currency bar
    * ──────────────────────────────────────────── */
   private renderHeader(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    // Frosted top strip
-    const stripH = 52;
+    const stripH = 56;
     const grad = ctx.createLinearGradient(0, 0, 0, stripH);
-    grad.addColorStop(0, "rgba(6, 8, 22, 0.8)");
+    grad.addColorStop(0, "rgba(6, 8, 22, 0.85)");
     grad.addColorStop(0.7, "rgba(6, 8, 22, 0.5)");
     grad.addColorStop(1, "rgba(6, 8, 22, 0)");
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, GAME_WIDTH, stripH);
 
-    // Thin accent line at bottom of strip
     ctx.strokeStyle = "rgba(0, 180, 255, 0.12)";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -464,11 +722,11 @@ export class UpgradeScreen {
     ctx.stroke();
 
     // Title
+    const mob = isMobileDevice;
     ctx.save();
-    ctx.font = "bold 16px Tektur";
+    ctx.font = mob ? "bold 24px Tektur" : "bold 18px Tektur";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    // Glow
     ctx.shadowColor = "rgba(0, 200, 255, 0.4)";
     ctx.shadowBlur = 12;
     ctx.fillStyle = COLORS.player;
@@ -478,16 +736,16 @@ export class UpgradeScreen {
     ctx.restore();
 
     // Currency chips
-    const chipY = 35 + 64;
-    const chipH = 16;
-    const chipR = 8;
+    const chipY = 38 + 64;
+    const chipH = 18;
+    const chipR = 9;
 
     // Coins chip
     const coinsText = `${this.upgrades.save.coins}`;
     ctx.save();
-    ctx.font = "bold 10px Tektur";
-    const coinsW = ctx.measureText(coinsText).width + 32;
-    const coinsX = GAME_WIDTH / 2 - coinsW - 50;
+    ctx.font = "bold 11px Tektur";
+    const coinsW = ctx.measureText(coinsText).width + 34;
+    const coinsX = GAME_WIDTH / 2 - coinsW - 55;
     this.drawChip(
       ctx,
       coinsX,
@@ -498,20 +756,20 @@ export class UpgradeScreen {
       "rgba(255,200,0,0.12)",
       "rgba(255,200,0,0.3)"
     );
-    ctx.font = "bold 10px Tektur";
+    ctx.font = "bold 11px Tektur";
     ctx.fillStyle = "#ffcc00";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText("💰", coinsX + 6, chipY + chipH / 2);
     ctx.fillStyle = COLORS.textGold;
-    ctx.fillText(coinsText, coinsX + 22, chipY + chipH / 2);
+    ctx.fillText(coinsText, coinsX + 24, chipY + chipH / 2);
     ctx.restore();
 
     // Stars chip
     const starsText = `${this.upgrades.save.starCoins ?? 0}`;
     ctx.save();
-    ctx.font = "bold 10px Tektur";
-    const starsW = ctx.measureText(starsText).width + 32;
+    ctx.font = "bold 11px Tektur";
+    const starsW = ctx.measureText(starsText).width + 34;
     const starsX = GAME_WIDTH / 2 - 20;
     this.drawChip(
       ctx,
@@ -523,21 +781,21 @@ export class UpgradeScreen {
       "rgba(170,130,255,0.12)",
       "rgba(170,130,255,0.3)"
     );
-    ctx.font = "bold 10px Tektur";
+    ctx.font = "bold 11px Tektur";
     ctx.fillStyle = "#bb88ff";
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
     ctx.fillText("⭐", starsX + 6, chipY + chipH / 2);
     ctx.fillStyle = "#bb88ff";
-    ctx.fillText(starsText, starsX + 22, chipY + chipH / 2);
+    ctx.fillText(starsText, starsX + 24, chipY + chipH / 2);
     ctx.restore();
 
     // Level chip
     const lvlText = `LV ${this.upgrades.save.currentLevel ?? 1}`;
     ctx.save();
-    ctx.font = "bold 10px Tektur";
-    const lvlW = ctx.measureText(lvlText).width + 18;
-    const lvlX = GAME_WIDTH / 2 + 50;
+    ctx.font = "bold 11px Tektur";
+    const lvlW = ctx.measureText(lvlText).width + 20;
+    const lvlX = GAME_WIDTH / 2 + 55;
     this.drawChip(
       ctx,
       lvlX,
@@ -548,7 +806,7 @@ export class UpgradeScreen {
       "rgba(0,180,255,0.12)",
       "rgba(0,180,255,0.3)"
     );
-    ctx.font = "bold 10px Tektur";
+    ctx.font = "bold 11px Tektur";
     ctx.fillStyle = COLORS.player;
     ctx.textAlign = "left";
     ctx.textBaseline = "middle";
@@ -596,9 +854,9 @@ export class UpgradeScreen {
         // Purchased path — solid luminous line with glow
         ctx.save();
         ctx.shadowColor = branchColor;
-        ctx.shadowBlur = 6;
+        ctx.shadowBlur = 8;
         ctx.strokeStyle = this.renderer.hexToRgba(branchColor, 0.6);
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
@@ -608,7 +866,7 @@ export class UpgradeScreen {
 
         // Bright core line
         ctx.strokeStyle = this.renderer.hexToRgba(branchColor, 0.25);
-        ctx.lineWidth = 4;
+        ctx.lineWidth = 5;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
@@ -616,10 +874,10 @@ export class UpgradeScreen {
       } else {
         // Available but unpurchased — animated dashed line
         ctx.save();
-        ctx.setLineDash([4, 6]);
+        ctx.setLineDash([5, 7]);
         ctx.lineDashOffset = -this.connectionDashOffset;
         ctx.strokeStyle = "rgba(255,255,255,0.12)";
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.moveTo(parentPos.x, parentPos.y);
         ctx.lineTo(childPos.x, childPos.y);
@@ -628,10 +886,6 @@ export class UpgradeScreen {
         ctx.restore();
       }
     }
-  }
-
-  renderBranchLabels(_renderer: Renderer) {
-    // Intentionally empty — labels are integrated into tooltip
   }
 
   /* ────────────────────────────────────────────
@@ -650,13 +904,14 @@ export class UpgradeScreen {
       const canBuy = unlocked && !maxed && this.upgrades.canAfford(cost);
       const isRoot = node.id === "root";
       const branchColor = BRANCH_COLORS[node.branch];
+      const isOverlapping = this.overlappingNode?.id === node.id;
 
-      const r = isRoot ? this.NODE_RADIUS + 6 : this.NODE_RADIUS;
+      const r = isRoot ? this.NODE_RADIUS + 8 : this.NODE_RADIUS;
 
       // Gentle float animation
       const nodeIdx = UPGRADE_TREE.indexOf(node);
       const phase = nodeIdx * 1.3;
-      const bobAmp = isRoot ? 2.5 : 1.5;
+      const bobAmp = isRoot ? 3.5 : 2.0;
       const bobSpeed = isRoot ? 1.0 : 0.8 + (nodeIdx % 3) * 0.12;
       const bobY = Math.sin(this.time * bobSpeed + phase) * bobAmp;
       const bobX = Math.cos(this.time * bobSpeed * 0.6 + phase) * bobAmp * 0.4;
@@ -693,8 +948,17 @@ export class UpgradeScreen {
 
       // Outer glow aura (varies by state)
       ctx.save();
-      if (maxed) {
-        // Gold aura
+      if (isOverlapping) {
+        // Bright white aura when ship is touching
+        const auraGrad = ctx.createRadialGradient(nx, ny, r * 0.4, nx, ny, r * 2.5);
+        auraGrad.addColorStop(0, `rgba(255, 255, 255, ${0.15 + pulse * 0.1})`);
+        auraGrad.addColorStop(0.5, this.renderer.hexToRgba(branchColor, 0.08 + pulse * 0.06));
+        auraGrad.addColorStop(1, "rgba(0,0,0,0)");
+        ctx.fillStyle = auraGrad;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r * 2.5, 0, Math.PI * 2);
+        ctx.fill();
+      } else if (maxed) {
         const auraGrad = ctx.createRadialGradient(nx, ny, r * 0.5, nx, ny, r * 2.2);
         auraGrad.addColorStop(0, `rgba(255, 210, 0, ${0.08 + pulse * 0.06})`);
         auraGrad.addColorStop(0.5, `rgba(255, 180, 0, ${0.03 + pulse * 0.03})`);
@@ -704,7 +968,6 @@ export class UpgradeScreen {
         ctx.arc(nx, ny, r * 2.2, 0, Math.PI * 2);
         ctx.fill();
       } else if (canBuy) {
-        // White breathing aura for purchasable
         const auraGrad = ctx.createRadialGradient(nx, ny, r * 0.6, nx, ny, r * 1.8);
         auraGrad.addColorStop(0, `rgba(255, 255, 255, ${0.06 + pulse * 0.08})`);
         auraGrad.addColorStop(1, "rgba(0,0,0,0)");
@@ -713,7 +976,6 @@ export class UpgradeScreen {
         ctx.arc(nx, ny, r * 1.8, 0, Math.PI * 2);
         ctx.fill();
       } else if (level > 0) {
-        // Branch-colored soft aura for partially purchased
         const auraGrad = ctx.createRadialGradient(nx, ny, r * 0.5, nx, ny, r * 1.6);
         auraGrad.addColorStop(0, this.renderer.hexToRgba(branchColor, 0.06 + pulse * 0.04));
         auraGrad.addColorStop(1, "rgba(0,0,0,0)");
@@ -744,38 +1006,44 @@ export class UpgradeScreen {
       ctx.restore();
 
       // Ring / progress arc
-      if (maxed) {
-        // Gold hexagonal border
+      if (isOverlapping) {
+        // Bright pulsing highlight ring when ship overlaps
+        ctx.save();
+        ctx.shadowColor = branchColor;
+        ctx.shadowBlur = 12 + pulse * 8;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.7 + pulse * 0.3})`;
+        ctx.lineWidth = 2.5;
+        ctx.beginPath();
+        ctx.arc(nx, ny, r + 2, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      } else if (maxed) {
         ctx.save();
         ctx.shadowColor = "#ffd700";
         ctx.shadowBlur = 8 + pulse * 6;
         this.drawHexagon(ctx, nx, ny, r + 1, "transparent", "#ffd700", 1.5);
         ctx.restore();
       } else if (level > 0) {
-        // Progress arc — branch color, partial fill
         const progressRatio = level / node.maxLevel;
         const progressAngle = progressRatio * Math.PI * 2;
 
-        // Background ring (dim)
         ctx.strokeStyle = "rgba(255,255,255,0.06)";
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
 
-        // Filled arc
         ctx.save();
         ctx.shadowColor = branchColor;
         ctx.shadowBlur = 4 + pulse * 4;
         ctx.strokeStyle = branchColor;
-        ctx.lineWidth = 2.5;
+        ctx.lineWidth = 3;
         ctx.lineCap = "round";
         ctx.beginPath();
         ctx.arc(nx, ny, r, -Math.PI / 2, -Math.PI / 2 + progressAngle);
         ctx.stroke();
         ctx.restore();
       } else if (canBuy) {
-        // Pulsing white ring — "buy me!"
         ctx.save();
         ctx.shadowColor = "rgba(255,255,255,0.6)";
         ctx.shadowBlur = 4 + pulse * 8;
@@ -786,14 +1054,12 @@ export class UpgradeScreen {
         ctx.stroke();
         ctx.restore();
       } else if (unlocked) {
-        // Dim red ring — can't afford
         ctx.strokeStyle = `rgba(255, 60, 60, ${0.25 + pulse * 0.15})`;
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.arc(nx, ny, r, 0, Math.PI * 2);
         ctx.stroke();
       } else {
-        // Very dim ring — locked
         ctx.strokeStyle = "rgba(255,255,255,0.06)";
         ctx.lineWidth = 1;
         ctx.beginPath();
@@ -801,22 +1067,9 @@ export class UpgradeScreen {
         ctx.stroke();
       }
 
-      // Icon
+      // Icon — canvas-drawn neon-geometric symbols
       const iconAlpha = maxed ? 1.0 : level > 0 ? 0.85 : canBuy ? 0.7 : unlocked ? 0.4 : 0.2;
-      ctx.save();
-      ctx.globalAlpha = iconAlpha;
-      const svgImg = node.iconPath ? this.iconImages.get(node.iconPath) : null;
-      if (svgImg && svgImg.complete && svgImg.naturalWidth > 0) {
-        const iconSize = r * 1.4;
-        ctx.drawImage(svgImg, nx - iconSize / 2, ny - iconSize / 2, iconSize, iconSize);
-      } else {
-        ctx.font = "12px Tektur";
-        ctx.fillStyle = "#fff";
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-        ctx.fillText(node.icon, nx, ny);
-      }
-      ctx.restore();
+      drawUpgradeIcon(ctx, node.id, nx, ny, r * 0.7, branchColor, iconAlpha);
 
       // Purchase flash overlay
       if (hasFlash) {
@@ -833,26 +1086,22 @@ export class UpgradeScreen {
       if (level > 0) {
         const lvlText = maxed ? "MAX" : `${level}/${node.maxLevel}`;
         ctx.save();
-        ctx.font = "bold 7px Tektur";
+        ctx.font = "bold 9px Tektur";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
-        if (maxed) {
-          ctx.fillStyle = "#ffd700";
-        } else {
-          ctx.fillStyle = branchColor;
-        }
-        ctx.fillText(lvlText, nx, ny + r + 5);
+        ctx.fillStyle = maxed ? "#ffd700" : branchColor;
+        ctx.fillText(lvlText, nx, ny + r + 6);
         ctx.restore();
       }
 
       // Cost badge (below node, for unpurchased affordable nodes)
       if (level === 0 && canBuy) {
         ctx.save();
-        ctx.font = "bold 7px Tektur";
+        ctx.font = "bold 9px Tektur";
         ctx.textAlign = "center";
         ctx.textBaseline = "top";
         ctx.fillStyle = "rgba(255, 200, 0, 0.7)";
-        ctx.fillText(`${cost}💰`, nx, ny + r + 5);
+        ctx.fillText(`${cost}💰`, nx, ny + r + 6);
         ctx.restore();
       }
     }
@@ -886,7 +1135,7 @@ export class UpgradeScreen {
     for (let i = 0; i < 3; i++) {
       const segAngle = this.time * 0.5 + (i * Math.PI * 2) / 3;
       ctx.beginPath();
-      ctx.arc(nx, ny, r + 4, segAngle, segAngle + Math.PI * 0.4);
+      ctx.arc(nx, ny, r + 5, segAngle, segAngle + Math.PI * 0.4);
       ctx.stroke();
     }
     ctx.restore();
@@ -897,31 +1146,145 @@ export class UpgradeScreen {
     ctx.fillStyle = "rgba(5, 10, 20, 0.85)";
     ctx.fill();
 
-    // Player sprite
-    const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
-    ctx.save();
-    if (sprite) {
-      ctx.shadowColor = COLORS.player;
-      ctx.shadowBlur = 10 + pulse * 8;
-      const spriteSize = r * 2;
-      ctx.drawImage(sprite, nx - spriteSize / 2, ny - spriteSize / 2, spriteSize, spriteSize);
-    } else {
-      ctx.shadowColor = COLORS.player;
-      ctx.shadowBlur = 10;
-      ctx.fillStyle = COLORS.player;
-      ctx.font = "bold 18px Tektur";
-      ctx.textAlign = "center";
-      ctx.textBaseline = "middle";
-      ctx.fillText("⬡", nx, ny);
-    }
-    ctx.restore();
-
     if (hasFlash) {
       ctx.save();
       ctx.globalAlpha = flashAlpha * 0.4;
       ctx.beginPath();
       ctx.arc(nx, ny, r * 1.5, 0, Math.PI * 2);
       ctx.fillStyle = COLORS.player;
+      ctx.fill();
+      ctx.restore();
+    }
+  }
+
+  /* ────────────────────────────────────────────
+   *  SHIP — player sprite flying around the map
+   * ──────────────────────────────────────────── */
+  private renderShip(ctx: CanvasRenderingContext2D) {
+    const hasPulse = this.shipPurchasePulse > 0;
+    const pulseAlpha = hasPulse ? this.shipPurchasePulse / 0.5 : 0;
+
+    // ── Purchase pulse: expanding glow ring + radial aura (drawn before rotation) ──
+    if (hasPulse) {
+      ctx.save();
+      const expandProgress = 1 - pulseAlpha; // 0→1
+      const ringRadius = 20 + expandProgress * 30;
+      const color = this.shipPurchaseColor || COLORS.player;
+
+      // Radial glow aura
+      const aura = ctx.createRadialGradient(
+        this.shipX,
+        this.shipY,
+        4,
+        this.shipX,
+        this.shipY,
+        ringRadius * 1.5
+      );
+      aura.addColorStop(0, this.renderer.hexToRgba(color, pulseAlpha * 0.35));
+      aura.addColorStop(0.5, this.renderer.hexToRgba(color, pulseAlpha * 0.12));
+      aura.addColorStop(1, "rgba(0,0,0,0)");
+      ctx.fillStyle = aura;
+      ctx.beginPath();
+      ctx.arc(this.shipX, this.shipY, ringRadius * 1.5, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Expanding ring
+      ctx.globalAlpha = pulseAlpha * 0.8;
+      ctx.strokeStyle = color;
+      ctx.shadowColor = color;
+      ctx.shadowBlur = 14;
+      ctx.lineWidth = 2.5 * pulseAlpha;
+      ctx.beginPath();
+      ctx.arc(this.shipX, this.shipY, ringRadius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner bright ring
+      ctx.globalAlpha = pulseAlpha * 0.5;
+      ctx.strokeStyle = "#ffffff";
+      ctx.shadowColor = "#ffffff";
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = 1.5 * pulseAlpha;
+      ctx.beginPath();
+      ctx.arc(this.shipX, this.shipY, ringRadius * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(this.shipX, this.shipY);
+    ctx.rotate(this.shipAngle + Math.PI / 2); // sprite faces up, rotate to movement dir
+
+    const sprite = imageReady(PlayerImages.glider) ? PlayerImages.glider : null;
+    if (sprite) {
+      const sw = 24;
+      const sh = 36;
+      // Glow — amplified during purchase pulse
+      const pulseColor = hasPulse ? this.shipPurchaseColor : COLORS.player;
+      ctx.shadowColor = pulseColor;
+      ctx.shadowBlur = 14 + (this.shipMoving ? 6 : 0) + (hasPulse ? pulseAlpha * 24 : 0);
+      ctx.drawImage(sprite, -sw / 2, -sh / 2, sw, sh);
+      ctx.shadowBlur = 0;
+    } else {
+      // Fallback triangle
+      ctx.shadowColor = COLORS.player;
+      ctx.shadowBlur = 10;
+      ctx.fillStyle = COLORS.player;
+      ctx.beginPath();
+      ctx.moveTo(0, -14);
+      ctx.lineTo(8, 10);
+      ctx.lineTo(-8, 10);
+      ctx.closePath();
+      ctx.fill();
+      ctx.shadowBlur = 0;
+    }
+    ctx.restore();
+  }
+
+  /* ────────────────────────────────────────────
+   *  SHOCKWAVES — expanding rings on purchase
+   * ──────────────────────────────────────────── */
+  private renderShockwaves(ctx: CanvasRenderingContext2D) {
+    for (const sw of this.shockwaves) {
+      const progress = 1 - sw.timer / sw.maxTimer;
+      const radius = this.NODE_RADIUS * (1 + progress * 2.5);
+      const alpha = 1 - progress;
+
+      ctx.save();
+      // Outer ring
+      ctx.strokeStyle = sw.color;
+      ctx.globalAlpha = alpha * 0.8;
+      ctx.shadowColor = sw.color;
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = 3 * (1 - progress);
+      ctx.beginPath();
+      ctx.arc(sw.x, sw.y, radius, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner ring
+      ctx.globalAlpha = alpha * 0.4;
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(sw.x, sw.y, radius * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+  }
+
+  /* ────────────────────────────────────────────
+   *  TRAIL PARTICLES — engine exhaust behind ship
+   * ──────────────────────────────────────────── */
+  private renderTrailParticles(ctx: CanvasRenderingContext2D) {
+    for (const p of this.trailParticles) {
+      const alpha = Math.max(0, p.life / p.maxLife);
+      ctx.save();
+      ctx.globalAlpha = alpha * 0.7;
+      ctx.fillStyle = COLORS.player;
+      ctx.shadowColor = COLORS.player;
+      ctx.shadowBlur = 3;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * alpha, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }
@@ -946,29 +1309,80 @@ export class UpgradeScreen {
   }
 
   /* ────────────────────────────────────────────
+   *  TOUCH JOYSTICK — visual indicator
+   * ──────────────────────────────────────────── */
+  private renderTouchJoystick(ctx: CanvasRenderingContext2D) {
+    const bx = this.touchBaseX;
+    const by = this.touchBaseY;
+    const tx = bx + this.touchDirX * 30;
+    const ty = by + this.touchDirY * 30;
+
+    // Base ring
+    ctx.save();
+    ctx.globalAlpha = 0.2;
+    ctx.strokeStyle = COLORS.player;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(bx, by, 35, 0, Math.PI * 2);
+    ctx.stroke();
+
+    // Thumb dot
+    ctx.globalAlpha = 0.5;
+    ctx.fillStyle = COLORS.player;
+    ctx.beginPath();
+    ctx.arc(tx, ty, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /* ────────────────────────────────────────────
+   *  INTERACT PROMPT — "SPACE to buy" hint
+   * ──────────────────────────────────────────── */
+  private renderInteractPrompt(ctx: CanvasRenderingContext2D) {
+    const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+    const promptText = isTouchDevice ? "TAP RIGHT SIDE TO BUY" : "DASH TO BUY";
+    const promptY = GAME_HEIGHT - (isTouchDevice ? 170 : 150);
+
+    ctx.save();
+    ctx.font = isTouchDevice ? "bold 16px Tektur" : "bold 11px Tektur";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    const pulse = (Math.sin(this.time * 4) + 1) / 2;
+    ctx.fillStyle = `rgba(0, 200, 255, ${0.5 + pulse * 0.5})`;
+    ctx.shadowColor = COLORS.player;
+    ctx.shadowBlur = 6;
+    ctx.fillText(promptText, GAME_WIDTH / 2, promptY);
+    ctx.restore();
+  }
+
+  /* ────────────────────────────────────────────
    *  TOOLTIP — floating info panel
    * ──────────────────────────────────────────── */
   renderTooltip(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
-    if (isTouchDevice && !this.touchActive) return;
+    // Show tooltip for overlapping node (ship collision) or mouse hover
+    let closest: UpgradeNode | null = this.overlappingNode;
 
-    const wx = this.mouseX - this.panX;
-    const wy = this.mouseY - this.panY;
+    if (!closest) {
+      const isTouchDevice = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+      if (isTouchDevice && !this.touchActive) return;
 
-    let closest: UpgradeNode | null = null;
-    let closestDist = Infinity;
+      const wx = this.mouseX - this.panX;
+      const wy = this.mouseY - this.panY;
 
-    for (const node of UPGRADE_TREE) {
-      if (node.id === "root") continue;
-      if (!this.isParentMaxed(node)) continue;
-      const pos = this.nodePositions.get(node.id);
-      if (!pos) continue;
-      const dx = wx - pos.x;
-      const dy = wy - pos.y;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist < this.NODE_RADIUS * 2.5 && dist < closestDist) {
-        closestDist = dist;
-        closest = node;
+      let closestDist = Infinity;
+      for (const node of UPGRADE_TREE) {
+        if (node.id === "root") continue;
+        if (!this.isParentMaxed(node)) continue;
+        const pos = this.nodePositions.get(node.id);
+        if (!pos) continue;
+        const dx = wx - pos.x;
+        const dy = wy - pos.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist < this.NODE_RADIUS * 5 && dist < closestDist) {
+          closestDist = dist;
+          closest = node;
+        }
       }
     }
 
@@ -980,24 +1394,21 @@ export class UpgradeScreen {
     const cost = maxed ? 0 : getUpgradeCost(closest, level);
     const branchColor = BRANCH_COLORS[closest.branch];
 
-    // Panel dimensions
-    const panelW = 300;
-    const panelH = 72;
+    // Panel dimensions (scaled up)
+    const panelW = 340;
+    const panelH = 84;
     const margin = 20;
 
-    // Position near the node but clamped to screen
     const nodePos = this.nodePositions.get(closest.id)!;
-    let panelX = nodePos.x + this.panX + this.NODE_RADIUS + 15;
+    let panelX = nodePos.x + this.panX + this.NODE_RADIUS + 18;
     let panelY = nodePos.y + this.panY - panelH / 2;
 
-    // Clamp to screen
     if (panelX + panelW > GAME_WIDTH - margin) {
-      panelX = nodePos.x + this.panX - this.NODE_RADIUS - panelW - 15;
+      panelX = nodePos.x + this.panX - this.NODE_RADIUS - panelW - 18;
     }
     panelX = Math.max(margin, Math.min(GAME_WIDTH - panelW - margin, panelX));
     panelY = Math.max(60, Math.min(GAME_HEIGHT - panelH - 50, panelY));
 
-    // Panel background
     renderer.drawPanel(panelX, panelY, panelW, panelH, {
       bg: "rgba(8, 8, 24, 0.92)",
       border: renderer.hexToRgba(branchColor, 0.3),
@@ -1015,7 +1426,7 @@ export class UpgradeScreen {
 
     // Name
     ctx.save();
-    ctx.font = "bold 12px Tektur";
+    ctx.font = "bold 14px Tektur";
     ctx.fillStyle = branchColor;
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
@@ -1024,42 +1435,45 @@ export class UpgradeScreen {
 
     // Level badge
     ctx.save();
-    ctx.font = "bold 10px Tektur";
+    ctx.font = "bold 11px Tektur";
     ctx.fillStyle = maxed ? "#ffd700" : "rgba(200,210,230,0.6)";
     ctx.textAlign = "right";
     ctx.textBaseline = "top";
-    ctx.fillText(`${level}/${closest.maxLevel}`, panelX + panelW - 10, panelY + 11);
+    ctx.fillText(`${level}/${closest.maxLevel}`, panelX + panelW - 12, panelY + 12);
     ctx.restore();
 
     // Description
     ctx.save();
-    ctx.font = "9px Tektur";
+    ctx.font = "10px Tektur";
     ctx.fillStyle = "rgba(180, 195, 220, 0.8)";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
-    ctx.fillText(closest.description, panelX + 14, panelY + 28);
+    ctx.fillText(closest.description, panelX + 14, panelY + 32);
     ctx.restore();
 
     // Status line
     ctx.save();
-    ctx.font = "bold 9px Tektur";
+    ctx.font = "bold 10px Tektur";
     ctx.textAlign = "left";
     ctx.textBaseline = "top";
     if (!unlocked) {
       const reqText = this.getRequirementText(closest);
       ctx.fillStyle = "rgba(180, 80, 80, 0.8)";
-      ctx.fillText(`🔒 ${reqText}`, panelX + 14, panelY + 48);
+      ctx.fillText(`🔒 ${reqText}`, panelX + 14, panelY + 56);
     } else if (maxed) {
       ctx.fillStyle = "#ffd700";
-      ctx.fillText("✓ MAXED", panelX + 14, panelY + 48);
+      ctx.fillText("✓ MAXED", panelX + 14, panelY + 56);
     } else {
       const canBuy = this.upgrades.canAfford(cost);
       ctx.fillStyle = canBuy ? COLORS.textGold : "rgba(180, 80, 80, 0.8)";
-      ctx.fillText(
-        `💰 ${cost}  ·  Tap to ${canBuy ? "buy" : "purchase"}`,
-        panelX + 14,
-        panelY + 48
-      );
+      const action = this.overlappingNode
+        ? canBuy
+          ? "Dash to buy"
+          : "Can't afford"
+        : canBuy
+          ? "Fly here to buy"
+          : "Can't afford";
+      ctx.fillText(`💰 ${cost}  ·  ${action}`, panelX + 14, panelY + 56);
     }
     ctx.restore();
   }
@@ -1068,7 +1482,6 @@ export class UpgradeScreen {
    *  BOTTOM BAR — action buttons
    * ──────────────────────────────────────────── */
   renderBottomBar(renderer: Renderer, ctx: CanvasRenderingContext2D) {
-    // Frosted bottom strip — tall enough for comfortable mobile tapping
     const stripH = 80;
     const stripY = GAME_HEIGHT - stripH;
     const grad = ctx.createLinearGradient(0, stripY, 0, GAME_HEIGHT);
@@ -1079,7 +1492,6 @@ export class UpgradeScreen {
     ctx.fillStyle = grad;
     ctx.fillRect(0, stripY, GAME_WIDTH, stripH);
 
-    // Thin accent line at top of strip
     ctx.strokeStyle = "rgba(0, 180, 255, 0.08)";
     ctx.lineWidth = 1;
     ctx.beginPath();
@@ -1087,11 +1499,12 @@ export class UpgradeScreen {
     ctx.lineTo(GAME_WIDTH, stripY + 1);
     ctx.stroke();
 
-    const btnY = GAME_HEIGHT - 128;
-    const btnH = 44;
+    const mob = isMobileDevice;
+    const btnY = GAME_HEIGHT - (mob ? 140 : 128);
+    const btnH = mob ? 58 : 44;
 
     // ── START RUN (center, hero button) ──
-    const playBtnW = 260;
+    const playBtnW = mob ? 340 : 260;
     const playBtnX = GAME_WIDTH / 2 - playBtnW / 2;
     const playPulse = (Math.sin(this.time * 2.5) + 1) / 2;
 
@@ -1102,7 +1515,7 @@ export class UpgradeScreen {
       bg: "rgba(0, 50, 110, 0.9)",
       border: `rgba(0, 180, 255, ${0.4 + playPulse * 0.2})`,
       textColor: COLORS.player,
-      fontSize: 14,
+      fontSize: 16,
       radius: 10,
       glow: `rgba(0, 170, 255, ${0.1 + playPulse * 0.1})`,
     });
@@ -1145,7 +1558,7 @@ export class UpgradeScreen {
       },
     });
 
-    // ── MENU (right side of bottom bar — inset for mobile) ──
+    // ── MENU (right side of bottom bar) ──
     const menuBtnW = 110;
     const menuBtnX = GAME_WIDTH - menuBtnW - 40;
 
@@ -1153,7 +1566,7 @@ export class UpgradeScreen {
       bg: "rgba(10, 10, 35, 0.85)",
       border: "rgba(80, 120, 200, 0.3)",
       textColor: "rgba(100, 160, 255, 0.8)",
-      fontSize: 11,
+      fontSize: 13,
       radius: 8,
     });
 
@@ -1165,7 +1578,7 @@ export class UpgradeScreen {
       action: () => this.manager.goToMenu(),
     });
 
-    // ── PRESTIGE (left side of bottom bar — inset for mobile) ──
+    // ── PRESTIGE (left side of bottom bar) ──
     const pBtnW = 140;
     const pBtnX = 40;
     const canPrestige = this.upgrades.save.highestLevel >= 10;
@@ -1179,7 +1592,7 @@ export class UpgradeScreen {
         bg: "rgba(30, 10, 35, 0.85)",
         border: `rgba(170, 80, 170, ${0.3 + pPulse * 0.2})`,
         textColor: "#bb66cc",
-        fontSize: 11,
+        fontSize: 13,
         radius: 8,
         glow: "rgba(170, 68, 170, 0.1)",
       });
@@ -1203,13 +1616,13 @@ export class UpgradeScreen {
         bg: "rgba(10, 10, 10, 0.5)",
         border: "rgba(80, 80, 80, 0.2)",
         textColor: "#444",
-        fontSize: 11,
+        fontSize: 13,
         radius: 8,
       });
       ctx.restore();
 
       ctx.save();
-      ctx.font = "7px Tektur";
+      ctx.font = "8px Tektur";
       ctx.fillStyle = "rgba(120, 120, 140, 0.5)";
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
@@ -1232,10 +1645,10 @@ export class UpgradeScreen {
     ctx.save();
     ctx.globalAlpha = msgAlpha;
 
-    const msgW = 280;
-    const msgH = 30;
+    const msgW = 300;
+    const msgH = 34;
     const msgX = GAME_WIDTH / 2 - msgW / 2;
-    const msgY = GAME_HEIGHT / 2 + 100;
+    const msgY = GAME_HEIGHT / 2 + 120;
 
     renderer.drawPanel(msgX, msgY, msgW, msgH, {
       bg: "rgba(50, 10, 10, 0.88)",
@@ -1243,7 +1656,7 @@ export class UpgradeScreen {
       radius: 8,
     });
 
-    ctx.font = "bold 11px Tektur";
+    ctx.font = "bold 12px Tektur";
     ctx.fillStyle = "#ff6666";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";

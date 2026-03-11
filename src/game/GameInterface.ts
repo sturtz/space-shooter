@@ -11,6 +11,7 @@ import { Rock } from "../entities/Rock";
 import { EnemyShip } from "../entities/EnemyShip";
 import { Enemy } from "../entities/Enemy";
 import { Coin } from "../entities/Coin";
+import { Debris } from "../entities/Debris";
 import { HUD } from "../ui/HUD";
 import { AudioManager } from "../audio/AudioManager";
 import { GameState } from "./Game";
@@ -36,6 +37,7 @@ export interface IGame {
   bullets: Bullet[];
   enemies: (Rock | EnemyShip)[];
   coins: Coin[];
+  debris: Debris[];
   enemyBullets: Bullet[];
 
   roundTimer: number;

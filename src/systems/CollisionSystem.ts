@@ -1,6 +1,7 @@
 import { IGame } from "../game/GameInterface";
 import { Enemy } from "../entities/Enemy";
-import { Vec2, vecDist, circleCollision, randomAngle } from "../utils/Math";
+import { Coin } from "../entities/Coin";
+import { Vec2, vecDistSq, circleCollision, randomAngle } from "../utils/Math";
 import {
   COIN_SIZE,
   COLORS,
@@ -11,10 +12,66 @@ import {
   PLAYER_COLLISION_RADIUS,
 } from "../utils/Constants";
 
+/** Options for the AoE damage helper. */
+export interface AoEOptions {
+  /** If provided, each hit rolls for crit with this chance/multiplier. */
+  crit?: { chance: number; multiplier: number };
+  /** If > 0, apply stun to each enemy in radius (seconds). */
+  stunDuration?: number;
+  /** If true, skip damage entirely (stun-only). */
+  stunOnly?: boolean;
+}
+
 /**
  * Handles all collision detection and resolution, extracted from Game.ts.
  */
 export class CollisionSystem {
+  /**
+   * Damage all enemies within `radius` of `center`.
+   * Handles damage numbers, kill checks, and optional crit/stun.
+   * Returns the number of enemies hit.
+   *
+   * Particle effects are NOT emitted here — call sites handle their own
+   * visual feedback since effects vary by context.
+   */
+  damageEnemiesInRadius(
+    game: IGame,
+    center: Vec2,
+    radius: number,
+    damage: number,
+    opts?: AoEOptions
+  ): number {
+    let hitCount = 0;
+    const radiusSq = radius * radius;
+    for (const enemy of game.enemies) {
+      if (!enemy.alive) continue;
+      if (vecDistSq(center, enemy.pos) > radiusSq) continue;
+
+      hitCount++;
+
+      if (opts?.stunDuration && opts.stunDuration > 0) {
+        enemy.applyStun(opts.stunDuration);
+      }
+      if (opts?.stunOnly) continue;
+
+      let dmg = damage;
+      let isCrit = false;
+      if (opts?.crit) {
+        isCrit = Math.random() < opts.crit.chance;
+        if (isCrit) dmg *= opts.crit.multiplier;
+      }
+
+      const wasAlive = enemy.alive;
+      enemy.takeDamage(dmg);
+      game.spawnDamageNumber(enemy.pos.x, enemy.pos.y, dmg, isCrit);
+
+      if (wasAlive && !enemy.alive) {
+        game.onEnemyKilled(enemy);
+      }
+    }
+    return hitCount;
+  }
+
   /**
    * Player bullets vs enemies.
    * Implements: pierce, splash (on every hit), chain lightning,
@@ -48,14 +105,16 @@ export class CollisionSystem {
             game.particles.emit(bullet.pos, 3, COLORS.bullet, 40, 0.2, 1);
           }
 
-          // Splash damage — triggers on every hit, not just kills
+          // Splash damage — triggers on every hit, not just kills (P3: skip when no splash)
           if (game.stats.splashRadius > 0) {
             const splashDmg = bullet.damage * SPLASH_DAMAGE_MULT;
+            const splashRadiusSq = game.stats.splashRadius * game.stats.splashRadius;
             for (const other of game.enemies) {
-              if (!other.alive || other === enemy) continue;
-              if (vecDist(enemy.pos, other.pos) < game.stats.splashRadius) {
+              if (!other.alive || other === enemy) continue; // P12: skip dead enemies
+              const dx = enemy.pos.x - other.pos.x;
+              const dy = enemy.pos.y - other.pos.y;
+              if (dx * dx + dy * dy < splashRadiusSq) {
                 const splashKilled = other.takeDamage(splashDmg);
-                // Bug #14 fix: show damage numbers for splash hits too
                 game.spawnDamageNumber(other.pos.x, other.pos.y, splashDmg, false);
                 if (splashKilled) {
                   game.onEnemyKilled(other);
@@ -64,7 +123,7 @@ export class CollisionSystem {
             }
           }
 
-          // Chain lightning — bounces to nearby enemies on kill
+          // Chain lightning — bounces to nearby enemies on kill (P3: skip when no chain)
           if (killed && game.stats.chainTargets > 0) {
             this.chainLightning(
               game,
@@ -96,16 +155,17 @@ export class CollisionSystem {
     const hit = new Set<Enemy>([source]);
     let currentPos = origin;
     let remaining = targets;
+    const chainRangeSq = CHAIN_RANGE * CHAIN_RANGE;
 
     while (remaining > 0) {
       let closest: Enemy | null = null;
-      let closestDist = CHAIN_RANGE;
+      let closestDistSq = chainRangeSq;
 
       for (const enemy of game.enemies) {
-        if (!enemy.alive || hit.has(enemy)) continue;
-        const d = vecDist(currentPos, enemy.pos);
-        if (d < closestDist) {
-          closestDist = d;
+        if (!enemy.alive || hit.has(enemy)) continue; // P12: skip dead enemies
+        const dSq = vecDistSq(currentPos, enemy.pos);
+        if (dSq < closestDistSq) {
+          closestDistSq = dSq;
           closest = enemy;
         }
       }
@@ -212,10 +272,12 @@ export class CollisionSystem {
     // Check if in overtime for bonus
     const inOvertime = game.stats.overtimeBonus > 0 && game.roundTimer <= 10;
     const overtimeMult = inOvertime ? 1 + game.stats.overtimeBonus : 1;
+    const pickupRange = COIN_SIZE + game.player.radius;
+    const pickupRangeSq = pickupRange * pickupRange;
 
     for (const coin of game.coins) {
       if (!coin.alive) continue;
-      if (vecDist(coin.pos, game.player.pos) < COIN_SIZE + game.player.radius) {
+      if (vecDistSq(coin.pos, game.player.pos) < pickupRangeSq) {
         coin.destroy();
         const value = Math.round(coin.value * overtimeMult);
         game.roundCoins += value;
@@ -231,6 +293,36 @@ export class CollisionSystem {
         // Show coin value as floating number
         game.spawnDamageNumber(coin.pos.x, coin.pos.y - 5, value, isRare);
         game.audio.playCoinPickup();
+      }
+    }
+  }
+
+  /**
+   * Player bullets vs debris asteroids.
+   * Debris has 1 HP — any bullet kills it. 50% chance to drop 1 coin (min 1 if dropping).
+   * Bullet is NOT consumed (pierces through debris).
+   */
+  checkBulletDebrisCollisions(game: IGame) {
+    for (const bullet of game.bullets) {
+      if (!bullet.alive) continue;
+      for (const debris of game.debris) {
+        if (!debris.alive) continue;
+        if (circleCollision(bullet.pos, bullet.radius, debris.pos, debris.radius)) {
+          const killed = debris.takeDamage(bullet.damage);
+          if (killed) {
+            // Small rock-crumble particle burst
+            game.particles.emit(debris.pos, 4, "#888888", 30, 0.2, 1);
+
+            // 50% chance to drop a coin (min value 1)
+            if (Math.random() < 0.5) {
+              const coin = new Coin(debris.pos.x, debris.pos.y, 1);
+              coin.magnetRange = game.stats.coinMagnetRange;
+              game.coins.push(coin);
+            }
+          }
+          // Bullet pierces through debris — don't consume it
+          break; // one debris per bullet per frame
+        }
       }
     }
   }

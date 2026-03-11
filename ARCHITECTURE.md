@@ -2,6 +2,7 @@
 
 > **Incremental space shooter** — defend your mothership, collect coins, unlock upgrades between rounds.
 
+** check context-rules-steps and cd../Cline/skills **
 ---
 
 ## Quick Reference
@@ -40,9 +41,10 @@ src/
 ├── main.ts                  # Bootstrap: orient lock, canvas grab, ScreenManager, game loop
 ├── game/
 │   ├── ScreenManager.ts     # 3-canvas orchestrator: owns shared state, switches screens
-│   ├── MenuScreen.ts        # Menu canvas: title screen + tutorial overlay
-│   ├── Game.ts              # Game canvas: gameplay, boss reward, game over
-│   └── GameInterface.ts     # TypeScript interface for Game (used by subsystems)
+│   ├── MenuScreen.ts        # Menu canvas: title screen + tutorial button
+│   ├── Game.ts              # Game canvas: gameplay, tutorial, boss reward, game over
+│   ├── GameInterface.ts     # TypeScript interface for Game (used by subsystems)
+│   └── TutorialSystem.ts    # Interactive 3-step tutorial (movement, dash, enemies)
 ├── entities/
 │   ├── Entity.ts            # Base class: pos, vel, radius, active flag
 │   ├── Player.ts            # Keyboard/touch-controlled ship; dash, firing, shield
@@ -84,11 +86,12 @@ The app uses 3 separate `<canvas>` elements, one per screen. `ScreenManager` own
 
 | Screen | Canvas | Class | States |
 |---|---|---|---|
-| **Menu** | `menu-canvas` | `MenuScreen` | Title screen + tutorial overlay |
-| **Game** | `game-canvas` | `Game` | `"playing"` · `"bossReward"` · `"gameover"` |
+| **Menu** | `menu-canvas` | `MenuScreen` | Title screen + tutorial button |
+| **Game** | `game-canvas` | `Game` | `"playing"` · `"tutorial"` · `"bossReward"` · `"gameover"` |
 | **Upgrade** | `upgrade-canvas` | `UpgradeScreen` | Upgrade tree, prestige, start run |
 
 Screen transitions (managed by `ScreenManager`):
+- **Menu** → **Game tutorial** (first-time or click Tutorial → `manager.startTutorial("menu")`)
 - **Menu** → **Game** (click Start → `manager.startGame()`)
 - **Game** `"gameover"` → **Upgrade** (click Continue → `manager.goToUpgradeScreen()`)
 - **Game** `"playing"` + K key → **Upgrade** (forfeit shortcut)
@@ -910,6 +913,887 @@ Implemented a renderer-level camera system that zooms into the game world on mob
 
 ---
 
+## Performance Audit (2026-03-11)
+
+### 🔴 Critical — Hot-Path Object Allocation (GC Pressure)
+
+**P1. Vec2 allocation storm in Math.ts**
+Every `vecAdd`, `vecSub`, `vecScale`, `vecNormalize`, `vecFromAngle`, `vecLerp` returns a **new `{x, y}` object**. These are called hundreds of times per frame across all entity updates, collision checks, and particle updates. 11 of 14 math functions allocate new Vec2s. Worst offenders per frame:
+- `ParticleSystem.update()` — 2 new Vec2 per particle per frame (400+ allocs at 200 particles)
+- `CollisionSystem` — 1 new Vec2 per collision pair via `vecDist→vecSub` (B×E pairs)
+- `Coin.attractTo()` — 4+ Vec2 per attracted coin per frame
+- `EnemyShip.update()` / `Rock.update()` — 3–4 Vec2 per enemy per frame
+
+**Fix:** Add mutating variants (`vecAddMut`, `vecScaleMut`) or inline dx/dy math in hot paths. Keep pure functions for cold paths.
+
+**P2. `circleCollision` uses `Math.sqrt` + allocates temp Vec2**
+`circleCollision → vecDist → vecLength(vecSub(a,b)) → Math.sqrt(...)` — every single collision pair pays for both a `sqrt` call and a temporary `{x, y}` allocation. Called B×E times per frame in bullet-enemy checks alone.
+
+**Fix:** Replace with squared-distance comparison: `dx*dx + dy*dy < (r1+r2)*(r1+r2)`. Eliminates sqrt AND the Vec2 allocation in one change. Same for `vecDist` calls in splash/chain.
+
+**P3. Splash damage is O(B × E²) — inner enemy scan per hit**
+`checkBulletEnemyCollisions` is O(B×E). When a bullet has splash radius, each hit triggers *another* full scan of `game.enemies` for AoE targets. Chain lightning does the same (scans all enemies per chain hop, up to `chainTargets` hops). Effective worst case: O(B × E × (E + chainTargets×E)).
+
+**Fix:** Short-circuit: skip splash/chain scans when `stats.splashRadius === 0` and `stats.chainTargets === 0`. For spatial queries, even a simple grid partition would reduce inner scans.
+
+**P4. Audio nodes created and discarded on every SFX call**
+Every `play*()` method creates new `OscillatorNode` + `GainNode` pairs (2–10 nodes per call). `playConeBlast()` is the worst: 3 oscillators, 4 gain nodes, 2 filters, 1 buffer source, plus a **new AudioBuffer** (`sampleRate × 0.35` floats) — 10 Web Audio nodes + buffer allocation every ~1.2s. `playExplosion()` creates 4 nodes and fires dozens of times per second during intense gameplay. No audio node pooling exists.
+
+**Fix:** Cache the noise buffer for `playConeBlast()` (create once, reuse). Pool oscillator "voices" for frequent SFX. At minimum, throttle `playExplosion()` to max 3–4 per frame.
+
+---
+
+### 🟡 Medium — Per-Frame Rendering Waste
+
+**P5. Gradient objects created every frame (never cached)**
+`Renderer.ts` helper methods allocate gradients on every call:
+- `drawGradientBar()` — 2 `createLinearGradient` per call (timer bar, HP bar)
+- `drawPanel()` — 1 `createLinearGradient` per call (header highlight)
+- `drawButton()` — 2 `createLinearGradient` per call (body + shine)
+- `drawGlowCircle()` — 1 `createRadialGradient` per call (entity glows)
+
+A typical gameplay frame allocates **10–20+ gradient objects**, all immediately discarded. Upgrade screen is worse with many panels/buttons.
+
+**Fix:** Cache gradients for fixed-layout elements (HUD bars, buttons). For dynamic elements, consider pre-rendered gradient textures on offscreen canvases.
+
+**P6. Shadow state changes not batched**
+`shadowBlur` and `shadowColor` are set per-entity in render loops (glow halos on rocks, enemies, mothership). Each shadow state change forces the canvas compositor to reconfigure. Shadow rendering is one of the most expensive canvas operations.
+
+**Fix:** Batch all shadow-rendered entities together. Or render glows to an offscreen canvas and composite once. Consider replacing `shadowBlur` with pre-rendered glow sprites.
+
+**P7. Font string construction per frame**
+`Renderer.drawText()` constructs a font string (`${size}px Tektur`) on every call. HUD and upgrade screen make 15–30+ `drawText` calls per frame. While font parsing is fast, it's unnecessary repeated work.
+
+**Fix:** Cache font strings by size (Map<number, string>).
+
+---
+
+### 🟡 Medium — Entity Lifecycle & Memory
+
+**P8. No object pooling for bullets, coins, or missiles**
+`new Bullet()`, `new Coin()`, `new Missile()` are allocated on every fire/kill/spawn. The game fires bullets on every beat (~2–4/sec), spawns coins on every kill, and missiles up to 3 per beat. These entities are short-lived and filtered out when dead. `compactAlive()` does in-place array compaction (good), but the allocations themselves create GC pressure.
+
+**Fix:** Implement object pools (like `ParticleSystem` already does for particles). Add `reset()` methods to `Bullet`, `Coin`, `Missile` and reuse dead instances.
+
+**P9. Entity arrays never shrink**
+`compactAlive()` compacts in-place but never reduces array capacity. After a large wave, arrays like `bullets[]` and `enemies[]` may have allocated internal capacity for 200+ slots that persist even when only 10 are active. V8 arrays don't auto-shrink.
+
+**Fix:** Periodically (e.g., at round start) reset arrays: `this.bullets.length = 0`.
+
+**P10. Event listeners leak on re-instantiation (Bug #16 still open)**
+`Game` constructor registers 8+ anonymous event listeners (click, touchend, mousedown, mousemove, mouseup, touchstart, touchmove, keydown) that are never removed. `ScreenManager` adds resize/mousemove listeners with no cleanup. If either class is re-instantiated, listeners stack.
+
+**Fix:** Use `AbortController` or store listener references with a `destroy()` method.
+
+---
+
+### 🟡 Medium — Collision Algorithm
+
+**P11. O(n²) brute-force collision with no spatial partitioning**
+`checkBulletEnemyCollisions` checks every bullet against every enemy. At 50 bullets × 30 enemies = 1,500 collision checks per frame, each with sqrt + Vec2 allocation. Current entity counts (<200) are manageable, but performance degrades quadratically.
+
+**Fix:** For current scale, fixing P2 (squared distance) is sufficient. If entity counts grow past 200, implement a spatial hash grid (cell size = max entity diameter). The grid update is O(n) and queries are O(1) amortized.
+
+**P12. Dead enemies still processed in splash/chain scans**
+When splash damage kills an enemy, the `onEnemyKilled` guard prevents double rewards, but the dead enemy still receives chain damage and triggers redundant particles. The inner splash/chain loops don't skip `!enemy.alive` entries.
+
+**Fix:** Add `if (!enemy.alive) continue;` at the top of splash and chain inner loops.
+
+---
+
+### 🟢 Low — Build & Config
+
+**P13. TypeScript target is conservative (`ES2020`)**
+Modern browsers (2024+) support ES2022+. Using `ES2020` prevents the compiler from emitting native `Object.hasOwn`, `Array.at()`, top-level await, and other features that minify better and run faster.
+
+**Fix:** Set `"target": "ES2022"` or `"ESNext"` in `tsconfig.json`. Set matching `build.target: 'esnext'` in Vite config.
+
+**P14. p5.js loaded as full library via CDN**
+`index.html` loads the complete p5.js library (~1MB uncompressed) via CDN for just the background animation. p5.js is not tree-shakeable.
+
+**Fix:** Long-term, rewrite the background with raw Canvas2D (it's just particles/gradients). Short-term, use `p5.min.js` and ensure it's cached. The background could also be rendered to a static texture and scrolled rather than animated every frame.
+
+**P15. No `build.target` in Vite config**
+Vite defaults may produce ES module output without explicit target. Setting `build.target: 'esnext'` enables maximum minification and modern syntax.
+
+**P16. 3 stacked canvases always in DOM**
+All 3 canvases (`menu-canvas`, `game-canvas`, `upgrade-canvas`) exist in the DOM at all times. Only one is visible via CSS `display`, but all consume GPU memory for their backing stores. At 1200×800 × DPR=2, each canvas is ~7.3MB.
+
+**Fix:** Consider using a single canvas and switching render functions, or destroying hidden canvases' contexts.
+
+---
+
+### 🟢 Low — Dead Code & Cleanup
+
+**P17. `getUpgradeEffect()` and `effectPerLevel` are dead code**
+`getUpgradeEffect()` is exported from `UpgradeTree.ts` but never called. `effectPerLevel` values on nodes are documentation-only — `computeStats()` uses hardcoded multipliers. Values can silently drift.
+
+**P18. `screenFlashColor` declared but never read**
+Dead field in `Game.ts` and `GameInterface.ts`.
+
+**P19. `streakBonus` is always 1 (dead code path)**
+`streakBonus` in Game.ts is always `1` with comment "kill streak bonus removed." HUD receives it as `streakCoinBonus` but only displays when `> 1.0` — entire prop chain unused.
+
+**P20. `PlayerStats` has ~15 unused compat stub fields**
+Fields like `playerHp`, `playerShields`, `evasionChance`, `reflectFraction`, `lifestealChance`, `armorReduction`, `shieldRegenInterval` etc. are set to defaults and never read.
+
+---
+
+### Priority Implementation Order
+
+| Priority | Items | Impact | Effort |
+|---|---|---|---|
+| **Do First** | P2 (squared distance) | Eliminates sqrt + Vec2 alloc in ALL collision checks | 15 min |
+| **Do First** | P1 (inline Vec2 math in hot paths) | Eliminates 500+ allocs/frame | 1 hour |
+| **Do Second** | P4 (cache noise buffer, throttle SFX) | Reduces audio GC + mobile stalls | 30 min |
+| **Do Second** | P8 (object pool for Bullet/Coin) | Eliminates frequent new allocations | 1 hour |
+| **Do Second** | P3 (skip splash/chain when stat is 0) | Eliminates O(E) inner scans for most bullets | 10 min |
+| **Do Third** | P5 (cache HUD gradients) | Eliminates 10-20 gradient allocs/frame | 30 min |
+| **Do Third** | P12 (skip dead enemies in splash/chain) | Reduces redundant work | 5 min |
+| **Whenever** | P13-P16 (build config) | Minor bundle/load improvements | 15 min |
+| **Whenever** | P17-P20 (dead code) | Code cleanliness | 15 min |
+
+---
+
+### 2026-03-11 — Red Glow on Damaging Rocks + Harmless Debris Asteroids
+
+1. **Damaging rocks glow red** — Replaced `ctx.filter = "brightness(1.5)..."` and `ctx.shadowBlur` on Rock sprites with a cheap red radial gradient halo (`rgba(255,40,40,0.6)`, radius×2). Rocks that can damage the mothership now emit a visible red glow behind them. Poisoned rocks get green glow + green `source-atop` composite tint. Elite rocks retain gold glow + gold overlay.
+
+2. **Removed ALL `ctx.filter` and entity `shadowBlur` from codebase** — 9 filter usages + per-entity `shadowBlur` eliminated:
+   - **Rock.ts**: Poison `hue-rotate` filter → green radial gradient glow + `source-atop` tint. Normal `brightness/drop-shadow` filter → red radial gradient glow. No `shadowBlur` on sprite draw.
+   - **EnemyShip.ts**: Poison `hue-rotate` + normal `brightness(1.4) drop-shadow(...)` filters → removed entirely. Radial gradient glow halo was already present. `shadowBlur` on sprite draw removed. Poisoned state uses `source-atop` green tint.
+   - **MenuScreen.ts**: Two `brightness(...)` tutorial asteroid filters → `shadowColor`/`shadowBlur` white glow (tutorial-only, not per-frame gameplay).
+   - Zero `ctx.filter` assignments remain. Entity rendering no longer uses `shadowBlur` (expensive per-frame canvas operation).
+
+3. **New `Debris` entity** — Created `src/entities/Debris.ts` extending `Entity`. Small, semi-transparent asteroid sprites (opacity 0.12–0.3) that:
+   - Spawn from screen edges (top/left/right) every 0.3–0.7s, capped at 40 active
+   - Float toward the mothership area at 18–45 px/s with wide target spread (±200px)
+   - Veer away when within 60–160px of target (perpendicular deflection + outward push)
+   - Self-destruct when off-screen (50px margin)
+   - Have no collision, no damage, no glow, no shadow — purely visual ambiance
+   - Use the small asteroid sprite pool at reduced size (2–5px radius, 1.6–2.4× draw scale)
+
+4. **Debris wired into Game.ts** — `debris: Debris[]` array + `debrisTimer` added to Game. Debris spawning, updating, and compaction happen in `updatePlaying()`. Rendering happens first in `renderPlaying()` (behind all gameplay entities). Array is reset in `startRun()`.
+
+---
+
+## TODO — Game.ts Refactoring Plan (2026-03-11)
+
+Game.ts is **2322 lines** — a monolith that owns gameplay logic, all weapon systems, all UI overlays, event handling, and multiple render passes. Below is a comprehensive analysis of repeating code, extractable utilities, and a phased extraction plan.
+
+---
+
+### Repeating Patterns Found
+
+#### 1. AoE "damage enemies in radius" pattern (×5 sites, ~15 lines each)
+
+All five share the identical structure: `for enemy → vecDist check → takeDamage → spawnDamageNumber → particles → onEnemyKilled guard`.
+
+| Site | Method | Line Range | Notes |
+|---|---|---|---|
+| A | `handleDash()` — ring damage | ~540–565 | Ring radius, 0.5× damage |
+| B | `handleDash()` — flashbang stun | ~567–578 | Stun only (no damage), different radius |
+| C | `fireConeWeapon()` | ~745–770 | Crit rolls, shockwave particles |
+| D | `fireDashConeHit()` | ~712–733 | Same as cone but no beat reset |
+| E | `updateBombs()` | ~1140–1160 | BOMB_DAMAGE_MULT, bomb radius |
+
+**Refactor**: Extract `damageEnemiesInRadius(center, radius, damage, opts?)` into `CollisionSystem` or a new `CombatHelper`. Options bag handles crit, stun, particles. Each call site becomes 1–3 lines.
+
+#### 2. Rectangle hit-test (×8 sites)
+
+`mx >= x && mx <= x + w && my >= y && my <= y + h` repeated verbatim:
+
+| Site | Method | Description |
+|---|---|---|
+| 1 | `hitTestPauseButton()` | Multi-line form |
+| 2 | `handlePauseMenuClick()` | Track button loop |
+| 3 | `handlePauseMenuClick()` | Volume bar |
+| 4 | `handlePauseMenuClick()` | Resume button |
+| 5 | `handlePauseMenuClick()` | Forfeit button |
+| 6 | `touchstart` handler | Volume bar drag init |
+| 7 | `handleBossRewardClick()` | Card hit-test loop |
+| 8 | `UpgradeScreen.handleClick()` | Clickable area loop |
+
+**Refactor**: Add `hitTestRect(mx, my, x, y, w, h): boolean` to `utils/Math.ts`. Replace all 8 inline checks.
+
+#### 3. `getScaledCoords()` — CSS→game coordinate transform (×3 independent copies)
+
+| File | Implementation |
+|---|---|
+| `Game.ts` constructor | `(clientX - renderer.gameOffsetX) / renderer.gameScale` inline closure |
+| `MenuScreen.ts` | Same formula in its own closure |
+| `UpgradeScreen.ts` | Same formula in its own closure |
+
+Plus `InputManager.touchToGame()` does the same transform with cached values.
+
+**Refactor**: Move to `Renderer.screenToGame(clientX, clientY): {x, y}` (Renderer already owns `gameOffsetX/Y/gameScale`). All three screens call `renderer.screenToGame()` instead of duplicating the math.
+
+#### 4. Beat callback duplication (×2 identical closures)
+
+Both `startRun()` and `resumeFromPause()` create the exact same callback:
+```ts
+() => {
+  this.coneBeatCount++;
+  if (this.coneBeatCount % CONE_FIRE_EVERY === 0) this.fireConeWeapon();
+  this.missileBeatCount++;
+  if (this.missileBeatCount % MISSILE_FIRE_EVERY === 0) this.fireMissile();
+}
+```
+
+**Refactor**: Extract to a `private onBeat()` method or a bound function.
+
+#### 5. Particle burst recipes (×12+ sites, same 3-color pattern)
+
+Boss kill, mothership death, bomb explosion all emit the same 3-layer burst pattern (red + orange + white with different counts/sizes). E.g.:
+```ts
+this.particles.emit(pos, 50, "#ff4444", 200, 0.8, 6);
+this.particles.emit(pos, 30, "#ffaa00", 160, 0.6, 5);
+this.particles.emit(pos, 20, "#ffffff", 120, 0.4, 3);
+```
+
+**Refactor**: Add named burst presets to `ParticleSystem`: `emitExplosion(pos, scale)`, `emitCoinPickup(pos)`, etc.
+
+---
+
+### Module Extraction Plan (Phased)
+
+#### Phase 1 — Quick Wins (utils + helpers, no architecture change)
+
+| # | What | From | To | Lines Saved | Effort |
+|---|---|---|---|---|---|
+| 1a | `compactAlive<T>()` | Game.ts top-level fn | `utils/Array.ts` | ~10 | 5 min |
+| 1b | `hitTestRect()` | 8 inline sites | `utils/Math.ts` | ~30 | 10 min |
+| 1c | `screenToGame()` | 3 inline closures | `Renderer.ts` method | ~15 | 10 min |
+| 1d | Beat callback dedup | 2 identical closures | `private onBeat()` | ~10 | 5 min |
+| 1e | `damageEnemiesInRadius()` | 5 AoE sites (~75 lines) | `CollisionSystem` | ~60 | 20 min |
+| 1f | Particle burst presets | 12+ emit clusters | `ParticleSystem` named methods | ~40 | 15 min |
+
+**Total Phase 1**: ~165 lines removed, ~1 hour
+
+#### Phase 2 — UI Extractions (self-contained render+click modules)
+
+| # | What | Lines in Game.ts | New File | Effort |
+|---|---|---|---|---|
+| 2a | **Pause menu** — layout, click handling, render, volume drag, track switching | ~300 | `src/ui/PauseMenu.ts` | 45 min |
+| 2b | **Boss reward screen** — data, card layout, click handling, render, ability icons | ~350 | `src/ui/BossRewardScreen.ts` | 45 min |
+| 2c | **Game over screen** — death cause switch, stats panel, continue button | ~110 | `src/ui/GameOverScreen.ts` | 20 min |
+| 2d | **Mobile controls** — joystick render, dash button render | ~100 | `src/ui/MobileControls.ts` | 15 min |
+
+Each module receives `(renderer, game)` or a small data bag. Game.ts calls `pauseMenu.render()` / `pauseMenu.handleClick(mx, my)`.
+
+**Total Phase 2**: ~860 lines extracted, ~2 hours
+
+#### Phase 3 — Systems Extraction (gameplay logic modules)
+
+| # | What | Lines in Game.ts | New File | Effort |
+|---|---|---|---|---|
+| 3a | **WeaponSystem** — cone state, missile state, laser state/timer, bomb state, `fireCone`, `fireMissile`, `fireLaser`, `updateBombs`, `fireDashConeHit` | ~250 | `src/systems/WeaponSystem.ts` | 1 hour |
+| 3b | **EffectsManager** — DamageNumber[], DashRing[], LaserBeam[] types + update + render | ~150 | `src/systems/EffectsManager.ts` | 30 min |
+| 3c | **BossSystem** — `spawnBoss()` level-variant logic, boss reward granting | ~80 | fold into `SpawnSystem.ts` | 20 min |
+
+**Total Phase 3**: ~480 lines extracted, ~2 hours
+
+#### Phase 4 — Interface Cleanup
+
+| # | What | Effort |
+|---|---|---|
+| 4a | Update `IGame` to match slimmed-down Game.ts | 15 min |
+| 4b | Remove dead fields (`screenFlashColor`, `streakBonus`, unused PlayerStats stubs) | 10 min |
+| 4c | Wire `AbortController` for event listener cleanup (Bug #16) | 20 min |
+
+---
+
+### Expected Result
+
+| Metric | Before | After |
+|---|---|---|
+| **Game.ts lines** | 2322 | ~500–600 (core loop, startRun, endRound, event wiring, entity management) |
+| **New files** | 0 | 6–8 focused modules |
+| **Repeated `hitTestRect`** | 8 inline | 1 utility + 8 calls |
+| **Repeated AoE pattern** | 5 × 15 lines | 1 helper + 5 × 2 lines |
+| **Repeated `getScaledCoords`** | 3 closures | 1 `Renderer.screenToGame()` |
+| **Dead code fields** | ~8 | 0 |
+
+### Implementation Order
+
+Do Phase 1 first — it's safe, doesn't change architecture, and immediately removes duplication. Phase 2 is the biggest win (860 lines) and each UI module is fully self-contained so they can be extracted one at a time with zero risk. Phase 3 requires more careful interface design but makes Game.ts purely an orchestrator. Phase 4 is cleanup.
+
+### Phase 1 Status: ✅ COMPLETE (2026-03-11)
+
+All 6 Phase 1 items implemented and verified (`pnpm finish` passes):
+
+| # | What | Status | Notes |
+|---|---|---|---|
+| 1a | `compactAlive<T>()` → `utils/Array.ts` | ✅ Done | New file. Game.ts imports from `utils/Array`. |
+| 1b | `hitTestRect()` → `utils/Math.ts` | ✅ Done | Added to Math.ts. Imported in Game.ts (available for Phase 2 wiring). |
+| 1c | `screenToGame()` → `Renderer.ts` | ✅ Done | New method on Renderer. Game.ts constructor uses `this.renderer.screenToGame()`. MenuScreen/UpgradeScreen still have local closures (will be replaced in Phase 2). |
+| 1d | Beat callback → `private onBeat()` | ✅ Done | Both `startRun()` and `resumeFromPause()` call `this.onBeat()`. |
+| 1e | `damageEnemiesInRadius()` → `CollisionSystem` | ✅ Done | New public method with `AoEOptions` interface (crit, stun, stunOnly). Available for Phase 2 wiring of handleDash/fireCone/updateBombs. |
+| 1f | Particle presets → `ParticleSystem` | ✅ Done | `emitExplosion()`, `emitEnemyDeath()`, `emitCoinPickup()` added. Available for Phase 2 wiring. |
+
+**New files created:** `src/utils/Array.ts`
+**Files modified:** `Game.ts`, `Math.ts`, `Renderer.ts`, `CollisionSystem.ts`, `ParticleSystem.ts`
+
+### Phase 2 Status: 🔶 MODULES CREATED (2026-03-11)
+
+4 self-contained UI modules extracted to standalone files. Game.ts imports them and removed the duplicate `BOSS_REWARD_CHOICES` constant. The inline render/click methods in Game.ts still exist alongside the module classes — the next step is replacing each inline method with a delegation call to the extracted module.
+
+| # | Module | Lines | Status |
+|---|---|---|---|
+| 2a | `src/ui/PauseMenu.ts` | 324 | ✅ Created — `hitTestPauseButton()`, `handleClick()`, `handleVolumeTouch()`, `renderPauseButton()`, `renderOverlay()` |
+| 2b | `src/ui/BossRewardScreen.ts` | 345 | ✅ Created — `handleClick()`, `render()` with auto-grant + choice screens, `drawAbilityIcon()` |
+| 2c | `src/ui/GameOverScreen.ts` | 143 | ✅ Created — `render()` with death-cause theming + stats panel + continue button |
+| 2d | `src/ui/MobileControls.ts` | 102 | ✅ Created — `render()` with joystick + dash button |
+
+### Phase 2 Status: ✅ COMPLETE (2026-03-11)
+
+All 4 UI modules are now fully wired into Game.ts. Inline render/click methods replaced with delegation calls:
+
+| # | Module | Wiring | Lines Removed |
+|---|---|---|---|
+| 2a | `PauseMenu.ts` | `pauseMenu.handleClick()`, `pauseMenu.renderOverlay()`, `pauseMenu.renderPauseButton()`, `pauseMenu.hitTestPauseButton()`, `pauseMenu.handleVolumeTouch()`, `pauseMenu.getLayout()` | ~300 (pause overlay + button + layout + click handler + volume touch) |
+| 2b | `BossRewardScreen.ts` | `bossRewardUI.render()`, `bossRewardUI.handleClick()` | ~350 (boss reward render + card layout + ability icons + click handler) |
+| 2c | `GameOverScreen.ts` | `gameOverUI.render()` with `GameOverData` bag | ~110 (game over render + death cause theming) |
+| 2d | `MobileControls.ts` | `mobileControlsUI.render()` | ~100 (joystick + dash button render) |
+
+**Removed from Game.ts:** `renderPauseOverlay()`, `renderMobilePauseButton()`, `renderMobileControls()`, `renderBossReward()`, `renderGameOver()`, `handlePauseMenuClick()`, `handlePauseVolumeTouch()`, `handleBossRewardClick()`, `hitTestPauseButton()`, `getPauseMenuLayout()`, `drawAbilityIcon()`, `getBossRewardLayout()`, `selectSpecialAbility()`, `PAUSE_BTN_*` constants, `PAUSE_PANEL_*` constants, `volumeDragActive` field.
+
+**Game.ts at ~1414 lines** after wiring (down from ~2322 at start of refactoring plan — ~900 lines removed across Phase 1 + Phase 2).
+
+---
+
+### 2026-03-11 — Performance Quick Wins + Bug #18 Fix
+
+1. **Bug #18 fix: `highestLevel` persisted immediately** — `saveGame()` is now called right after `highestLevel` is updated in `onEnemyKilled()`, fixing data loss where the new high level was never written to localStorage.
+
+2. **P2: Squared-distance collision (zero sqrt)** — `circleCollision()` now uses `dx*dx + dy*dy < r*r` instead of `Math.sqrt()`. `vecDist()` inlined to avoid temp Vec2 allocation. New `vecDistSq()` utility added. Eliminates sqrt + object allocation on every collision pair.
+
+3. **P1: Inlined Vec2 math in hot paths** — Removed allocating `vecAdd`/`vecScale`/`vecSub`/`vecNormalize`/`vecDist` calls from the hottest per-frame loops:
+   - **ParticleSystem.update()**: Inline `p.pos.x += p.vel.x * dt` (was `vecAdd(vecScale(...))` — 2 allocs per particle per frame, ~400+ eliminated at 200 particles)
+   - **Coin.update()**: Inline position update
+   - **Coin.attractTo()**: Inline distance check (squared first to early-out without sqrt), normalize, and scale — was 4+ Vec2 allocs per attracted coin per frame
+   - **Debris.update()**: Full inline of distance, normalize, deflection math — was 6+ Vec2 allocs per debris per frame
+
+4. **P3: Skip splash/chain when stats are 0** — Splash damage inner loop (`O(E)`) now uses squared-distance comparison and is already gated behind `splashRadius > 0`. Chain lightning search also uses `vecDistSq` with pre-computed `chainRangeSq`.
+
+5. **P12: Dead enemies skipped in splash/chain** — Added `!other.alive` / `!enemy.alive` continue guards in splash damage inner loop and chain lightning search. Prevents redundant damage/particles on already-killed enemies.
+
+6. **P4: Cached noise buffer in AudioManager** — `playConeBlast()` no longer allocates a new `AudioBuffer` (sampleRate × 0.35 floats) every 1.2 seconds. The noise buffer is created once and reused. Buffer is invalidated if sample rate changes.
+
+7. **P4: Throttled explosion SFX** — `playExplosion()` now rate-limited to max ~20/sec (50ms cooldown). During intense gameplay with dozens of kills per second, this prevents audio node spam and GC pressure from oscillator/gain pairs.
+
+**Files modified**: `Math.ts` (+`vecDistSq`, inline `vecDist`, squared `circleCollision`), `CollisionSystem.ts` (squared distance in splash/chain/coin/AoE), `ParticleSystem.ts` (inline particle update), `Coin.ts` (inline update+attract), `Debris.ts` (inline all Vec2 math), `AudioManager.ts` (cached buffer, throttle), `Game.ts` (Bug #18 fix).
+
+---
+
+## Performance Audit Status (updated 2026-03-11)
+
+### 2026-03-11 — Code Review Bug Fixes (3 Bugs + Mothership source-atop)
+
+1. **Bug #1 fix: `source-atop` compositing no longer corrupts entire canvas** — `EnemyShip.ts`, `Rock.ts`, and `Mothership.ts` all used `ctx.globalCompositeOperation = "source-atop"` + `fillRect` on the **main canvas** to tint poisoned/elite/damaged sprites. `source-atop` operates on the entire canvas destination, so the green/gold/red tint would bleed onto every pixel already drawn (background, earlier entities). Fixed by drawing sprite + tint to a shared **offscreen canvas** (one per entity file, lazily allocated, reused), then `drawImage`-ing the composited result back to the main canvas. `save()`/`restore()` does not scope composite operations — offscreen canvas is the correct solution. The existing Mothership `source-atop` (Bug #3 from original audit) was also fixed in this pass.
+
+2. **Bug #2 fix: `lifetimeKills` no longer double-counted on boss 4+ reward** — `onEnemyKilled()` added `roundKills` to `lifetimeKills` when a boss died and state transitioned to `"bossReward"`. Then `handleBossRewardClick()` added `roundKills` **again** when the player picked an ability (boss 4+ choice screen path). Bosses 1-3 (auto-grant, "continue" click) were also missing the `lifetimeKills` increment entirely. Fixed by removing the `lifetimeKills +=` from `onEnemyKilled()` boss transition, and ensuring **both** paths in `handleBossRewardClick()` ("continue" for auto-grant and ability-choice for boss 4+) add `roundKills` to `lifetimeKills` exactly once before saving.
+
+3. **Bug #3 fix: Hex color glow now converts correctly to rgba** — `PauseMenu.ts` used `.replace(")", ",0.2)").replace("rgb", "rgba")` to add alpha to track button glow colors, but `trackColors` uses hex strings (`"#ff6644"` etc.). The `.replace()` chain expects `rgb()` format and was a complete no-op on hex, resulting in full-opacity glow instead of 20%. Added a `hexToRgba(hex, alpha)` helper that properly parses hex and returns `rgba(r,g,b,alpha)`.
+
+4. **Should-fix #5: `volumeDragActive` kept** — Reviewed usage: `volumeDragActive` is set in `PauseMenu.handleVolumeTouch()` and read/checked in `Game.ts` constructor's `touchend` and `touchmove` event handlers as a guard for volume bar drag state. It IS used — the review note was incorrect. No change needed.
+
+**Files modified**: `EnemyShip.ts`, `Rock.ts`, `Mothership.ts`, `Game.ts`, `PauseMenu.ts`
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Code review bug fixes.*
+
+---
+
+| Item | Description | Status |
+|---|---|---|
+| P1 | Inline Vec2 math in hot paths | ✅ Done — Particle, Coin, Debris |
+| P2 | Squared-distance collision | ✅ Done — circleCollision, splash, chain, coin pickup, AoE |
+| P3 | Skip splash/chain when stat is 0 | ✅ Done |
+| P4 | Cache noise buffer, throttle SFX | ✅ Done |
+| P5 | Cache HUD gradients | ❌ Not started |
+| P6 | Batch shadow state changes | ❌ Not started |
+| P7 | Cache font strings | ✅ Done — Renderer.getFont() + all call sites |
+| P8 | Object pool for Bullet/Coin/Missile | ❌ Not started |
+| P9 | Shrink entity arrays at round start | ❌ Not started |
+| P10 | Event listener cleanup (Bug #16) | ❌ Not started |
+| P11 | Spatial partitioning | ❌ Not needed at current scale |
+| P12 | Skip dead enemies in splash/chain | ✅ Done |
+| P13-P16 | Build config improvements | ❌ Not started |
+| P17-P20 | Dead code cleanup | ❌ Not started |
+
+---
+
+### 2026-03-11 — Two New Upgrade Nodes: Gravity Well + Forward Field
+
+Added two new upgrade nodes to the upgrade tree with full gameplay logic, visuals, canvas-drawn icons, and SVG art.
+
+1. **Gravity Well (`ms_slow`)** — Mothership defense upgrade that slows enemies near the mothership.
+   - **Branch**: Mothership (blue), depth 2, requires `econ_duration` level 1
+   - **3 levels**: 50% / 60% / 75% slow strength, costs [10, 15, 30] — cheap defensive investment
+   - **100px radius** around mothership where enemies are slowed every frame
+   - **Visual**: Animated blue radial gradient ring + spinning dashed circle around mothership (rendered behind mothership sprite in world-space)
+   - **Gameplay**: `SpawnSystem.applyMothershipSlow()` checks distance to mothership and applies `enemy.applySlow()` — reuses existing slow debuff system
+   - **Stats**: `PlayerStats.msSlowStrength` (0–0.75) and `msSlowRadius` (0 or 100px) computed from `MS_SLOW_TABLE[level]`
+
+2. **Forward Field (`dmg_forward`)** — Damage upgrade that extends the pulse weapon forward in the player's facing direction.
+   - **Branch**: Damage (red), depth 2, requires `dmg_core` level 1
+   - **1 level**, costs [20] — available early after first damage upgrade
+   - **Extends pulse range to 2.5× CONE_RANGE** in the forward 180° arc (uses dot product with player facing direction)
+   - **Visual**: 8 directional red-pink particles fire forward on each cone weapon beat
+   - **Gameplay**: `isInPulseRange()` helper checks both base circular range AND extended forward range. Used by both `fireConeWeapon()` and `fireDashConeHit()`.
+   - **Stats**: `PlayerStats.forwardPulse` (boolean) computed from `dmg_forward` level
+
+**Files created**: `public/assets/upgrade-tree/gravity-well.svg`, `public/assets/upgrade-tree/forward-field.svg`
+**Files modified**: `UpgradeTree.ts` (+2 nodes), `UpgradeManager.ts` (+3 stats, +computation), `SpawnSystem.ts` (+applyMothershipSlow), `Game.ts` (+isInPulseRange, +gravity well visual, +forward pulse particles, +applyMothershipSlow call), `UpgradeIcons.ts` (+drawGravityWell, +drawForwardField)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Two new upgrade nodes: Gravity Well + Forward Field.*
+
+---
+
 ## TODO — Deferred
 
-- [ ] **Interactive tutorial demo** — Let the user practice movement with the real joystick and dash on a safe target before starting. Lower priority now that the visual tutorial shows the actual controls layout.
+- [x] **Interactive tutorial** — ✅ Replaced static 3-page tutorial with playable 3-step interactive `TutorialSystem` (movement → dash → enemies). Replayable from menu and pause menu.
+
+---
+
+### 2026-03-11 — Upgrade Screen: Layout Scale-Up + Ship Navigation
+
+Complete overhaul of the upgrade screen from a click-to-purchase tree to an explorable constellation map with flyable ship navigation.
+
+**Part 1: Neon Canvas-Drawn Icons** (previously completed)
+- Created `src/ui/UpgradeIcons.ts` — 24 canvas-drawn neon-geometric icons replacing SVG images
+- Each icon is stroke-only with branch-colored glow (`shadowBlur: 4`)
+- Icons scale automatically with node size via `u = size / 10` unit system
+
+**Part 2A: Layout Scale-Up**
+- `DEPTH_SPACING`: 120 → 240 (2× wider tree, room to fly between nodes)
+- `NODE_RADIUS`: 22 → 32 (~45% bigger nodes, better tap targets)
+- `BRANCH_SPREAD`: 0.3 → 0.45 (wider fan angle between branches)
+- All proportional elements scaled: fonts (7→9px badges, 12→14px tooltip names), connection lines (2→3px), tooltip panels (300×72→340×84), header (16→18px), currency chips (10→11px), bob amplitudes (1.5→2.0, 2.5→3.5), sparkle sizes
+
+**Part 2B: Ship Navigation**
+- Player ship (pulse-player.svg) rendered in world-space on the upgrade map
+- WASD/arrow keys move ship at 280px/sec
+- Ship facing angle tracks movement direction
+- Camera lerps toward ship position (`CAMERA_LERP = 0.08`), replacing manual pan
+- Engine trail particles spawn behind ship while moving (cyan glow, 0.3–0.5s lifetime)
+- Ship glow intensifies while moving (shadowBlur 14→20)
+
+**Part 2C: Ship-Node Collision + Purchase**
+- Ship-to-node collision: `SHIP_RADIUS(12) + NODE_RADIUS(32)` squared-distance check
+- Overlapping a node shows bright white aura + pulsing highlight ring
+- Space/Enter fires to purchase while overlapping (0.4s cooldown)
+- "SPACE TO BUY" / "TAP RIGHT SIDE TO BUY" prompt appears when overlapping
+- Tooltip shows "Fire to buy" when ship-overlapping, "Fly here to buy" otherwise
+- Mouse click on nodes still works as fallback for desktop users
+
+**Part 2D: Purchase Shockwave**
+- Branch-colored expanding ring (0.35s duration) with inner ring at 50% radius
+- 16-particle sparkle burst (was 12) with larger size range
+- Both rendered in world-space inside pan-translated context
+
+**Part 2E: Touch Support**
+- Left/center screen touch → joystick-style ship control (CSS-pixel based, 80px radius)
+- Right 30% of screen → fire zone (sets `touchFireRequested`)
+- Visual joystick indicator (base ring + thumb dot) in screen-space
+- Touch-end fires node click as fallback
+
+**Part 2F: Root Node Changes**
+- Root node now shows "HOME" label instead of player sprite (ship is now the moving entity)
+- Root radius bonus increased +6→+8 (40px total)
+- Ship initializes at root position on every `refresh()`
+
+**Files modified**: `src/ui/UpgradeScreen.ts` (complete rewrite), `src/ui/UpgradeIcons.ts` (Part 1)
+**Files created**: `docs/plans/2026-03-11-upgrade-screen-ship-nav.md`
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Upgrade screen layout scale-up + ship navigation.*
+
+---
+
+### 2026-03-11 — Upgrade Screen UX: Ship Orientation, Interaction Cleanup, View Zone
+
+1. **Fixed player ship upside down** — `renderShip()` rotation was `shipAngle - π/2` which produced a 180° flip when `shipAngle = -π/2` (facing up). Changed to `shipAngle + π/2` so the sprite correctly points in the movement direction.
+
+2. **Removed click/tap-to-purchase on nodes** — Stripped the "World-space node click (fallback for mouse users)" from `handleClick()` and the "Tap-on-node fallback" from the `touchend` handler. Upgrade nodes can now **only** be purchased by flying the ship into them and pressing Space/Enter (keyboard) or tapping the right fire zone (touch). Bottom bar buttons (Start Run, Menu, Prestige, Reset) still respond to click/tap normally.
+
+3. **Expanded tooltip hover zone** — Mouse hover tooltip detection radius increased from `NODE_RADIUS * 2.5` (80px) to `NODE_RADIUS * 5` (160px). Players can now read upgrade descriptions from a comfortable distance without accidentally entering the buy zone (ship collision at 44px). This creates a clear two-zone system:
+   - **View zone** (160px): Mouse hover → tooltip appears showing name, description, cost, status
+   - **Buy zone** (44px): Ship overlap + fire key → purchase
+
+*Last updated by agent — 2026-03-11. Upgrade screen UX: ship orientation, interaction cleanup, view zone.*
+
+---
+
+### 2026-03-11 — Mobile View Improvements, Debris Visibility, Rock Glow
+
+1. **Mobile camera zoom increased** — `MOBILE_CAMERA_ZOOM` bumped from 1.5 → 1.75 in Constants.ts. Mobile players now see ~685×457 of the world (was ~800×533), making everything larger and more readable on small screens.
+
+2. **Upgrade screen mobile scale-up** — On touch devices:
+   - Bottom bar buttons: height 44→58px, START RUN width 260→340px, Y position shifted down 12px
+   - Title: 18→24px font
+   - Interact prompt ("TAP RIGHT SIDE TO BUY"): 11→16px font, positioned higher
+   - Desktop rendering unchanged
+
+3. **Debris asteroids more visible** — Size range 2–5 → 3–6px, draw scale 1.6–2.4× → 1.8–2.6×, opacity 0.12–0.3 → 0.15–0.35. Background debris is now more visible without being distracting.
+
+4. **Damaging rocks glow more red** — Rock red glow halo intensity doubled: color `rgba(255,40,40,0.6)` → `rgba(255,20,20,0.9)`, gradient inner radius `0.3` → `0.2` (tighter center), outer radius `2.0` → `2.5` (wider spread). Dangerous rocks now have a prominent red danger halo.
+
+*Last updated by agent — 2026-03-11. Mobile view improvements, debris visibility, rock glow.*
+
+---
+
+### 2026-03-11 — Interactive Tutorial System
+
+Replaced the static 3-page tutorial overlay with a playable 3-step interactive tutorial that runs on the game canvas using real controls (joystick/mouse + dash). Works on both mobile and desktop.
+
+1. **New `TutorialSystem` class** (`src/game/TutorialSystem.ts`) — Self-contained state machine with 3 steps:
+   - **Step 1: Movement** — Ghost ship demos flying to a waypoint marker, then "YOUR TURN!" prompt. Player must move to the pulsing cyan waypoint ring using real controls (joystick or mouse).
+   - **Step 2: Dash** — Ghost ship demos a dash teleport, then "YOUR TURN!" prompt. Player must press Shift (desktop) or tap the dash button (mobile). On mobile, an animated arrow points to the dash button.
+   - **Step 3: Enemies** — Three sub-phases: (A) Watch a harmless grey rock pass through the mothership safely. (B) Watch a red-glowing rock hit the mothership and deal damage. (C) Player must fly close to a red rock to destroy it with auto-fire.
+   - Each step has intro → ghost_demo → player_turn → success phases with timer-based transitions.
+
+2. **Ghost ship rendering** — Semi-transparent player sprite (alpha 0.2–0.4, breathing) with faint trailing path line. "DEMO" label above. Fades out during player's turn.
+
+3. **`"tutorial"` game state added** — `GameState` type extended with `"tutorial"`. `Game.update()` and `Game.render()` delegate to `TutorialSystem` when in this state. Tutorial has its own render pipeline (calls beginFrame/endFrame internally) with camera follow, debris, particles, and mobile controls.
+
+4. **`startTutorial(returnTo)` method on Game** — Accepts `"menu"` (tutorial → start first run) or `"playing"` (tutorial → resume current run). Creates a `TutorialSystem` instance with a completion callback that sets `tutorialSeen = true`, saves, and transitions appropriately.
+
+5. **`startTutorial()` on ScreenManager** — Public method that initializes audio, shows the game canvas, and delegates to `Game.startTutorial()`. Called by MenuScreen and PauseMenu.
+
+6. **Tutorial button on main menu** — "📖 TUTORIAL" button below the start button. First-time players (tutorialSeen=false) auto-launch the tutorial on any click. Returning players can click the tutorial button to replay.
+
+7. **Tutorial button in pause menu** — "📖 TUTORIAL" button between Resume and Forfeit. Clicking it stops the cone track, switches to tutorial state (returnTo="playing"), and resumes gameplay after tutorial completion.
+
+8. **Skip tutorial** — ESC key (desktop) or hint text at bottom. Calls `tutorial.skip()` which fires the completion callback immediately.
+
+9. **MenuScreen cleaned up** — Removed all old static tutorial code (~500 lines of renderTutorialPage1/2/3, drawPageDots, drawContinueButton, drawOverlay, drawSpriteShowcase, drawStepPanel). File reduced from ~650 lines to ~200 lines.
+
+**Files created**: `src/game/TutorialSystem.ts` (580 lines)
+**Files modified**: `Game.ts` (+tutorial state, startTutorial, update/render wiring, ESC skip, pause menu handler), `ScreenManager.ts` (+startTutorial method), `MenuScreen.ts` (complete rewrite — tutorial button, removed static pages), `PauseMenu.ts` (+tutorial layout/click/render), `ARCHITECTURE.md`
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Interactive tutorial system.*
+
+---
+
+### 2026-03-11 — Algorithmic Art System (Sacred Geometry + Geometric Bursts + Formation Spawning)
+
+Added three interconnected algorithmic art systems to enhance the visual and gameplay experience:
+
+1. **Sacred Geometry Background** (`src/systems/AlgoArt.ts` → `SacredGeometryBg`)
+   - Rotating flower-of-life mandala rendered behind all entities in world-space
+   - 5 concentric rings with different rotation speeds creating moiré interference patterns
+   - Golden spiral (Fibonacci-based logarithmic spiral) slowly rotating
+   - 6-petal flower-of-life overlay at center
+   - Connections between adjacent ring dots forming a web of sacred geometry
+   - All elements very faint (3–8% opacity) so they don't distract from gameplay
+   - Breathing animation (6% radius oscillation) gives organic feel
+
+2. **Geometric Particle Death Bursts** — Replaced uniform `emit()` calls on enemy death with 4 cycling mathematical patterns:
+   - **Fibonacci sunflower spiral**: Particles placed at golden-angle offsets with √i radius distribution (phyllotaxis)
+   - **Spirograph (hypotrochoid)**: Intricate looping petal curves from parametric equations
+   - **Pentagonal symmetric star**: 5-fold rotational symmetry with inner/outer arms
+   - **Golden ratio concentric rings**: Rings at PHI^n spacing, each offset by the golden angle
+   - **Boss/elite enemies** get dramatic double-pattern: spirograph + golden rings
+   - Pattern cycles with `algoKillCounter` so every 4th kill repeats
+
+3. **Formation Spawning** — Enemies spawn in mathematical patterns (level 2+):
+   - **Lissajous curves**: Figure-8s and pretzel shapes from parametric `sin(at + δ), sin(bt)` equations
+   - **Phyllotaxis spirals**: Sunflower arrangements using the golden angle
+   - **Sine waves**: Wavy horizontal lines
+   - **Ring formations**: Perfect circles with optional center enemy
+   - **Cardioid curves**: Heart-shaped enemy arrangements
+   - Formations arrive every 8–15 seconds with a 2-second ghostly preview (dashed lines + dots)
+   - Formation type is randomly selected, enemy count scales with level (7–14)
+   - Preview fades out as enemies begin stagger-spawning at their calculated positions
+
+**Files created**: `src/systems/AlgoArt.ts` (470 lines — all 3 subsystems + formation generators + preview renderer)
+**Files modified**: `src/game/Game.ts` (+imports, +state fields, +updateFormations method, +sacred geometry in render pipeline, +geometric bursts in onEnemyKilled, +formation preview in renderPlaying, +reset in startRun)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Algorithmic art system.*
+
+---
+
+### 2026-03-11 — Shooting Star Performance Fix
+
+1. **Removed `shadowBlur` from shooting stars** — Each star was setting `drawingContext.shadowBlur = 10 * s.life` and `shadowColor` every frame. Canvas shadow operations are extremely expensive GPU ops (already stripped from all gameplay entities for this reason). Replaced with a wider colored stroke line that gives a similar glow appearance at zero GPU shadow cost.
+
+2. **Shortened tail length** — Max tail length reduced from 250px → 100px, min from 60px → 30px. Long tails with two `line()` calls per star were disproportionately expensive. Shorter tails look snappier and more natural.
+
+3. **Pre-computed normalized direction** — `sqrt(vx² + vy²)` was computed twice per star per frame for the tail direction. Now computed once at spawn time and stored as `nx`/`ny` on the star object.
+
+4. **Faster life decay** — `life -= 0.038` → `life -= 0.05` so stars fade out ~30% faster, spending less total time being rendered.
+
+5. **Replaced `splice()` with compact-alive pattern** — Array removal changed from `splice(i, 1)` (O(n) per removal, causes array reallocation) to the same `writeIdx` compaction pattern used by `ParticleSystem` — write live entries forward, then truncate with `.length = writeIdx`. O(n) total instead of O(n²) worst case.
+
+*Last updated by agent — 2026-03-11. Shooting star performance fix.*
+
+---
+
+### 2026-03-11 — Rendering Cache: Fonts + Glow Halos
+
+Added two caching systems to `Renderer.ts` that eliminate repeated per-frame allocations across the entire render pipeline:
+
+1. **Font string cache (`getFont()`)** — New `Renderer.getFont(size, bold?)` method returns cached font strings from a `Map<string, string>`. Eliminates 30+ template-literal allocations per frame (`` `${size}px Tektur` `` or `` `bold ${size}px Tektur` ``). Wired into:
+   - **Renderer.ts**: `drawText()`, `drawTextOutline()`, `measureText()`, `drawTitleText()`, `drawTitleTextOutline()`, `drawButton()` label
+   - **HUD.ts**: All 6 `ctx.font` assignments (timer, coins, bonus, streak, HP label, kills, mobile hint)
+   - **Mothership.ts**: HP text font
+   - **Game.ts**: Damage number font, ability label font
+
+2. **Glow halo texture cache (`getGlowHalo()`)** — New `Renderer.getGlowHalo(color, innerR, outerR, midColor?)` method returns a cached offscreen canvas with a pre-rendered radial gradient circle. Eliminates `createRadialGradient()` + `arc()` + `fill()` on every entity every frame. Radii are quantized to integers to keep the cache small. Wired into:
+   - **Rock.ts**: Red/green/gold danger glow halo (was `createRadialGradient` per rock per frame)
+   - **EnemyShip.ts**: Variant-colored glow halo (was `createRadialGradient` per ship per frame)
+
+   With 20 rocks + 10 enemy ships on screen, this eliminates ~30 gradient object allocations + 30 arc draws per frame, replacing them with cached `drawImage` calls.
+
+**Performance impact**: P7 (font cache) fully resolved. P5/P6 partially addressed — entity glow halos (the most frequent per-frame gradient) are now cached offscreen textures. HUD gradients (`drawGradientBar`, `drawPanel`) still create gradients per call but are called only 2-4× per frame (low priority).
+
+**Files modified**: `Renderer.ts` (+fontCache, +glowCache, +getFont(), +getGlowHalo()), `Rock.ts`, `EnemyShip.ts`, `HUD.ts`, `Mothership.ts`, `Game.ts`
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Rendering cache: fonts + glow halos.*
+
+---
+
+### 2026-03-11 — Algo Art Toggle in Pause Menu
+
+Added a persisted "ALGO ART: ON/OFF" toggle to the pause menu that controls all three algorithmic art subsystems:
+
+1. **`algoArtEnabled` in SaveData** — New boolean field (default: `true`), persisted to localStorage. Migrates cleanly from old saves via `getDefaultSave()` spread.
+
+2. **Pause menu toggle button** — Purple-themed "✦ ALGO ART: ON" button between volume bar and resume button. Toggles to dim gray "✦ ALGO ART: OFF" on click. Panel height expanded 480→530px; all buttons below shifted down.
+
+3. **Game.ts guards** — Five sites wrapped in `save.algoArtEnabled` checks:
+   - Sacred geometry `update(dt)` — skipped when off (no CPU cost)
+   - Sacred geometry `render()` — skipped when off
+   - Formation preview `renderFormationPreview()` — hidden when off
+   - Geometric death bursts — falls back to simple `particles.emit()` when off
+   - `algoKillCounter` increment — only ticks when algo art is on
+
+**Files modified**: `SaveManager.ts` (+1 field + default), `PauseMenu.ts` (+layout, +click handler, +render), `Game.ts` (+5 guards)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Algo art toggle in pause menu.*
+
+---
+
+### 2026-03-11 — Sacred Geometry Beat-Sync Pulse
+
+Made the sacred geometry background pulse to the music beat, creating a unified "everything throbs to the rhythm" visual effect.
+
+1. **Beat pulse system in `SacredGeometryBg`** — New `beatPulse` field (0–1) with fast exponential decay (`1 - dt * 8`, ~0.12s half-life). `pulse()` method sets it to 1.
+
+2. **Visual amplification on beat** — All sacred geometry elements respond to the pulse:
+   - **Alpha boost**: All elements get `alphaBoost = 1 + bp * 4` (up to 5× brighter on beat)
+   - **Radius expansion**: Breath multiplier gains `+bp * 0.15` (15% radius throb)
+   - **Line thickness**: Connections 0.5→1.0px, ring circles 0.4→1.2px, spiral 0.8→2.3px on beat
+   - **Expanding pulse ring**: Cyan circle radiates from mandala center (0→400px) on each beat, fading with pulse intensity
+
+3. **Wired to every music beat** — `Game.onBeat()` calls `sacredGeometry.pulse()` on every beat (not just cone fire beats), so the background pulses at the full BPM. Respects `algoArtEnabled` toggle.
+
+**Files modified**: `AlgoArt.ts` (+beatPulse field, +pulse() method, +alphaBoost/breath in render), `Game.ts` (+pulse call in onBeat)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Sacred geometry beat-sync pulse.*
+
+---
+
+### 2026-03-11 — Tutorial UX: Instant Control + Debris Overhaul
+
+1. **Instant player control in tutorial** — Removed the "intro" delay phase from all tutorial steps. The player can now move from the very first frame of each step, even while the ghost ship is demonstrating. No more waiting — you have control immediately.
+
+2. **Player auto-faces ghost during demo** — When the ghost ship is visible and the player isn't actively moving, the player's ship angle automatically rotates to point toward the ghost. This ensures the player sees the demo and naturally faces the right direction when the ghost finishes.
+
+3. **Ghost spawns in player's direction** — In step 2 (dash), the ghost's waypoint is calculated from the player's current facing angle, so the ghost dashes in the direction the player is already looking.
+
+4. **Debris flies straight over mothership** — Complete rewrite of `Debris.ts`. Debris asteroids now:
+   - Fly in a perfectly straight line (direction computed once at spawn, never changes)
+   - Pass directly through/over the mothership area and off the bottom of screen
+   - Are fully visible (opacity 1.0 instead of 0.15–0.35)
+   - Are slightly larger (size 4–7, drawScale 2.2–3.0×)
+   - Move faster (60–120 px/s instead of 18–45)
+   - Removed all veer/flee logic — no more computing perpendicular deflection directions
+   - No `targetPos`, `fleeRadius`, or `fleeDir` fields — just `dirX`/`dirY` set once
+
+5. **Fixed step 2 dash arrow** — Replaced the weird dashed-line arrow pointing at the dash button with a clean animated pulsing dashed circle around the dash button area + "TAP HERE!" label. Animated `lineDashOffset` for spinning effect.
+
+6. **Centralized dash handling in tutorial** — All dash input is now handled once in the top-level `update()` method instead of being duplicated in `updateStep2` and `updateStep3`. Cleaner, no double-consume risk.
+
+**Files modified**: `src/entities/Debris.ts` (complete rewrite), `src/game/TutorialSystem.ts` (major restructure)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Tutorial UX: instant control + debris overhaul.*
+
+---
+
+### 2026-03-11 — Killable Debris with Coin Drops
+
+1. **Debris asteroids are now killable** — `Debris.ts` gained `hp: 1` and `takeDamage()` method. Player bullets destroy debris in one hit (any damage kills).
+
+2. **50% coin drop chance** — When debris is killed, there's a 50% chance to drop 1 coin at the debris position. Coins get the player's `coinMagnetRange` for auto-attraction. This gives players a secondary income stream from shooting the ambient background rocks.
+
+3. **Bullets pierce through debris** — Player bullets are NOT consumed when hitting debris, so they continue to their intended enemy targets. One debris per bullet per frame to avoid redundant checks.
+
+4. **New `checkBulletDebrisCollisions()` in CollisionSystem** — Circle-circle collision between player bullets and debris array. Called in `updatePlaying()` right after `checkBulletEnemyCollisions()`.
+
+5. **`IGame` interface updated** — Added `debris: Debris[]` field so `CollisionSystem` can access the debris array through the typed interface.
+
+6. **Fixed pre-existing build error** — `TutorialSystem.ts` was missing `import { Rock }` — added the import to fix compilation.
+
+**Files modified**: `Debris.ts` (+hp, +takeDamage), `CollisionSystem.ts` (+checkBulletDebrisCollisions, +Coin import), `GameInterface.ts` (+debris field, +Debris import), `Game.ts` (+collision call), `TutorialSystem.ts` (+Rock import fix)
+
+*Last updated by agent — 2026-03-11. Killable debris with coin drops.*
+
+---
+
+### 2026-03-11 — Boss Hitbox Fix, Pulse Weapon Visuals, Mothership Death Cleanup
+
+1. **Fixed pulse weapon not hitting large enemies** — The cone/pulse weapon's hit check used `dist > CONE_RANGE` (center-to-center distance), meaning you had to get within 18px of an enemy's CENTER to hit it. For the mega rock boss (radius 45), you'd have to fly deep inside its body. Changed all 3 hit-check sites (`fireConeWeapon`, `fireDashConeHit`) to `dist - enemy.radius > CONE_RANGE` — now the pulse hits any enemy whose EDGE is within range. This massively improves boss and large rock hittability.
+
+2. **Upgraded pulse weapon particle visuals** — Replaced the old 16-particle ring burst with a more dramatic "death pulse" effect:
+   - **Inner ring**: 20 cyan particles expanding outward from player center at 120px/s (was 16 at 70px/s)
+   - **Outer ring**: 12 light-blue particles at 160px/s with tighter spread, creating a two-wave shockwave
+   - **Core flash**: 8 white particles (was 6) at larger size for a brighter impact center
+   - Overall effect is a much more visible and satisfying beat-synced pulse
+
+3. **Fixed mothership death leaving a "cloud of shit"** — When the mothership was destroyed, the massive 100-particle explosion (50 red + 30 orange + 20 white, sizes up to 6px, lasting 0.8s) would persist into the gameover state and keep rendering behind the gameover UI panel as a lingering cloud of colored dots. Added `particles.clear()` in `endRound()` right before transitioning to `"gameover"` state, so the explosion plays during the 1.2s death delay but is cleaned up before the gameover screen renders.
+
+**Files modified**: `src/game/Game.ts` (hitbox fix × 3 sites, particle upgrade, particle clear)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Boss hitbox fix, pulse visuals, mothership death cleanup.*
+
+---
+
+### 2026-03-11 — Upgrade Screen: Thruster Trail, Node Spread, HOME Removal
+
+1. **Removed "HOME" text from root node** — The center root node in the upgrade screen no longer displays the word "HOME". The dark backdrop + rotating cyan ring segments remain as the visual identity.
+
+2. **Engine thruster trail in regular gameplay** — Player ship now emits cyan engine glow particles (~20/sec) and occasional white core particles (~8/sec) behind it while moving (not during dash). Particles spawn at the back of the ship (opposite of facing angle) with slight spread, creating a subtle thruster flame trail matching the upgrade screen's ship trail visual. Uses existing `ParticleSystem.emitDirectional()` — no new allocations.
+
+3. **Spread out overlapping upgrade nodes** — Widened `BRANCH_ANGLES` in `UpgradeTree.ts` so branches no longer overlap:
+   - `guns`: 120° → 100° (upper-left, wider from dmg)
+   - `health`: 210° → 260° (lower-left, wider from dmg)
+   - `movement`: 255° → 270° (straight down)
+   - `economy`: 0° → 15° (slight upper-right)
+   - `mothership`: -30° → -60° (wider upper-right)
+   - `dmg` unchanged at 180°
+
+**Files modified**: `UpgradeScreen.ts` (removed HOME label), `Game.ts` (thruster trail particles in updatePlaying), `UpgradeTree.ts` (BRANCH_ANGLES spread)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Upgrade screen: thruster trail, node spread, HOME removal.*
+
+---
+
+### 2026-03-11 — Upgrade Screen Dash Key + Tutorial Step 2 Fix
+
+1. **Upgrade screen: purchase key changed from Space to Shift (Dash)** — The upgrade screen's ship-to-node purchase interaction now uses Shift (the game's dash key) instead of Space. All UI text updated: prompt says "DASH TO BUY" (was "SPACE TO BUY"), tooltip says "Dash to buy" (was "Fire to buy"). Enter key and mobile right-side tap still work as alternatives.
+
+2. **Tutorial step 2: fixed auto-dash during ghost demo** — Dash input is now only executed during `player_turn` and `destroy_red` phases. Previously, `dashEnabled = true` was set at the start of step 2 (during `ghost_demo` phase), so a held Shift key or stale `dashRequested` would trigger an immediate auto-dash before the player was supposed to act. The `consumeDash()` call still drains stale requests in all phases, but `tryDash()` is only called when the player should actually be dashing.
+
+**Files modified**: `src/ui/UpgradeScreen.ts` (shift key, prompt/tooltip text), `src/game/TutorialSystem.ts` (phase-gated dash execution)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Upgrade screen dash key + tutorial step 2 fix.*
+
+---
+
+### 2026-03-11 — Favicon Redesign (Algo Art Style)
+
+1. **New sacred geometry favicon** — Replaced the simple flat spaceship favicon with a detailed SVG that combines the player ship with the game's algorithmic art visual language:
+   - **Player ship** in neon stroke style matching `pulse-player.svg` — dark fill, cyan `#00d4ff` hull stroke, cockpit, engine thruster with bloom glow
+   - **Sacred geometry mandala** behind the ship — 4 concentric rings (cyan/blue/purple), flower of life (6 overlapping circles + center), golden spiral hint, radial connection lines
+   - **Ring dots** at golden-angle positions in two rings (inner 6, outer 6) using the game's 3 palette colors
+   - **Fibonacci sparkle particles** scattered at golden-angle distributed positions
+   - SVG filters: `bloom` (double gaussian blur merge) for neon glow, `softglow` for geometry, `shipglow` for hull edge
+   - Dark background `#060612` with rounded corners (rx=16)
+   - 128×128 viewBox for crisp rendering at all favicon sizes
+
+2. **Fixed pre-existing UpgradeIcons.ts build errors** — `drawGravityWell` and `drawForwardField` were defined after the `ICON_MAP` that referenced them (and duplicated at the bottom). Moved definitions before the lookup table and removed duplicates. Build now passes cleanly.
+
+*Last updated by agent — 2026-03-11. Favicon redesign + UpgradeIcons build fix.*
+
+---
+
+### 2026-03-11 — Player Pulse Visual: Purchase-Style Shockwave
+
+1. **Replaced pulse weapon firing visual with exact upgrade-screen purchase shockwave** — The old cone weapon visual (expanding ring + splash gradient + spike lines driven by `coneFlashTimer`) was completely replaced with the same array-based `PulseShockwave` system used in UpgradeScreen.ts:
+   - **New `PulseShockwave` interface**: `{ x, y, timer, maxTimer, color }` — identical to upgrade screen's `PurchaseShockwave`
+   - **`pulseShockwaves: PulseShockwave[]`** array on Game class — pushed on every `fireConeWeapon()` call with `timer: 0.35`, `color: COLORS.player`
+   - **Timer update** in `updatePlaying()` — countdown + splice when expired (same pattern as upgrade screen)
+   - **Render** is a character-for-character copy of `UpgradeScreen.renderShockwaves()`: outer ring with `shadowBlur: 10` + glow, inner ring at 50% radius, both fading with `1 - progress` alpha, line width thinning as `3 * (1 - progress)`
+   - Base radius uses `CONE_RANGE` (18px) scaled by `1 + progress * 2.5` (same `NODE_RADIUS * (1 + progress * 2.5)` formula)
+   - Old `isFiring`/`flashPower` render block removed (was driving spike lines + splash gradient)
+   - Loader ring and pre-fire ambient glow unchanged
+
+**Files modified**: `src/game/Game.ts` (+PulseShockwave interface, +array field, +push in fireConeWeapon, +timer update in updatePlaying, +render in renderPlaying, -old isFiring block)
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Player pulse visual: purchase-style shockwave.*
+
+---
+
+### 2026-03-11 — Tutorial Step 3: Enemy Ship Kill + Mothership Explosion
+
+Replaced the old 3-sub-phase rock tutorial (watch harmless → watch dangerous → destroy rock) with a cleaner 2-phase enemy ship + mothership explosion flow:
+
+1. **`destroy_ship` phase** — A pulse-variant `EnemyShip` spawns ~100px from the player (1 HP, stationary, no shooting). Player flies close and their auto-fire pulse instantly kills it. Pulsing red dashed target ring draws attention to the enemy. Big 3-layer explosion particles + screen shake on kill.
+
+2. **`mothership_explode` phase** — After 1.2s pause, mothership dramatically explodes (50 red + 30 orange + 20 white particles, heavy screen shake 10). "OH NO..." header turns red, then after explosion settles: "DEFEND THE MOTHERSHIP!" / "Don't let enemies reach it" → "GOT IT — LET'S GO!" success text → tutorial ends.
+
+3. **Removed all rock-based tutorial code** — Deleted `Rock` import, `tutorialRocks[]` array, `harmlessRockDone`/`dangerousRockHit`/`playerRockKilled` flags, `spawnHarmlessDebris()`, `updateHarmlessRock()`, `spawnDangerousRock()`, `updateDangerousRock()`, `transitionToPlayerDestroy()`, and the old `watch_harmless`/`watch_dangerous`/`destroy_red` phase types.
+
+4. **Updated `StepPhase` type** — Replaced `"watch_harmless" | "watch_dangerous" | "destroy_red"` with `"destroy_ship" | "mothership_explode"`.
+
+**Files modified**: `src/game/TutorialSystem.ts`
+**Build**: `pnpm finish` passes (tsc, eslint, prettier — zero errors)
+
+*Last updated by agent — 2026-03-11. Tutorial step 3: enemy ship kill + mothership explosion.*
+
+---
+
+### 2026-03-11 — QA Testing Report (Desktop + Mobile Notes)
+
+**Automated browser testing** performed via Puppeteer (900×600 viewport, desktop mode). Mobile testing limited due to Puppeteer's inability to emit real touch events (game detects mobile via `ontouchstart`/`maxTouchPoints`).
+
+#### Fixes Applied During Testing
+
+1. **`bgDrawScanlines` reference error (index.html)** — `draw()` in the p5.js background sketch called `bgDrawScanlines()` which was never defined. Removed the call. The `scanlineOpacity` param in `bgParams` is now unused dead config.
+
+#### Desktop Test Results — All Screens Functional ✅
+
+| Screen | Status | Notes |
+|---|---|---|
+| **Menu** | ✅ | Title, subtitle, Level/Stars/Coins display, TAP TO START + TUTORIAL buttons, control hints, volume slider all render correctly. Animated cosmic background visible. |
+| **Tutorial** | ✅ | 3-step interactive tutorial (move → dash → destroy ship) works. Step indicators at bottom. ESC skip works. Ghost demo + "YOUR TURN!" prompts display correctly. |
+| **Gameplay** | ✅ | HUD (LV, timer bar, coins, HP hearts, kills), enemies (rocks with red glow, enemy ships), debris, mothership HP bar, ability label ("DASH BOMB"), pause button (‖) all render and function. Beat-synced pulse weapon fires visually. Sacred geometry mandala visible behind entities. |
+| **Pause Menu** | ✅ | Music track selector (Fire/Chill🔒/Trap🔒), volume bar at 7%, Algo Art toggle, Resume, Tutorial, Back to Upgrades buttons all present and clickable. P key toggle works. |
+| **Game Over** | ✅ | Death cause theming works ("MOTHERSHIP DESTROYED" red theme on K-forfeit). Stats panel shows Coins Earned, Enemies Defeated, Total Coins. CONTINUE button navigates to upgrade screen. |
+| **Upgrade Screen** | ✅ | Constellation map with ship navigation. Ship follows mouse on desktop. Nodes display with correct icons (canvas-drawn neon geometric), branch colors, costs, progress arcs. Tooltip on hover shows name/description/cost. START RUN, MENU, RESET, PRESTIGE buttons present. |
+
+#### Bugs Found During Testing
+
+| # | Severity | Description | Location |
+|---|---|---|---|
+| 31 | 🟡 **Medium** | **Upgrade screen: ship follows mouse to bottom bar buttons, making them hard to click** — On desktop, the ship-follow-mouse system moves the ship toward the cursor even when hovering over bottom bar buttons (START RUN, MENU). The click handler does fire `handleClick()` and check `clickables`, but the ship's movement toward the cursor makes precise clicking feel unreliable. Buttons DO work when clicked precisely (tested: START RUN at correct Y coordinate, RESET in top-right), but the ship drifting toward the button area during the click is confusing UX. **Fix**: Add a dead zone or disable mouse-follow when cursor is in the bottom bar Y region (below `GAME_HEIGHT - 160`). |
+| 32 | 🟡 **Medium** | **K-key forfeit shows "MOTHERSHIP DESTROYED" instead of a neutral forfeit message** — Pressing K during gameplay immediately ends the round with `deathCause: "mothership"`, showing the dramatic red "MOTHERSHIP DESTROYED" screen. Should show something like "ROUND FORFEITED" or "BACK TO UPGRADES" since the mothership wasn't actually destroyed. |
+| 33 | 🟢 **Low** | **`bgDrawScanlines` was called but never defined** — ✅ **FIXED** — Removed the call from `draw()` in `index.html`. `scanlineOpacity` param in `bgParams` is now dead config that could be cleaned up. |
+| 34 | 🟢 **Low** | **`drawGravityWell` and `drawForwardField` previously duplicated in UpgradeIcons.ts** — Two const declarations each appeared twice (before and after ICON_MAP). esbuild/Vite caught this at dev-server transform time but `tsc` did not flag it (since the file has different module semantics). Appears to have been fixed in a recent commit. |
+
+#### Mobile Testing Limitations
+
+- **Puppeteer cannot emulate `ontouchstart` in window** — The game detects mobile via `'ontouchstart' in window || navigator.maxTouchPoints > 0`. Puppeteer's mouse events are treated as desktop mouse input, so all mobile-specific code paths (joystick, dash button, `MOBILE_SPRITE_SCALE`, `MOBILE_CAMERA_ZOOM`, mobile button sizing) cannot be exercised through automated browser testing.
+- **Recommendation**: For mobile QA, use a real device or Chrome DevTools with "Toggle device toolbar" + "Emulate touch" enabled. Key areas to verify on mobile:
+  - Touch joystick (left side) + dash button (bottom-right) responsiveness
+  - Mobile camera zoom (1.75×) centering and clamping
+  - Pause menu touch targets (track buttons, volume drag, resume, forfeit)
+  - Upgrade screen touch joystick + right-side fire zone for purchases
+  - Tutorial dash button animation ("TAP HERE!" pulsing circle)
+  - Bottom bar buttons on upgrade screen at larger mobile sizes
+
+*Last updated by agent — 2026-03-11. QA testing report.*

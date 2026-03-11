@@ -15,7 +15,7 @@ export const isMobileDevice =
 export const MOBILE_SPRITE_SCALE = 1;
 
 /** Camera zoom level on mobile — shows a zoomed-in portion of the 1200×800 world that follows the player */
-export const MOBILE_CAMERA_ZOOM = 1.5;
+export const MOBILE_CAMERA_ZOOM = 2;
 
 // Canvas
 export const GAME_WIDTH = 1200;

@@ -12,6 +12,7 @@ const GAME_KEYS = new Set([
   "arrowleft",
   "arrowright",
   " ",
+  "shift",
 ]);
 
 /** Virtual joystick state (mobile only) */
@@ -96,6 +97,10 @@ export class InputManager {
       this.keys.add(key);
       if (GAME_KEYS.has(key)) {
         e.preventDefault();
+      }
+      // Shift triggers dash (keyboard equivalent of touch dash zone)
+      if (key === "shift") {
+        this.dashRequested = true;
       }
     };
 

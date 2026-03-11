@@ -7,6 +7,15 @@ export class Renderer {
   private shakeAmount = 0;
   private shakeDecay = 0.9;
 
+  // ── Caches ──────────────────────────────────────────────────
+  /** Font string cache — avoids 30+ template-literal allocations per frame */
+  private fontCache = new Map<string, string>();
+  /** Glow halo texture cache — keyed by "color|innerR|outerR" → offscreen canvas */
+  private glowCache = new Map<
+    string,
+    { canvas: OffscreenCanvas | HTMLCanvasElement; size: number }
+  >();
+
   /** Device pixel ratio — set once at init, updated on resize */
   private dpr = 1;
 
@@ -91,6 +100,13 @@ export class Renderer {
       this.ctx.setTransform(this.baseTransform);
     }
     this.ctx.save();
+
+    // Clip to the logical game area — prevents any rendering from leaking into
+    // the viewport region outside the 1200×800 game bounds (letter-box margins).
+    this.ctx.beginPath();
+    this.ctx.rect(0, 0, GAME_WIDTH, GAME_HEIGHT);
+    this.ctx.clip();
+
     // Clear the entire logical area (need to clear wider when zoomed in)
     if (this.cameraZoom > 1) {
       // Clear a region large enough to cover the full canvas regardless of camera
@@ -146,6 +162,17 @@ export class Renderer {
   /** Restore the camera transform after screen-space rendering. */
   popScreenSpace() {
     this.ctx.restore();
+  }
+
+  /**
+   * Convert CSS client coordinates to game-logical coordinates (0..GAME_WIDTH, 0..GAME_HEIGHT).
+   * Replaces the duplicated `getScaledCoords` closures in Game.ts, MenuScreen.ts, UpgradeScreen.ts.
+   */
+  screenToGame(clientX: number, clientY: number): { mx: number; my: number } {
+    return {
+      mx: (clientX - this.gameOffsetX) / this.gameScale,
+      my: (clientY - this.gameOffsetY) / this.gameScale,
+    };
   }
 
   /**
@@ -212,7 +239,7 @@ export class Renderer {
     align: CanvasTextAlign = "left",
     baseline: CanvasTextBaseline = "top"
   ) {
-    this.ctx.font = `${size}px Tektur`;
+    this.ctx.font = this.getFont(size);
     this.ctx.fillStyle = color;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
@@ -229,7 +256,7 @@ export class Renderer {
     align: CanvasTextAlign = "left",
     baseline: CanvasTextBaseline = "top"
   ) {
-    this.ctx.font = `${size}px Tektur`;
+    this.ctx.font = this.getFont(size);
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
     this.ctx.strokeStyle = outlineColor;
@@ -240,7 +267,7 @@ export class Renderer {
   }
 
   measureText(text: string, size: number = 14): number {
-    this.ctx.font = `${size}px Tektur`;
+    this.ctx.font = this.getFont(size);
     return this.ctx.measureText(text).width;
   }
 
@@ -256,7 +283,7 @@ export class Renderer {
     align: CanvasTextAlign = "center",
     baseline: CanvasTextBaseline = "middle"
   ) {
-    this.ctx.font = `bold ${size}px Tektur`;
+    this.ctx.font = this.getFont(size, true);
     this.ctx.fillStyle = color;
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
@@ -274,7 +301,7 @@ export class Renderer {
     align: CanvasTextAlign = "center",
     baseline: CanvasTextBaseline = "middle"
   ) {
-    this.ctx.font = `bold ${size}px Tektur`;
+    this.ctx.font = this.getFont(size, true);
     this.ctx.textAlign = align;
     this.ctx.textBaseline = baseline;
     this.ctx.strokeStyle = outlineColor;
@@ -512,13 +539,70 @@ export class Renderer {
 
     // Label text
     const textX = icon ? x + w / 2 + 4 : x + w / 2;
-    this.ctx.font = `bold ${fontSize}px Tektur`;
+    this.ctx.font = this.getFont(fontSize, true);
     this.ctx.fillStyle = textColor;
     this.ctx.textAlign = "center";
     this.ctx.textBaseline = "middle";
     this.ctx.fillText(label, textX, y + h / 2 + 1);
 
     this.ctx.restore();
+  }
+
+  // ── Cache helpers ───────────────────────────────────────────
+
+  /** Get a cached font string — avoids template literal allocation per call */
+  getFont(size: number, bold = false): string {
+    const key = bold ? `b${size}` : `${size}`;
+    let f = this.fontCache.get(key);
+    if (!f) {
+      f = bold ? `bold ${size}px Tektur` : `${size}px Tektur`;
+      this.fontCache.set(key, f);
+    }
+    return f;
+  }
+
+  /**
+   * Get a cached glow halo texture (offscreen canvas with pre-rendered radial gradient).
+   * Returns the canvas and its pixel size. Draw it centered on the entity with drawImage.
+   * Halo is centered in the canvas at (size/2, size/2).
+   */
+  getGlowHalo(
+    color: string,
+    innerRadius: number,
+    outerRadius: number,
+    midColor?: string
+  ): { canvas: OffscreenCanvas | HTMLCanvasElement; size: number } {
+    // Quantize radii to nearest int to keep cache small
+    const ir = Math.round(innerRadius);
+    const or = Math.round(outerRadius);
+    const key = `${color}|${ir}|${or}|${midColor ?? ""}`;
+    let entry = this.glowCache.get(key);
+    if (!entry) {
+      const size = or * 2 + 2; // +2 for rounding safety
+      let canvas: OffscreenCanvas | HTMLCanvasElement;
+      if (typeof OffscreenCanvas !== "undefined") {
+        canvas = new OffscreenCanvas(size, size);
+      } else {
+        canvas = document.createElement("canvas");
+        canvas.width = size;
+        canvas.height = size;
+      }
+      const gCtx = canvas.getContext("2d")!;
+      const cx = size / 2;
+      const grad = (gCtx as CanvasRenderingContext2D).createRadialGradient(cx, cx, ir, cx, cx, or);
+      grad.addColorStop(0, color);
+      if (midColor) {
+        grad.addColorStop(0.5, midColor);
+      }
+      grad.addColorStop(1, "rgba(0,0,0,0)");
+      (gCtx as CanvasRenderingContext2D).fillStyle = grad;
+      (gCtx as CanvasRenderingContext2D).beginPath();
+      (gCtx as CanvasRenderingContext2D).arc(cx, cx, or, 0, Math.PI * 2);
+      (gCtx as CanvasRenderingContext2D).fill();
+      entry = { canvas, size };
+      this.glowCache.set(key, entry);
+    }
+    return entry;
   }
 
   /** Utility: hex color to rgba string */

@@ -79,6 +79,22 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     costs: [10, 15, 25],
   },
   {
+    id: "dmg_forward",
+    name: "Forward Field",
+    description: "Pulse extends forward in facing direction — bigger reach ahead",
+    branch: "dmg",
+    maxLevel: 1,
+    baseCost: 20,
+    costGrowth: 1,
+    effectPerLevel: 1,
+    requires: [{ id: "dmg_core", level: 1 }],
+    icon: "▶",
+    iconPath: `${A}forward-field.svg`,
+    depth: 2,
+    angleOffset: -0.7,
+    costs: [20],
+  },
+  {
     id: "dmg_range",
     name: "Expanded Rays",
     description: "+20px pulse AoE radius per level",
@@ -443,6 +459,22 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     costs: [10, 25, 50, 100],
   },
   {
+    id: "ms_slow",
+    name: "Gravity Well",
+    description: "Enemies near mothership are slowed — 50% / 60% / 75%",
+    branch: "mothership",
+    maxLevel: 3,
+    baseCost: 10,
+    costGrowth: 1.5,
+    effectPerLevel: 1,
+    requires: [{ id: "econ_duration", level: 1 }],
+    icon: "◎",
+    iconPath: `${A}gravity-well.svg`,
+    depth: 2,
+    angleOffset: 0.5,
+    costs: [10, 15, 30],
+  },
+  {
     id: "ms_turret",
     name: "Sentinel Eye",
     description: "Unlock / upgrade auto-targeting turret — higher level = faster fire",
@@ -546,14 +578,14 @@ export const STAR_UPGRADES: StarUpgrade[] = [
 // BRANCH LAYOUT — evenly spaced in a circle
 // ============================================================
 export const BRANCH_ANGLES: Record<UpgradeBranch, number> = {
-  // Left arm — combat branches fanning from straight-left
+  // Left arm — combat branches fanning wider
   dmg: Math.PI, // 180° straight left
-  guns: (2 * Math.PI) / 3, // 120° upper-left
-  health: (7 * Math.PI) / 6, // 210° lower-left
-  movement: (17 * Math.PI) / 12, // 255° far lower-left
-  // Right arm — economy / ship branches fanning from straight-right
-  economy: 0, // 0° straight right
-  mothership: -(Math.PI / 6), // -30° upper-right
+  guns: (Math.PI * 5) / 9, // 100° upper-left (was 120°)
+  health: (Math.PI * 13) / 9, // 260° lower-left (was 210°)
+  movement: (Math.PI * 3) / 2, // 270° straight down (was 255°)
+  // Right arm — economy / ship branches spread wider
+  economy: Math.PI / 12, // 15° slight upper-right (was 0°)
+  mothership: -Math.PI / 3, // -60° upper-right (was -30°)
 };
 
 export const BRANCH_COLORS: Record<UpgradeBranch, string> = {

@@ -4,6 +4,28 @@ import { vec2, vecSub, vecNormalize, vecAdd, vecScale, vecAngle, randomRange } f
 import { ENEMY_SHIP_SIZE, COLORS, isMobileDevice, MOBILE_SPRITE_SCALE } from "../utils/Constants";
 import { ShipImages, imageReady } from "../utils/Assets";
 
+// ── Offscreen canvas for safe source-atop tinting ───────────────────
+let _tintCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+let _tintCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+
+function getTintCtx(
+  w: number,
+  h: number
+): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  if (!_tintCanvas || _tintCanvas.width < w || _tintCanvas.height < h) {
+    const size = Math.max(w, h, 128); // allocate at least 128 to reduce re-allocs
+    if (typeof OffscreenCanvas !== "undefined") {
+      _tintCanvas = new OffscreenCanvas(size, size);
+    } else {
+      _tintCanvas = document.createElement("canvas");
+      _tintCanvas.width = size;
+      _tintCanvas.height = size;
+    }
+    _tintCtx = _tintCanvas.getContext("2d")!;
+  }
+  return _tintCtx!;
+}
+
 /** Visual variant for enemy ships */
 export type EnemyShipVariant = "normal" | "pulse" | "bee" | "butterfly" | "boss";
 
@@ -110,31 +132,32 @@ export class EnemyShip extends Enemy {
       ctx.translate(this.pos.x, this.pos.y);
       ctx.rotate(this.angle);
 
-      // Glow halo behind sprite
+      // Glow halo behind sprite — uses cached offscreen texture
       const glowColor = isPoisoned ? "rgba(80,255,80,0.7)" : this.getGlowColor();
-      const glowGrad = ctx.createRadialGradient(0, 0, this.radius * 0.2, 0, 0, this.radius * 2);
-      glowGrad.addColorStop(0, glowColor);
-      glowGrad.addColorStop(1, "rgba(0,0,0,0)");
-      ctx.fillStyle = glowGrad;
-      ctx.beginPath();
-      ctx.arc(0, 0, this.radius * 2, 0, Math.PI * 2);
-      ctx.fill();
+      const halo = renderer.getGlowHalo(glowColor, this.radius * 0.2, this.radius * 2);
+      ctx.drawImage(halo.canvas, -halo.size / 2, -halo.size / 2);
 
-      // Draw sprite
-      if (isPoisoned) {
-        ctx.filter = "hue-rotate(120deg) saturate(3) brightness(1.5)";
+      // Draw sprite — use offscreen canvas for tint overlays to avoid
+      // source-atop bleeding onto the main canvas (Bug #1 fix)
+      if (isPoisoned || this.isElite) {
+        const s = Math.ceil(drawSize);
+        const tCtx = getTintCtx(s, s);
+        tCtx.clearRect(0, 0, s, s);
+        tCtx.globalCompositeOperation = "source-over";
+        tCtx.drawImage(sprite, 0, 0, s, s);
+        if (isPoisoned) {
+          tCtx.globalCompositeOperation = "source-atop";
+          tCtx.fillStyle = "rgba(0, 255, 50, 0.35)";
+          tCtx.fillRect(0, 0, s, s);
+        }
+        if (this.isElite) {
+          tCtx.globalCompositeOperation = "source-atop";
+          tCtx.fillStyle = "rgba(255, 220, 0, 0.25)";
+          tCtx.fillRect(0, 0, s, s);
+        }
+        ctx.drawImage(tCtx.canvas, 0, 0, s, s, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
       } else {
-        ctx.filter = "brightness(1.4) drop-shadow(1px 1px 4px rgba(255,255,255,0.3))";
-      }
-      ctx.drawImage(sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
-      ctx.filter = "none";
-
-      // Elite gold tint overlay
-      if (this.isElite) {
-        ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = "rgba(255, 220, 0, 0.25)";
-        ctx.fillRect(-drawSize / 2, -drawSize / 2, drawSize, drawSize);
-        ctx.globalCompositeOperation = "source-over";
+        ctx.drawImage(sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
       }
 
       ctx.restore();

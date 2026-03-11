@@ -1,12 +1,4 @@
-import {
-  Vec2,
-  vec2,
-  vecAdd,
-  vecScale,
-  randomRange,
-  randomAngle,
-  vecFromAngle,
-} from "../utils/Math";
+import { Vec2, vec2, randomRange, randomAngle, vecFromAngle } from "../utils/Math";
 import { Renderer } from "../rendering/Renderer";
 
 export interface Particle {
@@ -26,15 +18,15 @@ export class ParticleSystem {
     let writeIdx = 0;
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
-      p.pos = vecAdd(p.pos, vecScale(p.vel, dt));
+      // Inline vecAdd + vecScale to avoid 2 object allocations per particle per frame
+      p.pos.x += p.vel.x * dt;
+      p.pos.y += p.vel.y * dt;
       p.life -= dt;
       if (p.life > 0) {
-        // Keep particle — swap to writeIdx
         this.particles[writeIdx] = p;
         writeIdx++;
       }
     }
-    // Trim the array to only living particles
     this.particles.length = writeIdx;
   }
 
@@ -98,5 +90,26 @@ export class ParticleSystem {
 
   clear() {
     this.particles = [];
+  }
+
+  // ── Named Presets ─────────────────────────────────────────────────
+
+  /** 3-layer explosion (red + orange + white). Used for boss kills, mothership death, bombs. */
+  emitExplosion(pos: Vec2, scale: number = 1) {
+    this.emit(pos, Math.round(50 * scale), "#ff4444", 200 * scale, 0.8, 6 * scale);
+    this.emit(pos, Math.round(30 * scale), "#ffaa00", 160 * scale, 0.6, 5 * scale);
+    this.emit(pos, Math.round(20 * scale), "#ffffff", 120 * scale, 0.4, 3 * scale);
+  }
+
+  /** Enemy death burst (explosion color + particle color). */
+  emitEnemyDeath(pos: Vec2, explosionColor: string, particleColor: string) {
+    this.emit(pos, 12, explosionColor, 100, 0.4, 3);
+    this.emit(pos, 6, particleColor, 60, 0.3, 2);
+  }
+
+  /** Coin pickup sparkle (color + white ring). */
+  emitCoinPickup(pos: Vec2, color: string, isRare: boolean) {
+    this.emit(pos, isRare ? 12 : 8, color, isRare ? 60 : 45, 0.3, 1.5);
+    this.emit(pos, 4, "#ffffff", 35, 0.15, 0.8);
   }
 }

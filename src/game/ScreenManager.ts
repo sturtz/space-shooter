@@ -137,6 +137,14 @@ export class ScreenManager {
     this.gameScreen.startRun();
   }
 
+  /** Launch the interactive tutorial on the game canvas */
+  startTutorial(returnTo: "menu" | "playing" = "menu") {
+    this.audio.init();
+    this.audio.applyPreferences(this.save.musicTrack, this.save.musicVolume);
+    this.show("game");
+    this.gameScreen.startTutorial(returnTo);
+  }
+
   /** Called from Game when round ends — go to upgrade screen */
   goToUpgradeScreen() {
     this.audio.stopConeTrack();

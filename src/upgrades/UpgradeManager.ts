@@ -16,6 +16,7 @@ export interface PlayerStats {
   critChance: number;
   critMultiplier: number;
   splashRadius: number; // base AoE radius of pulse weapon
+  forwardPulse: boolean; // pulse extends forward in facing direction
   pierceCount: number; // bullet pierce
   chainTargets: number; // chain lightning jumps
   missileLevel: number; // 0 = none, 1-3 = active; 4 = barrage (4 missiles)
@@ -36,6 +37,10 @@ export interface PlayerStats {
   msBarrierHits: number; // 0 = no barrier
   msBarrierCooldown: number;
   turretLevel: number; // 0 = no turret
+  /** Mothership gravity well: slow strength (0-1) applied to nearby enemies */
+  msSlowStrength: number;
+  /** Mothership gravity well: radius in px around mothership */
+  msSlowRadius: number;
   // === Economy ===
   roundDuration: number;
   coinMagnetRange: number;
@@ -219,6 +224,17 @@ export class UpgradeManager {
     // ms_turret: level = turret tier (0 = none, 1-3 = active)
     const turretLevel = this.getLevel("ms_turret");
 
+    // ── MOTHERSHIP GRAVITY WELL (ms_slow) ─────────────────────────────────
+    // ms_slow: slow enemies near the mothership — 50% / 60% / 75%
+    const msSlowLevel = this.getLevel("ms_slow");
+    const MS_SLOW_TABLE = [0, 0.5, 0.6, 0.75]; // level 0,1,2,3
+    const msSlowStrength = MS_SLOW_TABLE[Math.min(msSlowLevel, MS_SLOW_TABLE.length - 1)];
+    const msSlowRadius = msSlowLevel > 0 ? 100 : 0; // 100px radius around mothership
+
+    // ── FORWARD PULSE (dmg_forward) ───────────────────────────────────────
+    // dmg_forward: pulse extends forward in facing direction
+    const forwardPulse = this.getLevel("dmg_forward") >= 1;
+
     // ── ROUND DURATION ────────────────────────────────────────────────────
     // econ_duration: +50% per level (max 3)
     let roundDuration = BASE_ROUND_DURATION;
@@ -260,6 +276,7 @@ export class UpgradeManager {
       critChance,
       critMultiplier,
       splashRadius,
+      forwardPulse,
       pierceCount,
       chainTargets,
       missileLevel,
@@ -280,6 +297,8 @@ export class UpgradeManager {
       msBarrierHits,
       msBarrierCooldown,
       turretLevel,
+      msSlowStrength,
+      msSlowRadius,
       // Economy
       roundDuration,
       coinMagnetRange,
