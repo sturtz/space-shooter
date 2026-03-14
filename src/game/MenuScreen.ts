@@ -210,7 +210,7 @@ export class MenuScreen {
       ctx.fillStyle = COLORS.textSecondary;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      ctx.fillText("Mouse to move  •  Shift to dash", cx, controlsY + 8);
+      ctx.fillText("Mouse to move  •  Click / Space to dash", cx, controlsY + 8);
       ctx.fillText("Auto-fires to beat  •  Destroy enemies → Coins → Upgrade", cx, controlsY + 24);
       ctx.restore();
     }

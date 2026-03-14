@@ -169,7 +169,7 @@ export class TutorialSystem {
 
       case 2:
         this.dashEnabled = true;
-        this.instructionText = isMobileDevice ? "TAP DASH" : "PRESS SHIFT";
+        this.instructionText = isMobileDevice ? "TAP DASH" : "CLICK TO DASH";
         this.subText = "Watch the ghost dash, then you try!";
         // Ghost starts at player position
         this.ghost.pos = vec2(this.player.pos.x, this.player.pos.y);
@@ -350,7 +350,7 @@ export class TutorialSystem {
           this.setPhase("player_turn");
           this.ghost.visible = false;
           this.instructionText = "YOUR TURN!";
-          this.subText = isMobileDevice ? "Tap the DASH button" : "Press SHIFT to dash";
+          this.subText = isMobileDevice ? "Tap the DASH button" : "Click or press Space to dash";
           this.player.dashCooldown = 0; // ensure dash is ready
         }
         break;

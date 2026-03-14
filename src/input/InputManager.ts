@@ -11,8 +11,14 @@ const GAME_KEYS = new Set([
   "arrowdown",
   "arrowleft",
   "arrowright",
+  "e",
   " ",
   "shift",
+  "enter",
+  "z",
+  "x",
+  "j",
+  "k",
 ]);
 
 /** Virtual joystick state (mobile only) */
@@ -98,8 +104,16 @@ export class InputManager {
       if (GAME_KEYS.has(key)) {
         e.preventDefault();
       }
-      // Shift triggers dash (keyboard equivalent of touch dash zone)
-      if (key === "shift") {
+      // Dash keys: Shift, Space, Enter, Z, X, J (click also triggers dash via onMouseDown)
+      if (
+        key === "shift" ||
+        key === " " ||
+        key === "enter" ||
+        key === "e" ||
+        key === "z" ||
+        key === "x" ||
+        key === "j"
+      ) {
         this.dashRequested = true;
       }
     };
@@ -116,7 +130,10 @@ export class InputManager {
     };
 
     this.onMouseDown = (e: MouseEvent) => {
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) {
+        this.mouseDown = true;
+        this.dashRequested = true;
+      }
     };
 
     this.onMouseUp = (e: MouseEvent) => {
@@ -297,7 +314,8 @@ export class InputManager {
   }
 
   get isFiring(): boolean {
-    // On mobile: auto-shoot is always active (handled by Game.ts for aiming)
-    return this.mouseDown || this.isKeyDown(" ") || this.isTouchDevice;
+    // Firing is beat-synced (auto). On mobile: always active.
+    // Space and click are now dash triggers, not fire.
+    return this.isTouchDevice;
   }
 }

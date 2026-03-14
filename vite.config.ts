@@ -5,6 +5,9 @@ import pkg from "./package.json" with { type: "json" };
 // use a relative base so the site works when hosted under a repo path
 export default defineConfig({
   base: "./",
+  build: {
+    target: "esnext",
+  },
   define: {
     /** Injected at compile-time from package.json — use `npm version patch` to bump */
     __APP_VERSION__: JSON.stringify(pkg.version),

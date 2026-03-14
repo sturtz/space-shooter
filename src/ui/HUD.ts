@@ -13,7 +13,6 @@ export interface HUDData {
   mothershipMaxHp: number;
   playerHp: number;
   playerMaxHp: number;
-  streakCoinBonus: number;
   dashReady: boolean;
   dashCooldownRatio: number;
   isMobile: boolean;
@@ -109,7 +108,6 @@ export class HUD {
     if (data.killStreak > 1) {
       const streakColor =
         data.killStreak > 10 ? "#ff4444" : data.killStreak > 5 ? "#ffaa00" : "#ffff00";
-      const multStr = data.streakCoinBonus > 1.0 ? ` ×${data.streakCoinBonus.toFixed(1)}` : "";
       const streakY = GAME_HEIGHT - 14;
       renderer.drawPanel(pad, streakY - 12, 160, 22, {
         bg: "rgba(40, 20, 0, 0.7)",
@@ -121,7 +119,7 @@ export class HUD {
       ctx.fillStyle = streakColor;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.fillText(`🔥 ${data.killStreak}x STREAK${multStr}`, pad + 8, streakY);
+      ctx.fillText(`🔥 ${data.killStreak}x STREAK`, pad + 8, streakY);
       ctx.restore();
     }
 

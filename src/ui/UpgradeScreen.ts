@@ -479,8 +479,10 @@ export class UpgradeScreen {
     }
 
     // Mouse-follow: ship moves toward cursor in world-space (desktop only, no keyboard/touch active)
+    // Dead zone: don't follow mouse into the bottom bar area where buttons live
     const hasKeyboard = dx !== 0 || dy !== 0;
-    if (!hasKeyboard && !this.touchShipActive) {
+    const mouseInBottomBar = this.mouseY > GAME_HEIGHT - 160;
+    if (!hasKeyboard && !this.touchShipActive && !mouseInBottomBar) {
       const worldMouseX = this.mouseX - this.panX;
       const worldMouseY = this.mouseY - this.panY;
       const toMouseX = worldMouseX - this.shipX;

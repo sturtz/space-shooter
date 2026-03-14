@@ -141,7 +141,7 @@ export class Game implements IGame {
   private _stats!: PlayerStats;
 
   state: GameState = "playing";
-  deathCause: "mothership" | "player" | "time" | "" = "";
+  deathCause: "mothership" | "player" | "time" | "forfeit" | "" = "";
   /** Countdown before transitioning to gameover — lets explosion play out */
   private deathDelay: number = 0;
   private deathDelayActive: boolean = false;
@@ -169,7 +169,6 @@ export class Game implements IGame {
   nextBossElapsed: number = 12;
   gameTime: number = 0;
   paused: boolean = false;
-  screenFlashColor: string = "";
   damageNumbers: DamageNumber[] = [];
   dashRings: DashRing[] = [];
   private lastDt: number = 1 / 60;
@@ -240,10 +239,7 @@ export class Game implements IGame {
           this.startTutorial("playing");
         } else if (action === "forfeit") {
           this.paused = false;
-          this.audio.stopConeTrack();
-          this.save.lifetimeKills += this.roundKills;
-          saveGame(this.save);
-          this.manager.goToUpgradeScreen();
+          this.forfeitRound();
         }
         return;
       }
@@ -325,20 +321,12 @@ export class Game implements IGame {
         this.tutorial.skip();
         return;
       }
-      if (
-        (e.key === "Escape" || e.key.toLowerCase() === "p" || e.key === " ") &&
-        this.state === "playing"
-      ) {
+      if ((e.key === "Escape" || e.key.toLowerCase() === "p") && this.state === "playing") {
         this.togglePause();
       }
-      if (e.key === "Shift" && this.state === "playing" && !this.paused) {
-        this.handleDash();
-      }
+      // Dash is handled via InputManager.consumeDash() in updatePlaying
       if (e.key.toLowerCase() === "k" && this.state === "playing") {
-        this.audio.stopConeTrack();
-        this.save.lifetimeKills += this.roundKills;
-        saveGame(this.save);
-        this.manager.goToUpgradeScreen();
+        this.forfeitRound();
       }
     });
   }
@@ -1195,6 +1183,17 @@ export class Game implements IGame {
     this.stateChangeTime = this.gameTime;
   }
 
+  /** Forfeit the current round — shows gameover screen with neutral "forfeited" message */
+  forfeitRound() {
+    this.audio.stopConeTrack();
+    this.deathCause = "forfeit";
+    this.save.lifetimeKills += this.roundKills;
+    saveGame(this.save);
+    this.particles.clear();
+    this.state = "gameover";
+    this.stateChangeTime = this.gameTime;
+  }
+
   goToUpgradeScreen() {
     this.manager.goToUpgradeScreen();
   }
@@ -1479,8 +1478,6 @@ export class Game implements IGame {
     // ── Switch to screen-space for HUD, mobile controls, overlays ──
     this.renderer.pushScreenSpace();
 
-    const streakBonus = 1; // kill streak bonus removed — econ_combo is now round-end %
-
     this.hud.render(this.renderer, {
       roundTimer: this.roundTimer,
       roundDuration: this.roundDuration,
@@ -1493,7 +1490,6 @@ export class Game implements IGame {
       mothershipMaxHp: this.mothership.maxHp,
       playerHp: this.player.hp,
       playerMaxHp: this.player.maxHp,
-      streakCoinBonus: streakBonus,
       dashReady: this.player.dashReady,
       dashCooldownRatio: this.player.dashCooldownRatio,
       isMobile: this.input.isTouchDevice,

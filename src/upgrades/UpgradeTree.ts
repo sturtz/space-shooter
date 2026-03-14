@@ -8,7 +8,6 @@ export interface UpgradeNode {
   maxLevel: number;
   baseCost: number;
   costGrowth: number;
-  effectPerLevel: number;
   requires?: { id: string; level: number }[];
   icon: string;
   iconPath?: string;
@@ -22,10 +21,6 @@ export function getUpgradeCost(node: UpgradeNode, currentLevel: number): number 
     return node.costs[currentLevel];
   }
   return Math.floor(node.baseCost * Math.pow(node.costGrowth, currentLevel));
-}
-
-export function getUpgradeEffect(node: UpgradeNode, level: number): number {
-  return node.effectPerLevel * level;
 }
 
 // Base asset path for upgrade tree SVGs
@@ -50,7 +45,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 0,
     costGrowth: 1,
-    effectPerLevel: 0,
     icon: "⬡",
     iconPath: `./assets/pulse-player.svg`,
     depth: 0,
@@ -70,7 +64,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 2,
-    effectPerLevel: 0.25,
     requires: [{ id: "root", level: 1 }],
     icon: "⚔",
     iconPath: `${A}sword-brandish.svg`,
@@ -86,7 +79,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 20,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "dmg_core", level: 1 }],
     icon: "▶",
     iconPath: `${A}forward-field.svg`,
@@ -102,7 +94,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 2,
     baseCost: 40,
     costGrowth: 2.5,
-    effectPerLevel: 20,
     requires: [{ id: "dmg_core", level: 1 }],
     icon: "◎",
     iconPath: `${A}expanded-rays.svg`,
@@ -118,7 +109,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 50,
     costGrowth: 2.3,
-    effectPerLevel: 0.08,
     requires: [{ id: "dmg_core", level: 2 }],
     icon: "✦",
     iconPath: `${A}sword-wound.svg`,
@@ -134,7 +124,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 420,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "dmg_range", level: 2 }],
     icon: "☽",
     iconPath: `${A}scythe.svg`,
@@ -156,7 +145,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 50,
     costGrowth: 2.3,
-    effectPerLevel: 1,
     requires: [{ id: "dmg_core", level: 1 }],
     icon: "↑",
     iconPath: `${A}rocket.svg`,
@@ -172,7 +160,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 40,
     costGrowth: 2.3,
-    effectPerLevel: 1,
     requires: [{ id: "dmg_core", level: 2 }],
     icon: "→",
     iconPath: `${A}hypersonic-bolt.svg`,
@@ -188,7 +175,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 55,
     costGrowth: 2.3,
-    effectPerLevel: 1,
     requires: [{ id: "guns_missile", level: 2 }],
     icon: "⚡",
     iconPath: `${A}ringed-beam.svg`,
@@ -204,7 +190,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 450,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "guns_missile", level: 2 }],
     icon: "💣",
     iconPath: `${A}bombing-run.svg`,
@@ -226,7 +211,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 2.3,
-    effectPerLevel: 1.5,
     requires: [{ id: "root", level: 1 }],
     icon: "⏱",
     iconPath: `${A}extra-time.svg`,
@@ -242,7 +226,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 30,
     costGrowth: 2.3,
-    effectPerLevel: 1,
     requires: [{ id: "econ_duration", level: 1 }],
     icon: "◆",
     iconPath: `${A}two-coins.svg`,
@@ -258,7 +241,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 60,
     costGrowth: 2.3,
-    effectPerLevel: 0.1,
     requires: [{ id: "econ_value", level: 2 }],
     icon: "💰",
     iconPath: `${A}coins.svg`,
@@ -274,7 +256,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 2.1,
-    effectPerLevel: 20,
     requires: [{ id: "econ_duration", level: 1 }],
     icon: "○",
     iconPath: `${A}coins.svg`,
@@ -290,7 +271,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 50,
     costGrowth: 2.3,
-    effectPerLevel: 0.04,
     requires: [{ id: "econ_value", level: 1 }],
     icon: "🍀",
     iconPath: `${A}coins.svg`,
@@ -306,7 +286,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 2,
     baseCost: 15,
     costGrowth: 2.5,
-    effectPerLevel: 0.4,
     requires: [{ id: "root", level: 1 }],
     icon: "👾",
     iconPath: `${A}surrounded-eye.svg`,
@@ -328,7 +307,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 2.2,
-    effectPerLevel: 0.25,
     requires: [{ id: "root", level: 1 }],
     icon: "▲",
     iconPath: `${A}jet-pack.svg`,
@@ -344,7 +322,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 50,
     costGrowth: 2.3,
-    effectPerLevel: 40,
     requires: [{ id: "move_speed", level: 1 }],
     icon: "◉",
     iconPath: `${A}flash-grenade.svg`,
@@ -360,7 +337,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 75,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "move_speed", level: 2 }],
     icon: "💣",
     iconPath: `${A}rolling-bomb.svg`,
@@ -376,7 +352,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 210,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "move_mine", level: 1 }],
     icon: "⏰",
     iconPath: `${A}time-trap.svg`,
@@ -397,7 +372,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 2.4,
-    effectPerLevel: 0.05,
     requires: [{ id: "dmg_core", level: 1 }],
     icon: "☠",
     iconPath: `${A}assassin-pocket.svg`,
@@ -413,7 +387,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 38,
     costGrowth: 2.3,
-    effectPerLevel: 0.08,
     requires: [{ id: "eff_poison", level: 1 }],
     icon: "↓",
     iconPath: `${A}drop.svg`,
@@ -429,7 +402,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 1,
     baseCost: 80,
     costGrowth: 1,
-    effectPerLevel: 1,
     requires: [{ id: "eff_poison", level: 2 }],
     icon: "💣",
     iconPath: `${A}unlit-bomb.svg`,
@@ -450,7 +422,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 4,
     baseCost: 10,
     costGrowth: 2.2,
-    effectPerLevel: 1,
     requires: [{ id: "econ_duration", level: 1 }],
     icon: "⬡",
     iconPath: `${A}shield.svg`,
@@ -466,7 +437,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 10,
     costGrowth: 1.5,
-    effectPerLevel: 1,
     requires: [{ id: "econ_duration", level: 1 }],
     icon: "◎",
     iconPath: `${A}gravity-well.svg`,
@@ -482,7 +452,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 50,
     costGrowth: 2.4,
-    effectPerLevel: 1,
     requires: [{ id: "ms_hull", level: 2 }],
     icon: "◉",
     depth: 3,
@@ -497,7 +466,6 @@ export const UPGRADE_TREE: UpgradeNode[] = [
     maxLevel: 3,
     baseCost: 40,
     costGrowth: 2.3,
-    effectPerLevel: 1,
     requires: [{ id: "ms_hull", level: 1 }],
     icon: "◎",
     iconPath: `${A}shield-echoes.svg`,
@@ -517,7 +485,6 @@ export interface StarUpgrade {
   maxLevel: number;
   baseCost: number;
   costGrowth: number;
-  effectPerLevel: number;
   icon: string;
 }
 
@@ -529,7 +496,6 @@ export const STAR_UPGRADES: StarUpgrade[] = [
     maxLevel: 20,
     baseCost: 1,
     costGrowth: 1.5,
-    effectPerLevel: 0.25,
     icon: "⭐",
   },
   {
@@ -539,7 +505,6 @@ export const STAR_UPGRADES: StarUpgrade[] = [
     maxLevel: 20,
     baseCost: 1,
     costGrowth: 1.5,
-    effectPerLevel: 0.15,
     icon: "⭐",
   },
   {
@@ -549,7 +514,6 @@ export const STAR_UPGRADES: StarUpgrade[] = [
     maxLevel: 20,
     baseCost: 1,
     costGrowth: 1.5,
-    effectPerLevel: 3,
     icon: "⭐",
   },
   {
@@ -559,7 +523,6 @@ export const STAR_UPGRADES: StarUpgrade[] = [
     maxLevel: 20,
     baseCost: 1,
     costGrowth: 1.5,
-    effectPerLevel: 0.2,
     icon: "⭐",
   },
   {
@@ -569,7 +532,6 @@ export const STAR_UPGRADES: StarUpgrade[] = [
     maxLevel: 10,
     baseCost: 2,
     costGrowth: 1.8,
-    effectPerLevel: 0.15,
     icon: "⭐",
   },
 ];

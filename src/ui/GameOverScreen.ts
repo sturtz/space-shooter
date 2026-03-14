@@ -2,7 +2,7 @@ import { Renderer } from "../rendering/Renderer";
 import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
 
 export interface GameOverData {
-  deathCause: "mothership" | "player" | "time" | "";
+  deathCause: "mothership" | "player" | "time" | "forfeit" | "";
   roundCoins: number;
   roundKills: number;
   totalCoins: number;
@@ -46,6 +46,13 @@ export class GameOverScreen {
         titleColor = "#ffaa00";
         panelBorder = "rgba(255, 170, 0, 0.3)";
         panelGlow = "rgba(255, 170, 0, 0.15)";
+        break;
+      case "forfeit":
+        title = "ROUND FORFEITED";
+        subtitle = "Returning to upgrades...";
+        titleColor = "#8888aa";
+        panelBorder = "rgba(136, 136, 170, 0.3)";
+        panelGlow = "rgba(136, 136, 170, 0.15)";
         break;
       default:
         title = "ROUND COMPLETE";

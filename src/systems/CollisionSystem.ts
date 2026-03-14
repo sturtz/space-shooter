@@ -75,7 +75,7 @@ export class CollisionSystem {
   /**
    * Player bullets vs enemies.
    * Implements: pierce, splash (on every hit), chain lightning,
-   * poison, slow, damage numbers on kill, lifesteal.
+   * poison, slow, damage numbers on kill.
    */
   checkBulletEnemyCollisions(game: IGame) {
     for (const bullet of game.bullets) {
@@ -285,8 +285,10 @@ export class CollisionSystem {
         game.save.lifetimeCoins += value;
 
         // Juicy coin pickup feedback — more particles, bigger burst, rising "+N" text
-        const isRare = coin.value >= 5;
-        const particleColor = isRare ? COLORS.coinRare : COLORS.coin;
+        const isPurple = coin.value >= 50;
+        const isGold = coin.value >= 5;
+        const particleColor = isPurple ? COLORS.coinRare : isGold ? "#ffaa00" : COLORS.coin;
+        const isRare = isPurple || isGold;
         game.particles.emit(coin.pos, isRare ? 12 : 8, particleColor, isRare ? 60 : 45, 0.3, 1.5);
         // Extra white sparkle ring
         game.particles.emit(coin.pos, 4, "#ffffff", 35, 0.15, 0.8);

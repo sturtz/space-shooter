@@ -7,7 +7,6 @@ import {
   MOTHERSHIP_BASE_HP,
   MOTHERSHIP_TIME_PENALTY,
   COIN_MAGNET_RANGE,
-  BULLET_SPEED,
 } from "../utils/Constants";
 
 export interface PlayerStats {
@@ -51,23 +50,13 @@ export interface PlayerStats {
   /** Chance (0-1) for a kill to drop 5x coins (econ_lucky) */
   luckyChance: number;
   enemySpawnMultiplier: number;
-  // === Kept for compatibility (unused since player is invincible) ===
-  bulletSpeed: number;
+  // === Used by subsystems but not yet upgradeable ===
   timePenaltyPerHit: number;
   extraProjectiles: number;
   spreadAngle: number;
-  evasionChance: number;
   dashDistMult: number;
-  dashInvincibility: number;
   slowAuraRange: number;
   slowAuraFactor: number;
-  counterDmgMult: number;
-  playerHp: number;
-  playerShields: number;
-  shieldRegenInterval: number;
-  armorReduction: number;
-  reflectFraction: number;
-  lifestealChance: number;
   msRegenInterval: number;
   turretDamageMult: number;
   overtimeBonus: number;
@@ -306,23 +295,13 @@ export class UpgradeManager {
       roundCoinBonus,
       luckyChance,
       enemySpawnMultiplier: enemySpawnMult,
+      // Used by subsystems but not yet upgradeable
       timePenaltyPerHit: timePenalty,
-      // Compat stubs (player is invincible — these are all inactive)
-      bulletSpeed: BULLET_SPEED,
       extraProjectiles: 0,
       spreadAngle: 0.15,
-      evasionChance: 0,
       dashDistMult: 1,
-      dashInvincibility: 0,
       slowAuraRange: 0,
       slowAuraFactor: 0,
-      counterDmgMult: 1,
-      playerHp: 1,
-      playerShields: 0,
-      shieldRegenInterval: 0,
-      armorReduction: 0,
-      reflectFraction: 0,
-      lifestealChance: 0,
       msRegenInterval: 0,
       turretDamageMult: 1,
       overtimeBonus: 0,

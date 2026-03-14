@@ -49,12 +49,12 @@ export interface IGame {
   killStreak: number;
   streakTimer: number;
   gameTime: number;
-  screenFlashColor: string;
+  paused: boolean;
   bossEnemy: Rock | EnemyShip | null;
   bossDefeated: boolean;
 
   startRun(): void;
-  deathCause: "mothership" | "player" | "time" | "";
+  deathCause: "mothership" | "player" | "time" | "forfeit" | "";
   endRound(mothershipDestroyed: boolean, cause?: "mothership" | "player" | "time"): void;
   onEnemyKilled(enemy: Enemy): void;
   spawnDamageNumber(x: number, y: number, damage: number, isCrit?: boolean): void;
