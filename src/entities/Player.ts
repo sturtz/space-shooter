@@ -21,7 +21,7 @@ export interface DashResult {
 }
 
 export class Player extends Entity {
-  stats!: PlayerStats;
+  stats: PlayerStats;
   fireCooldown: number = 0;
 
   // Player health
@@ -47,6 +47,71 @@ export class Player extends Entity {
 
   constructor() {
     super(GAME_WIDTH / 2, GAME_HEIGHT / 2 + 80, PLAYER_COLLISION_RADIUS);
+    // Initialize with safe defaults so stats is never undefined before updateStats() is called
+    this.stats = {
+      damage: 1,
+      critChance: 0,
+      critMultiplier: 2.5,
+      splashRadius: 0,
+      forwardPulse: false,
+      pierceCount: 0,
+      chainTargets: 0,
+      missileLevel: 0,
+      barrageSplashBonus: 0,
+      poisonDps: 0,
+      slowOnHit: 0,
+      moveSpeed: 200,
+      flashbangRadius: 0,
+      mineOnDash: false,
+      mineSlow: false,
+      fireRate: 0.5,
+      autoBomb: false,
+      mothershipHP: 5,
+      msBarrierHits: 0,
+      msBarrierCooldown: 25,
+      turretLevel: 0,
+      msSlowStrength: 0,
+      msSlowRadius: 0,
+      roundDuration: 30,
+      coinMagnetRange: 50,
+      extraCoinPerKill: 0,
+      roundCoinBonus: 0,
+      luckyChance: 0,
+      enemySpawnMultiplier: 1,
+      // Phase 2 defaults
+      executeThreshold: 0,
+      deathNovaActive: false,
+      deathNovaDamageFraction: 0,
+      deathNovaRadius: 0,
+      multishotCount: 0,
+      orbitalDrones: false,
+      eliteCoinMultiplier: 1,
+      interestRate: 0,
+      afterimageActive: false,
+      afterimageDpsFraction: 0,
+      warpDash: false,
+      freezeChance: 0,
+      freezeDuration: 0,
+      bleedActive: false,
+      bleedDpsPerStack: 0,
+      bleedMaxStacks: 0,
+      msRepairInterval: 0,
+      msMechActive: false,
+      msOverdriveActive: false,
+      msFortressActive: false,
+      msFortressDomeRadius: 0,
+      timePenaltyPerHit: 3,
+      extraProjectiles: 0,
+      spreadAngle: 0.15,
+      dashDistMult: 1,
+      slowAuraRange: 0,
+      slowAuraFactor: 0,
+      turretDamageMult: 1,
+      overtimeBonus: 0,
+      playerMaxHp: PLAYER_BASE_HP,
+      playerRegenInterval: 0,
+      playerInvulnTime: PLAYER_HIT_INVULN,
+    };
   }
 
   updateStats(stats: PlayerStats) {
@@ -58,7 +123,7 @@ export class Player extends Entity {
     if (this.invulnTimer > 0 || this.isDashing) return false; // invulnerable
     this.hp -= amount;
     this.damageFlash = 0.3;
-    this.invulnTimer = PLAYER_HIT_INVULN;
+    this.invulnTimer = this.stats.playerInvulnTime;
     if (this.hp <= 0) {
       this.hp = 0;
       return true; // killed

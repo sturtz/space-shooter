@@ -613,16 +613,45 @@ export class Renderer {
     return `rgba(${r},${g},${b},${alpha})`;
   }
 
-  /** Utility: darken a color */
+  /** Utility: darken a color — handles hex (#rgb, #rrggbb), rgb(), and rgba() formats */
   private darkenColor(color: string, amount: number): string {
+    const factor = 1 - amount;
+
+    // Handle rgba(r, g, b, a)
     if (color.startsWith("rgba")) {
       return color.replace(/rgba\((\d+),\s*(\d+),\s*(\d+),\s*([\d.]+)\)/, (_, r, g, b, a) => {
-        const nr = Math.max(0, Math.round(parseInt(r) * (1 - amount)));
-        const ng = Math.max(0, Math.round(parseInt(g) * (1 - amount)));
-        const nb = Math.max(0, Math.round(parseInt(b) * (1 - amount)));
+        const nr = Math.max(0, Math.round(parseInt(r) * factor));
+        const ng = Math.max(0, Math.round(parseInt(g) * factor));
+        const nb = Math.max(0, Math.round(parseInt(b) * factor));
         return `rgba(${nr},${ng},${nb},${a})`;
       });
     }
+
+    // Handle rgb(r, g, b)
+    if (color.startsWith("rgb")) {
+      return color.replace(/rgb\((\d+),\s*(\d+),\s*(\d+)\)/, (_, r, g, b) => {
+        const nr = Math.max(0, Math.round(parseInt(r) * factor));
+        const ng = Math.max(0, Math.round(parseInt(g) * factor));
+        const nb = Math.max(0, Math.round(parseInt(b) * factor));
+        return `rgb(${nr},${ng},${nb})`;
+      });
+    }
+
+    // Handle hex colors (#rgb and #rrggbb)
+    if (color.startsWith("#")) {
+      let hex = color.slice(1);
+      // Expand shorthand #rgb → #rrggbb
+      if (hex.length === 3) {
+        hex = hex[0] + hex[0] + hex[1] + hex[1] + hex[2] + hex[2];
+      }
+      if (hex.length === 6) {
+        const r = Math.max(0, Math.round(parseInt(hex.slice(0, 2), 16) * factor));
+        const g = Math.max(0, Math.round(parseInt(hex.slice(2, 4), 16) * factor));
+        const b = Math.max(0, Math.round(parseInt(hex.slice(4, 6), 16) * factor));
+        return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+      }
+    }
+
     return color;
   }
 }

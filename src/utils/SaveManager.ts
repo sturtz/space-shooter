@@ -9,11 +9,15 @@ export interface SaveData {
   starCoins: number;
   upgradeLevels: Record<string, number>;
   starUpgradeLevels: Record<string, number>;
-  currentLevel: number;
+  /** Total runs completed — drives cross-run difficulty scaling */
+  roundNumber: number;
   lifetimeCoins: number;
   lifetimeKills: number;
   prestigeCount: number;
-  highestLevel: number;
+  /** Highest round reached (for display) */
+  highestRound: number;
+  /** Longest survival time in a single round (seconds) */
+  bestSurvivalTime: number;
   /** Special abilities earned by defeating bosses — stacks, persists between runs */
   specialAbilities: string[];
   /** Whether the first-load tutorial has been completed */
@@ -24,6 +28,8 @@ export interface SaveData {
   musicVolume: number;
   /** Whether algorithmic art effects are enabled (sacred geometry, geometric bursts, formations) */
   algoArtEnabled: boolean;
+  /** Best kill streak ever achieved */
+  streakRecord: number;
   /** App version — save is wiped when this doesn't match the current version */
   appVersion: string;
 }
@@ -34,16 +40,18 @@ export function getDefaultSave(): SaveData {
     starCoins: 0,
     upgradeLevels: {},
     starUpgradeLevels: {},
-    currentLevel: 1,
+    roundNumber: 1,
     lifetimeCoins: 0,
     lifetimeKills: 0,
     prestigeCount: 0,
-    highestLevel: 1,
+    highestRound: 1,
+    bestSurvivalTime: 0,
     specialAbilities: [],
     tutorialSeen: false,
     musicTrack: "fire",
     musicVolume: 0.07,
     algoArtEnabled: true,
+    streakRecord: 0,
     appVersion: APP_VERSION,
   };
 }
@@ -78,6 +86,12 @@ export function loadGame(): SaveData {
       if (parsed.specialAbility && !parsed.specialAbilities) {
         save.specialAbilities = [parsed.specialAbility];
         delete (save as Record<string, unknown>).specialAbility;
+      }
+
+      // Migrate old currentLevel → roundNumber
+      if (parsed.currentLevel != null && parsed.roundNumber == null) {
+        save.roundNumber = parsed.currentLevel;
+        save.highestRound = parsed.highestLevel ?? parsed.currentLevel;
       }
 
       return save;

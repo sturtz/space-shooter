@@ -7,6 +7,9 @@ import { GAME_WIDTH, GAME_HEIGHT } from "../utils/Constants";
  * Provides common HP, coin value, elite status, poison/slow debuff handling.
  */
 export abstract class Enemy extends Entity {
+  /** Global execute threshold — set once per run from PlayerStats */
+  static executeThreshold: number = 0;
+
   hp: number;
   maxHp: number;
   speed: number;
@@ -21,6 +24,11 @@ export abstract class Enemy extends Entity {
   slowFactor: number = 1; // 1 = normal speed, < 1 = slowed
   slowTimer: number = 0;
   stunTimer: number = 0; // > 0 = frozen (cannot move)
+  // Bleed (stacking DoT — % of max HP per stack per second)
+  bleedStacks: number = 0;
+  bleedDpsPerStack: number = 0;
+  bleedMaxStacks: number = 0;
+  bleedTimer: number = 0;
 
   constructor(x: number, y: number, radius: number, hp: number, speed: number, coinValue: number) {
     super(x, y, radius);
@@ -33,6 +41,10 @@ export abstract class Enemy extends Entity {
 
   takeDamage(amount: number): boolean {
     this.hp -= amount;
+    // Execute threshold — instant kill when HP falls below threshold
+    if (this.hp > 0 && Enemy.executeThreshold > 0 && this.hp / this.maxHp <= Enemy.executeThreshold) {
+      this.hp = 0;
+    }
     if (this.hp <= 0) {
       this.destroy();
       return true;
@@ -53,6 +65,15 @@ export abstract class Enemy extends Entity {
 
   applyStun(duration: number) {
     this.stunTimer = Math.max(this.stunTimer, duration);
+  }
+
+  applyBleed(dpsPerStack: number, maxStacks: number) {
+    this.bleedDpsPerStack = dpsPerStack;
+    this.bleedMaxStacks = maxStacks;
+    if (this.bleedStacks < maxStacks) {
+      this.bleedStacks++;
+    }
+    this.bleedTimer = 3; // refresh 3s duration on each hit
   }
 
   get isStunned(): boolean {
@@ -82,6 +103,20 @@ export abstract class Enemy extends Entity {
       this.slowTimer -= dt;
       if (this.slowTimer <= 0) {
         this.slowFactor = 1;
+      }
+    }
+
+    // Bleed tick (stacking DoT — % of max HP per stack per second)
+    if (this.bleedStacks > 0 && this.bleedTimer > 0) {
+      this.bleedTimer -= dt;
+      const bleedDmg = this.bleedStacks * this.bleedDpsPerStack * this.maxHp * dt;
+      this.hp -= bleedDmg;
+      if (this.hp <= 0) {
+        this.destroy();
+        return true;
+      }
+      if (this.bleedTimer <= 0) {
+        this.bleedStacks = 0;
       }
     }
 

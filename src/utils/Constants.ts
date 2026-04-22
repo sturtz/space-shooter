@@ -23,7 +23,7 @@ export const GAME_HEIGHT = 800;
 
 // Player
 export const PLAYER_BASE_SPEED = 50; // pixels/sec (slow, deliberate)
-export const PLAYER_BASE_FIRE_RATE = 0.4; // seconds between shots
+export const PLAYER_BASE_FIRE_RATE = 1.2; // seconds between shots (slow, methodical pace)
 export const PLAYER_BASE_DAMAGE = 1;
 export const PLAYER_COLLISION_RADIUS = 4; // smaller, sleeker ship
 
@@ -39,9 +39,9 @@ export const BOSS_MOTHERSHIP_DAMAGE = 3; // boss body collision deals 3× damage
 export const BOSS_BULLET_DAMAGE = 2; // boss bullets deal 2× damage to mothership
 
 // Bullets
-export const BULLET_SPEED = 400;
-export const BULLET_SIZE = 4;
-export const BULLET_LIFETIME = 2; // seconds
+export const BULLET_SPEED = 180; // slow, visible projectiles
+export const BULLET_SIZE = 3; // slimmer projectiles (was 4)
+export const BULLET_LIFETIME = 1.2; // shorter to match slow speed
 
 // Enemies
 export const ROCK_BASE_HP = 2; // small rocks: 2 hits (was 3, rebalanced for early game)
@@ -62,12 +62,14 @@ export const COIN_SPEED = 60; // speed when flying to player
 // Waves
 export const BASE_ROUND_DURATION = 20; // seconds
 export const SPAWN_RATE_BASE = 4.0; // seconds between spawns (fewer enemies at start)
+export const SPAWN_RATE_MIN = 1.5; // fastest spawn interval (was ~1.0 via exponential)
+export const SPAWN_RAMP_PER_BOSS = 0.3; // seconds shaved off spawn rate per boss killed
 export const SPAWN_DISTANCE = 500; // distance from center to spawn
 
 // Weapons — formerly hardcoded in Game.ts
-export const CONE_RANGE = 18; // circle weapon radius (matches loader ring visual)
+export const CONE_RANGE = 28; // circle weapon radius — bigger for visual prominence (was 18)
 export const CONE_FIRE_EVERY = 1; // fire every N beats
-export const CONE_FLASH_DURATION = 0.12; // seconds of flash after cone fires
+export const CONE_FLASH_DURATION = 0.18; // seconds of flash after cone fires (was 0.12)
 export const MISSILE_SPEED = 180;
 export const MISSILE_FIRE_EVERY = 2; // fire missiles every N beats
 export const LASER_INTERVAL = 2.5; // seconds between laser shots
@@ -83,9 +85,79 @@ export const FIRST_BOSS_ELAPSED = 12; // seconds into round before first mega ro
 export const CHAIN_RANGE = 120; // max chain lightning jump distance
 export const SPLASH_DAMAGE_MULT = 0.5; // splash deals fraction of bullet damage
 
+// Shooting enemy spawn gating
+export const SHOOTING_ENEMY_MIN_ROUND = 8; // effective round before any ships can shoot
+export const SHOOTING_ENEMY_RAMP = 0.15; // chance increase per round past gate
+
 // Upgrades
-export const UPGRADE_BASE_COST = 10;
+export const UPGRADE_BASE_COST = 5;
 export const UPGRADE_COST_GROWTH = 1.18;
+
+// Economy scaling (Phase 1 — logarithmic rebalance)
+/** Minimum coins awarded per round (bad-run floor) */
+export const MIN_ROUND_COINS = 5;
+/** ln-based coin value scaling factor per roundNumber */
+export const COIN_LEVEL_SCALE = 0.15; // halved from 0.3 — slower coin inflation
+/** ln-based enemy HP scaling factor per roundNumber */
+export const ENEMY_HP_LEVEL_SCALE = 0.4;
+/** Round-end bonus multiplier per roundNumber (coins × (1 + this × roundNumber)) */
+export const ROUND_LEVEL_BONUS = 0.02; // reduced from 0.05 — less free coins at round end
+
+// ── Endless Round System (Phase 4) ──────────────────────────────────────
+/** First boss spawns at this many seconds elapsed */
+export const FIRST_BOSS_SPAWN_TIME = 15;
+/** After each boss kill, next boss spawns this much sooner (min 8s) */
+export const BOSS_SPAWN_ACCELERATION = 2;
+/** Minimum seconds between boss spawns */
+export const MIN_BOSS_SPAWN_INTERVAL = 8;
+/** Boss base HP — scales with bossesKilled + roundNumber */
+export const BOSS_BASE_HP = 10;
+/** Boss HP multiplier per boss killed within run */
+export const BOSS_HP_PER_KILL = 5;
+/** Boss HP multiplier per roundNumber (cross-run) */
+export const BOSS_HP_PER_ROUND = 3;
+/** Star coin milestone thresholds (seconds survived) */
+export const STAR_MILESTONES = [30, 45, 60];
+/** Cross-run difficulty multiplier per roundNumber on spawn rate */
+export const ROUND_DIFFICULTY_SCALE = 0.04;
+
+// Kill Streak tiers — threshold, coin multiplier, color
+export const STREAK_TIERS = [
+  { threshold: 50, multiplier: 3.0, color: "#cc44ff", label: "GOD" },
+  { threshold: 20, multiplier: 2.0, color: "#ff4444", label: "FURY" },
+  { threshold: 10, multiplier: 1.5, color: "#ffaa00", label: "RAMPAGE" },
+  { threshold: 5, multiplier: 1.2, color: "#ffff00", label: "STREAK" },
+] as const;
+/** Seconds between kills before streak resets */
+export const STREAK_TIMEOUT = 3.0;
+
+// ── In-Run Perks (Phase 5) ──────────────────────────────────────────────
+/** Base XP needed for first perk level */
+export const PERK_BASE_XP = 5;
+/** Additional XP needed per perk level */
+export const PERK_XP_GROWTH = 3;
+/** Number of perk choices shown on level-up */
+export const PERK_CHOICES = 3;
+/** Base XP awarded per enemy kill */
+export const PERK_XP_PER_KILL = 1;
+/** Bonus XP for killing elite enemies */
+export const PERK_XP_ELITE_BONUS = 2;
+/** Bonus XP for killing boss enemies */
+export const PERK_XP_BOSS_BONUS = 5;
+
+// ── In-Round Skills (Phase 6) ───────────────────────────────────────────
+/** Minimum seconds into round before skill pickups can spawn */
+export const SKILL_MIN_SPAWN_TIME = 10;
+/** Min seconds between skill pickup spawns */
+export const SKILL_SPAWN_INTERVAL_MIN = 15;
+/** Max seconds between skill pickup spawns */
+export const SKILL_SPAWN_INTERVAL_MAX = 25;
+/** Pickup orb collision/visual radius */
+export const SKILL_PICKUP_RADIUS = 10;
+/** Seconds before uncollected skill pickup despawns */
+export const SKILL_PICKUP_LIFETIME = 12;
+/** Player collection range for skill pickups */
+export const SKILL_COLLECT_RANGE = 18;
 
 // Colors (retro palette)
 export const COLORS = {

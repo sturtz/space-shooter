@@ -13,6 +13,9 @@ import {
   ENEMY_SHIP_BASE_HP,
   ENEMY_SHIP_BASE_SPEED,
   COLORS,
+  ENEMY_HP_LEVEL_SCALE,
+  SHOOTING_ENEMY_MIN_ROUND,
+  SHOOTING_ENEMY_RAMP,
 } from "../utils/Constants";
 
 /**
@@ -38,11 +41,14 @@ export class SpawnSystem {
     const cy = GAME_HEIGHT / 2;
     const x = cx + Math.cos(angle) * SPAWN_DISTANCE;
     const y = cy + Math.sin(angle) * SPAWN_DISTANCE;
-    const level = game.save.currentLevel;
+    const round = game.save.roundNumber;
 
-    // Determine enemy type based on level
-    // Rock probability: 85% at level 2, decreasing by 10% per level, floor 30%
-    const rockChance = level <= 1 ? 1 : Math.max(0.3, 0.85 - (level - 2) * 0.1);
+    // Determine enemy type based on round + bosses killed
+    // Round 1-3: rocks only. Ships phase in round 4+ (gated by bosses killed too)
+    const bossesKilled = game.bossesKilledThisRun ?? 0;
+    // Cap boss contribution to prevent turbo-acceleration into shooting enemy territory
+    const effectiveRound = round + Math.min(2, bossesKilled);
+    const rockChance = effectiveRound <= 3 ? 1 : Math.max(0.3, 0.9 - (effectiveRound - 3) * 0.08);
     if (Math.random() < rockChance) {
       // Rocks — three sizes: small / medium / large.
       // Big + medium chances ramp up over the round.
@@ -57,8 +63,8 @@ export class SpawnSystem {
 
       // HP: lg=ROCK_BIG_HP, md≈3, sm=ROCK_BASE_HP
       const baseHp = isBig ? ROCK_BIG_HP : isMed ? 3 : ROCK_BASE_HP;
-      const hp = baseHp + Math.floor(level * 0.3);
-      const speed = ROCK_BASE_SPEED + level * 2;
+      const hp = Math.ceil(baseHp * (1 + ENEMY_HP_LEVEL_SCALE * Math.log(round + 1)));
+      const speed = ROCK_BASE_SPEED + round * 2;
       // Medium rocks use small sprite pool at 1.4× scale (radius ≈ 14px)
       const sizeScale = isMed ? 1.4 : 1.0;
       const rock = new Rock(x, y, hp, speed, isBig, sizeScale);
@@ -66,8 +72,8 @@ export class SpawnSystem {
       // Coin values: small=1, medium=3, large=5
       rock.coinValue = isBig ? 5 : isMed ? 3 : 1;
 
-      // Elite check
-      if (level >= 3 && Math.random() < 0.05) {
+      // Elite check — requires round 5+ or 2+ bosses killed
+      if (effectiveRound >= 5 && Math.random() < 0.05) {
         rock.isElite = true;
         rock.hp *= 3;
         rock.maxHp = rock.hp;
@@ -77,20 +83,25 @@ export class SpawnSystem {
 
       game.enemies.push(rock);
     } else {
-      // Enemy ship — level 3+ can spawn "pulse" variant (fast, uses pulse-enemy-ship.svg)
-      const isPulseShip = level >= 3 && Math.random() < 0.35; // 35% chance at lvl 3+
+      // Enemy ship — pulse variant needs round 5+ or 2 bosses killed
+      const isPulseShip = effectiveRound >= 5 && Math.random() < 0.35;
       const hp = isPulseShip
         ? Math.max(1, ENEMY_SHIP_BASE_HP - 1) // pulse ships are fragile
-        : ENEMY_SHIP_BASE_HP + level;
+        : Math.ceil(ENEMY_SHIP_BASE_HP * (1 + ENEMY_HP_LEVEL_SCALE * Math.log(round + 1)));
       const speed = isPulseShip
-        ? ENEMY_SHIP_BASE_SPEED * 3 + level * 4 // really fast!
-        : ENEMY_SHIP_BASE_SPEED + level * 2;
-      const canShoot = isPulseShip ? false : level >= 4; // pulse ships are melee-only
+        ? ENEMY_SHIP_BASE_SPEED * 3 + round * 4 // really fast!
+        : ENEMY_SHIP_BASE_SPEED + round * 2;
+      // Gradual shooting ramp — no binary flip, probability-based past gate
+      const shootChance = isPulseShip ? 0 :
+        effectiveRound >= SHOOTING_ENEMY_MIN_ROUND
+          ? Math.min(0.8, (effectiveRound - SHOOTING_ENEMY_MIN_ROUND) * SHOOTING_ENEMY_RAMP)
+          : 0;
+      const canShoot = Math.random() < shootChance;
       const variant = isPulseShip ? ("pulse" as const) : ("normal" as const);
       const ship = new EnemyShip(x, y, hp, speed, canShoot, variant);
-      ship.coinValue = isPulseShip ? 1 : 2 + Math.floor(level * 0.3);
+      ship.coinValue = isPulseShip ? 1 : 2 + Math.floor(round * 0.3);
 
-      if (!isPulseShip && level >= 5 && Math.random() < 0.05) {
+      if (!isPulseShip && effectiveRound >= 7 && Math.random() < 0.05) {
         ship.isElite = true;
         ship.hp *= 3;
         ship.maxHp = ship.hp;
@@ -109,7 +120,7 @@ export class SpawnSystem {
       if (enemy instanceof EnemyShip && enemy.shouldShoot()) {
         // Target the PLAYER, not the mothership
         const dir = vecNormalize(vecSub(game.player.pos, enemy.pos));
-        const bullet = new Bullet(enemy.pos.x, enemy.pos.y, dir, 200, 1, false, 0, true);
+        const bullet = new Bullet(enemy.pos.x, enemy.pos.y, dir, 120, 1, false, 0, true);
         game.enemyBullets.push(bullet);
       }
     }
@@ -157,7 +168,10 @@ export class SpawnSystem {
     if (this.turretCooldown > 0) return;
 
     // Fire rate: 1 shot per (2 / turretLevel) seconds, minimum 0.3s
-    this.turretCooldown = Math.max(0.3, 2 / game.stats.turretLevel);
+    // Fortress mode: turret fires 3× faster
+    let cooldown = Math.max(0.3, 2 / game.stats.turretLevel);
+    if (game.stats.msFortressActive) cooldown /= 3;
+    this.turretCooldown = Math.max(0.1, cooldown);
 
     // Find closest enemy to mothership
     let closest: Rock | EnemyShip | null = null;
@@ -202,11 +216,11 @@ export class SpawnSystem {
 
   /** Mothership auto-regen (ms_regen upgrade) */
   updateMothershipRegen(game: IGame, dt: number) {
-    if (game.stats.msRegenInterval <= 0) return;
+    if (game.stats.msRepairInterval <= 0) return;
     if (game.mothership.hp >= game.mothership.maxHp) return;
 
     this.msRegenTimer += dt;
-    if (this.msRegenTimer >= game.stats.msRegenInterval) {
+    if (this.msRegenTimer >= game.stats.msRepairInterval) {
       this.msRegenTimer = 0;
       game.mothership.heal(1);
     }

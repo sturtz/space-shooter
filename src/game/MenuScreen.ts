@@ -142,7 +142,7 @@ export class MenuScreen {
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
     ctx.fillText(
-      `Level: ${save.currentLevel}   ⭐ ${save.starCoins}   💰 ${save.coins}`,
+      `Round: ${save.roundNumber}   ⭐ ${save.starCoins}   💰 ${save.coins}`,
       cx,
       cy - 35
     );

@@ -227,7 +227,7 @@ export class TutorialSystem {
 
     // Update debris
     this.debrisTimer -= dt;
-    if (this.debrisTimer <= 0 && this.debris.length < 15) {
+    if (this.debrisTimer <= 0 && this.debris.length < 5) {
       const edge = Math.random();
       let dx: number, dy: number;
       if (edge < 0.5) {
@@ -241,7 +241,7 @@ export class TutorialSystem {
         dy = randomRange(-50, GAME_HEIGHT * 0.4);
       }
       this.debris.push(new Debris(dx, dy));
-      this.debrisTimer = randomRange(0.5, 1.0);
+      this.debrisTimer = randomRange(1.5, 2.5);
     }
     for (const d of this.debris) d.update(dt);
     compactAlive(this.debris);

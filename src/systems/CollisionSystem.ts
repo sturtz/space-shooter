@@ -39,12 +39,15 @@ export class CollisionSystem {
     center: Vec2,
     radius: number,
     damage: number,
-    opts?: AoEOptions
+    opts?: AoEOptions,
+    /** Optional enemy to skip (e.g. the primary hit target for splash damage) */
+    skip?: Enemy
   ): number {
     let hitCount = 0;
     const radiusSq = radius * radius;
     for (const enemy of game.enemies) {
       if (!enemy.alive) continue;
+      if (enemy === skip) continue;
       if (vecDistSq(center, enemy.pos) > radiusSq) continue;
 
       hitCount++;
@@ -98,29 +101,37 @@ export class CollisionSystem {
             enemy.applySlow(game.stats.slowOnHit, 2);
           }
 
+          // Apply freeze (eff_freeze) — chance to stun for freezeDuration
+          if (game.stats.freezeChance > 0 && Math.random() < game.stats.freezeChance) {
+            enemy.applyStun(game.stats.freezeDuration);
+            game.particles.emit(enemy.pos, 6, "#88ddff", 40, 0.25, 1.5);
+          }
+
+          // Apply bleed (eff_bleed) — stacking DoT
+          if (game.stats.bleedActive) {
+            enemy.applyBleed(game.stats.bleedDpsPerStack, game.stats.bleedMaxStacks);
+          }
+
           if (killed) {
             game.onEnemyKilled(enemy);
+
+            // Death nova (dmg_overcharge) — killed enemies explode
+            if (game.stats.deathNovaActive) {
+              const novaDmg = game.stats.damage * game.stats.deathNovaDamageFraction;
+              this.damageEnemiesInRadius(game, enemy.pos, game.stats.deathNovaRadius, novaDmg, undefined, enemy);
+              game.particles.emit(enemy.pos, 15, "#ff6644", 100, 0.4, 3);
+              game.particles.emit(enemy.pos, 8, "#ffcc00", 70, 0.25, 2);
+            }
           } else {
             // Hit particles
             game.particles.emit(bullet.pos, 3, COLORS.bullet, 40, 0.2, 1);
           }
 
           // Splash damage — triggers on every hit, not just kills (P3: skip when no splash)
-          if (game.stats.splashRadius > 0) {
+          const totalSplash = game.stats.splashRadius + game.stats.barrageSplashBonus;
+          if (totalSplash > 0) {
             const splashDmg = bullet.damage * SPLASH_DAMAGE_MULT;
-            const splashRadiusSq = game.stats.splashRadius * game.stats.splashRadius;
-            for (const other of game.enemies) {
-              if (!other.alive || other === enemy) continue; // P12: skip dead enemies
-              const dx = enemy.pos.x - other.pos.x;
-              const dy = enemy.pos.y - other.pos.y;
-              if (dx * dx + dy * dy < splashRadiusSq) {
-                const splashKilled = other.takeDamage(splashDmg);
-                game.spawnDamageNumber(other.pos.x, other.pos.y, splashDmg, false);
-                if (splashKilled) {
-                  game.onEnemyKilled(other);
-                }
-              }
-            }
+            this.damageEnemiesInRadius(game, enemy.pos, totalSplash, splashDmg, undefined, enemy);
           }
 
           // Chain lightning — bounces to nearby enemies on kill (P3: skip when no chain)
@@ -318,7 +329,6 @@ export class CollisionSystem {
             // 50% chance to drop a coin (min value 1)
             if (Math.random() < 0.5) {
               const coin = new Coin(debris.pos.x, debris.pos.y, 1);
-              coin.magnetRange = game.stats.coinMagnetRange;
               game.coins.push(coin);
             }
           }
@@ -348,7 +358,7 @@ export class CollisionSystem {
         game.particles.emit(game.player.pos, 8, COLORS.playerHp, 60, 0.25, 2);
         game.particles.emit(game.player.pos, 4, "#ffffff", 30, 0.15, 1);
         game.renderer.shake(4);
-        game.audio.playMothershipHit(); // reuse hit SFX
+        game.audio.playPlayerHit();
 
         if (killed) {
           // Player destroyed — end round

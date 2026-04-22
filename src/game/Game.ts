@@ -29,22 +29,44 @@ import {
   GAME_WIDTH,
   GAME_HEIGHT,
   SPAWN_RATE_BASE,
+  SPAWN_RATE_MIN,
+  SPAWN_RAMP_PER_BOSS,
+  BULLET_SPEED,
   ROCK_BASE_SPEED,
   COLORS,
   CONE_RANGE,
   CONE_FIRE_EVERY,
   MISSILE_SPEED,
   MISSILE_FIRE_EVERY,
-  PLAYER_BASE_HP,
   BOMB_DAMAGE_MULT,
   isMobileDevice,
   MOBILE_CAMERA_ZOOM,
+  COIN_LEVEL_SCALE,
+  MIN_ROUND_COINS,
+  ROUND_LEVEL_BONUS,
+  STREAK_TIMEOUT,
+  STREAK_TIERS,
+  FIRST_BOSS_SPAWN_TIME,
+  BOSS_SPAWN_ACCELERATION,
+  MIN_BOSS_SPAWN_INTERVAL,
+  BOSS_BASE_HP,
+  BOSS_HP_PER_KILL,
+  BOSS_HP_PER_ROUND,
+  STAR_MILESTONES,
+  ROUND_DIFFICULTY_SCALE,
+  PERK_XP_PER_KILL,
+  PERK_XP_ELITE_BONUS,
+  PERK_XP_BOSS_BONUS,
+  SKILL_COLLECT_RANGE,
 } from "../utils/Constants";
 import { HUD } from "../ui/HUD";
 import { PauseMenu } from "../ui/PauseMenu";
 import { BossRewardScreen, BOSS_REWARD_CHOICES } from "../ui/BossRewardScreen";
 import { GameOverScreen } from "../ui/GameOverScreen";
 import { MobileControls } from "../ui/MobileControls";
+import { PerkSelectionScreen } from "../ui/PerkSelectionScreen";
+import { PerkSystem } from "../systems/PerkSystem";
+import { SkillSystem } from "../systems/SkillSystem";
 import type { ScreenManager } from "./ScreenManager";
 import { IGame } from "./GameInterface";
 import { TutorialSystem } from "./TutorialSystem";
@@ -62,7 +84,7 @@ import {
   type FormationType,
 } from "../systems/AlgoArt";
 
-export type GameState = "playing" | "bossReward" | "gameover" | "tutorial";
+export type GameState = "playing" | "bossReward" | "perkSelection" | "gameover" | "tutorial";
 
 interface DamageNumber {
   x: number;
@@ -164,9 +186,19 @@ export class Game implements IGame {
   roundKills: number = 0;
   killStreak: number = 0;
   streakTimer: number = 0;
+  /** Best streak this run (for game over display) */
+  bestStreakThisRun: number = 0;
+  /** Player HP regen countdown timer */
+  playerRegenTimer: number = 0;
   bossDefeated: boolean = false;
   bossEnemy: Rock | EnemyShip | null = null;
-  nextBossElapsed: number = 12;
+  nextBossElapsed: number = FIRST_BOSS_SPAWN_TIME;
+  /** Bosses killed within this run — drives boss HP scaling + spawn acceleration */
+  bossesKilledThisRun: number = 0;
+  /** Elapsed survival time this run (seconds) — drives difficulty + star milestones */
+  elapsedSurvivalTime: number = 0;
+  /** Star milestones earned this run */
+  starMilestonesEarned: number = 0;
   gameTime: number = 0;
   paused: boolean = false;
   damageNumbers: DamageNumber[] = [];
@@ -207,6 +239,23 @@ export class Game implements IGame {
   } | null = null;
   private formationPreview: FormationPreview | null = null;
   private algoKillCounter = 0; // cycles through geometric burst patterns
+
+  // ── In-Run Skills (Phase 6) ──
+  skillSystem = new SkillSystem();
+
+  // ── In-Run Perks (Phase 5) ──
+  perkSystem = new PerkSystem();
+  private _baseStats!: PlayerStats;
+  private perkSelectionUI = new PerkSelectionScreen();
+
+  // ── Phase 2 upgrade timers ──
+  private autoBombBeatCounter = 0;
+  private orbitalDroneTimer = 0;
+  private afterimageTimer = 0;
+  private mechStompTimer = 0;
+  private mechMissileTimer = 0;
+  private fortressDomeTimer = 0;
+  private warpPortal: { x: number; y: number; timer: number } | null = null;
 
   // ── Extracted UI modules ──
   private pauseMenu = new PauseMenu();
@@ -252,7 +301,9 @@ export class Game implements IGame {
       }
       // Guard: ignore taps for 0.6s after state changes (prevents touchend → instant screen skip)
       if (this.gameTime - this.stateChangeTime < 0.6) return;
-      if (this.state === "bossReward") {
+      if (this.state === "perkSelection") {
+        this.handlePerkSelectionClick(mx, my);
+      } else if (this.state === "bossReward") {
         this.handleBossRewardClick(mx, my);
       } else if (this.state === "gameover") {
         this.manager.goToUpgradeScreen();
@@ -362,6 +413,21 @@ export class Game implements IGame {
     if (this.missileBeatCount % MISSILE_FIRE_EVERY === 0) {
       this.fireMissile();
     }
+
+    // ── Auto-bomb (eff_bomb) — deploy bomb every 8 beats ──
+    if (this._stats.autoBomb) {
+      this.autoBombBeatCounter++;
+      if (this.autoBombBeatCounter % 8 === 0) {
+        this.pendingBombs.push({
+          x: this.player.pos.x,
+          y: this.player.pos.y,
+          timer: 1.0,
+          maxTimer: 1.0,
+          radius: 80,
+        });
+        this.particles.emit(this.player.pos, 4, "#ffaa00", 40, 0.15, 1.5);
+      }
+    }
   }
 
   handleDash() {
@@ -454,6 +520,23 @@ export class Game implements IGame {
       this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 4, "#ffaa00", 40, 0.15, 1.5);
     }
 
+    // ── Warp Portal (move_warp) — create portal or teleport back ──
+    if (this._stats.warpDash) {
+      if (this.warpPortal) {
+        // Second dash: teleport back to portal location
+        const portalPos = { x: this.warpPortal.x, y: this.warpPortal.y };
+        this.player.pos.x = portalPos.x;
+        this.player.pos.y = portalPos.y;
+        this.warpPortal = null;
+        this.particles.emit(vec2(portalPos.x, portalPos.y), 15, "#cc44ff", 80, 0.4, 3);
+        this.particles.emit(vec2(portalPos.x, portalPos.y), 8, "#ffffff", 50, 0.2, 1.5);
+      } else {
+        // First dash: place portal at dash origin
+        this.warpPortal = { x: ringOrigin.x, y: ringOrigin.y, timer: 5.0 };
+        this.particles.emit(vec2(ringOrigin.x, ringOrigin.y), 10, "#cc44ff", 60, 0.3, 2);
+      }
+    }
+
     this.audio.playFlashbang();
   }
 
@@ -492,11 +575,38 @@ export class Game implements IGame {
     });
   }
 
+  /** Recalculate effective stats from base + perk bonuses, update player */
+  private recalcStatsFromPerks() {
+    this._stats = this.perkSystem.applyToStats(this._baseStats);
+    if (this.player) {
+      this.player.updateStats(this._stats);
+      // If extra_hp perk was picked, also heal
+      if (this.player.maxHp < this._stats.playerMaxHp) {
+        const hpGain = this._stats.playerMaxHp - this.player.maxHp;
+        this.player.maxHp = this._stats.playerMaxHp;
+        this.player.hp = Math.min(this.player.hp + hpGain, this.player.maxHp);
+      }
+      // If glass_cannon reduced max HP, clamp
+      if (this.player.maxHp > this._stats.playerMaxHp) {
+        this.player.maxHp = this._stats.playerMaxHp;
+        this.player.hp = Math.min(this.player.hp, this.player.maxHp);
+      }
+    }
+    // Update round timer if time_warp added duration mid-run
+    if (this._stats.roundDuration > this.roundDuration) {
+      const added = this._stats.roundDuration - this.roundDuration;
+      this.roundTimer += added;
+      this.roundDuration = this._stats.roundDuration;
+    }
+  }
+
   startRun() {
-    this._stats = this.upgrades.computeStats();
+    this._baseStats = this.upgrades.computeStats();
+    this.perkSystem.reset();
+    this._stats = this._baseStats;
     this.player = new Player();
     this.player.updateStats(this._stats);
-    this.player.resetHp(PLAYER_BASE_HP);
+    this.player.resetHp(this._stats.playerMaxHp);
     this.mothership = new Mothership(this._stats.mothershipHP);
     this.bullets = [];
     this.enemies = [];
@@ -510,9 +620,14 @@ export class Game implements IGame {
     this.roundKills = 0;
     this.killStreak = 0;
     this.streakTimer = 0;
-    this.nextBossElapsed = 12;
+    this.bestStreakThisRun = 0;
+    this.playerRegenTimer = this._stats.playerRegenInterval;
+    this.nextBossElapsed = FIRST_BOSS_SPAWN_TIME;
     this.bossDefeated = false;
     this.bossEnemy = null;
+    this.bossesKilledThisRun = 0;
+    this.elapsedSurvivalTime = 0;
+    this.starMilestonesEarned = 0;
     this.dashRings = [];
     this.laserBeams = [];
     this.pendingBombs = [];
@@ -534,8 +649,25 @@ export class Game implements IGame {
     this.deathCause = "";
     this.stateChangeTime = 0;
 
-    const level = this.save.currentLevel;
-    const initialRockCount = 5 + Math.floor(level * 0.5);
+    // Phase 2: set static execute threshold on Enemy class
+    Enemy.executeThreshold = this._stats.executeThreshold;
+
+    // Phase 2: reset auto-bomb and orbital drone timers
+    this.autoBombBeatCounter = 0;
+    this.orbitalDroneTimer = 0;
+    this.afterimageTimer = 0;
+    this.mechStompTimer = 0;
+    this.mechMissileTimer = 0;
+    this.fortressDomeTimer = 0;
+    this.warpPortal = null;
+
+    // Phase 6: skill system reset + configure unlocked skills
+    this.skillSystem.reset();
+    this.skillSystem.setUnlockedSkills((id) => this.upgrades.getLevel(id));
+
+    const round = this.save.roundNumber;
+    // Gentler initial rock count — round 1 gets 3, scales slowly
+    const initialRockCount = 3 + Math.floor(round * 0.3);
     for (let i = 0; i < initialRockCount; i++) {
       const angle = (Math.PI * 2 * i) / initialRockCount + randomRange(-0.2, 0.2);
       const dist = 180 + Math.random() * 120;
@@ -561,37 +693,40 @@ export class Game implements IGame {
     this.audio.startConeTrack(() => this.onBeat());
   }
 
+  /** Twin Cannons — fires parallel side-by-side bullets on beat (not homing) */
   fireMissile() {
     if (this.state !== "playing" || this.paused) return;
     if (this._stats.missileLevel <= 0) return;
 
-    const target = this.findNearestEnemy();
-    if (!target) return;
+    // Fire direction = player facing
+    const dir = vecFromAngle(this.player.angle);
+    const perpX = -dir.y; // perpendicular for side-by-side offset
+    const perpY = dir.x;
 
-    const missileDmg = this._stats.damage * 0.5;
-    const dir = vecNormalize(vecSub(target.pos, this.player.pos));
-    const spawnX = this.player.pos.x + dir.x * 12;
-    const spawnY = this.player.pos.y + dir.y * 12;
+    const twinDmg = this._stats.damage * 0.7;
+    const extraShots = this._stats.missileLevel; // 1-3 extra parallel shots
+    const spacing = 6; // px between parallel bullets
 
-    const count = Math.min(this._stats.missileLevel, 3);
-    for (let i = 0; i < count; i++) {
-      const spread = count > 1 ? (i - (count - 1) / 2) * 0.3 : 0;
-      const angle = vecAngle(dir) + spread;
-      const missileDir = vecFromAngle(angle);
+    for (let i = 0; i < extraShots; i++) {
+      // Offset left/right symmetrically: -1, +1, 0 pattern
+      const offset = (i % 2 === 0 ? 1 : -1) * (Math.floor(i / 2) + 1);
+      const ox = this.player.pos.x + perpX * offset * spacing + dir.x * 8;
+      const oy = this.player.pos.y + perpY * offset * spacing + dir.y * 8;
 
-      const missile = new Missile(spawnX, spawnY, missileDir, MISSILE_SPEED, missileDmg, target);
-      this.bullets.push(missile);
+      const pierce = this._stats.pierceCount ?? 0;
+      const bullet = new Bullet(ox, oy, dir, BULLET_SPEED, twinDmg, false, pierce, false);
+      this.bullets.push(bullet);
     }
 
     this.particles.emitDirectional(
-      vec2(spawnX, spawnY),
-      vecAngle(dir),
-      0.4,
+      vec2(this.player.pos.x + dir.x * 10, this.player.pos.y + dir.y * 10),
+      this.player.angle,
+      0.3,
       2,
-      "#ff4466",
-      50,
+      COLORS.player,
+      40,
       0.1,
-      1.5
+      1.2
     );
   }
 
@@ -650,12 +785,12 @@ export class Game implements IGame {
     this.coneTimeSinceLastFire = 0;
     this.coneFlashTimer = 0.18; // longer flash for more prominent effect
 
-    // Push purchase-style shockwave (same as upgrade screen buy animation)
+    // Push purchase-style shockwave — bigger + longer for visual prominence
     this.pulseShockwaves.push({
       x: this.player.pos.x,
       y: this.player.pos.y,
-      timer: 0.35,
-      maxTimer: 0.35,
+      timer: 0.4,
+      maxTimer: 0.4,
       color: COLORS.player,
     });
 
@@ -703,23 +838,26 @@ export class Game implements IGame {
       }
     }
 
-    // ── Death pulse shockwave particles — expanding ring burst ──
-    const ringCount = 20;
+    // ── Death pulse shockwave particles — expanding ring burst (more prominent) ──
+    const ringCount = 24;
     for (let i = 0; i < ringCount; i++) {
       const a = (i / ringCount) * Math.PI * 2;
       const px = this.player.pos.x + Math.cos(a) * 4;
       const py = this.player.pos.y + Math.sin(a) * 4;
-      this.particles.emitDirectional(vec2(px, py), a, 0.12, 1, COLORS.player, 120, 0.25, 2);
+      this.particles.emitDirectional(vec2(px, py), a, 0.15, 1, COLORS.player, 140, 0.35, 2.5);
     }
-    // Outer ring — fainter, wider
-    for (let i = 0; i < 12; i++) {
-      const a = ((i + 0.5) / 12) * Math.PI * 2;
+    // Outer ring — fainter, wider echo effect
+    for (let i = 0; i < 16; i++) {
+      const a = ((i + 0.5) / 16) * Math.PI * 2;
       const px = this.player.pos.x + Math.cos(a) * 6;
       const py = this.player.pos.y + Math.sin(a) * 6;
-      this.particles.emitDirectional(vec2(px, py), a, 0.08, 1, "#aaddff", 160, 0.2, 1.2);
+      this.particles.emitDirectional(vec2(px, py), a, 0.1, 1, "#aaddff", 180, 0.3, 1.5);
     }
-    // Inner burst — bright white core flash
-    this.particles.emit(this.player.pos, 8, "#ffffff", 60, 0.15, 2.5);
+    // Inner burst — bright white core flash (bigger)
+    this.particles.emit(this.player.pos, 12, "#ffffff", 80, 0.2, 3);
+
+    // Subtle rhythmic screen shake on every pulse
+    this.renderer.shake(1.0);
 
     // Screen shake on hit for impact feel
     if (hitCount > 0) {
@@ -753,6 +891,9 @@ export class Game implements IGame {
         if (this.tutorial) {
           this.tutorial.update(dt);
         }
+        break;
+      case "perkSelection":
+        this.particles.update(dt);
         break;
       case "bossReward":
         this.particles.update(dt);
@@ -799,8 +940,69 @@ export class Game implements IGame {
       }
     }
 
+    // Skill: warp_speed 3× move speed
+    if (this.skillSystem.isActive("warp_speed")) {
+      this.player.stats.moveSpeed = this._stats.moveSpeed * 3;
+    } else {
+      this.player.stats.moveSpeed = this._stats.moveSpeed;
+    }
+
+    // Skill: juggernaut — player invulnerable (reset invuln timer each frame)
+    if (this.skillSystem.isActive("juggernaut")) {
+      this.player.invulnTimer = 0.5; // keep invuln refreshed
+    }
+
     this.player.move(this.input, dt);
     this.player.update(dt);
+
+    // Skill: warp_speed damage trail (stronger than afterimage)
+    if (this.skillSystem.isActive("warp_speed") && this.player.isMoving) {
+      const trailDmg = this._stats.damage * 0.5;
+      for (const enemy of this.enemies) {
+        if (!enemy.alive) continue;
+        if (vecDist(this.player.pos, enemy.pos) <= 35) {
+          const wasAlive = enemy.alive;
+          enemy.takeDamage(trailDmg * dt * 6);
+          if (wasAlive && !enemy.alive) this.onEnemyKilled(enemy);
+        }
+      }
+      this.particles.emit(this.player.pos, 2, "#00ffcc", 25, 0.15, 1.2);
+    }
+
+    // ── Auto-fire blaster (Galaga-style) — fires toward aim direction ──
+    // Uses Player.fire() which respects fireRate cooldown and extraProjectiles
+    // Skill: bullet_hell triples fire rate
+    if (this.skillSystem.isActive("bullet_hell")) {
+      this.player.stats.fireRate = this._stats.fireRate / 3;
+    } else {
+      this.player.stats.fireRate = this._stats.fireRate;
+    }
+    const directions = this.player.fire();
+    if (directions.length > 0) {
+      // Skill: juggernaut +50% damage, overdrive +50% damage
+      let skillDmgMult = 1;
+      if (this.skillSystem.isActive("juggernaut")) skillDmgMult += 0.5;
+      if (this.skillSystem.isActive("overdrive")) skillDmgMult += 0.5;
+      const bulletDmg = this._stats.damage * skillDmgMult;
+      const isCrit = Math.random() < this._stats.critChance;
+      const dmg = isCrit ? bulletDmg * this._stats.critMultiplier : bulletDmg;
+      // Skill: bullet_hell grants infinite pierce
+      const pierce = this.skillSystem.isActive("bullet_hell") ? 99 : (this._stats.pierceCount ?? 0);
+      for (const dir of directions) {
+        const bullet = new Bullet(
+          this.player.pos.x + dir.x * 8,
+          this.player.pos.y + dir.y * 8,
+          dir,
+          BULLET_SPEED,
+          dmg,
+          isCrit,
+          pierce,
+          false
+        );
+        this.bullets.push(bullet);
+      }
+      this.audio.playShoot();
+    }
 
     // ── Engine thruster trail particles (like the upgrade screen ship) ──
     if (this.player.isMoving && !this.player.isDashing) {
@@ -887,11 +1089,28 @@ export class Game implements IGame {
       }
     }
 
-    const elapsed = this.roundDuration - this.roundTimer;
-    if (elapsed >= this.nextBossElapsed) {
+    // Track elapsed survival time + check star milestones
+    this.elapsedSurvivalTime = this.roundDuration - this.roundTimer;
+
+    // Award star coins at survival time milestones
+    while (
+      this.starMilestonesEarned < STAR_MILESTONES.length &&
+      this.elapsedSurvivalTime >= STAR_MILESTONES[this.starMilestonesEarned]
+    ) {
+      this.starMilestonesEarned++;
+      this.save.starCoins++;
+      saveGame(this.save);
+    }
+
+    const elapsed = this.elapsedSurvivalTime;
+    if (elapsed >= this.nextBossElapsed && !this.bossEnemy) {
       this.spawnBoss();
-      const interval = randomRange(15, 30) - this.save.currentLevel * 0.5;
-      this.nextBossElapsed += interval;
+      // Next boss spawns sooner after each kill (acceleration)
+      const nextInterval = Math.max(
+        MIN_BOSS_SPAWN_INTERVAL,
+        FIRST_BOSS_SPAWN_TIME - this.bossesKilledThisRun * BOSS_SPAWN_ACCELERATION
+      );
+      this.nextBossElapsed = elapsed + nextInterval;
     }
 
     if (hasAbility(this.save, "laser")) {
@@ -919,10 +1138,15 @@ export class Game implements IGame {
       if (this.pulseShockwaves[i].timer <= 0) this.pulseShockwaves.splice(i, 1);
     }
 
+    // ── Spawn rate: gentle linear ramp + boss-gated acceleration ──
+    // Linear ramp from SPAWN_RATE_BASE down to SPAWN_RATE_MIN over round duration
     const progress = this.roundDuration > 0 ? Math.min(1, elapsed / this.roundDuration) : 0;
-    const rampFactor = Math.pow(0.25, progress);
-    const levelMult = this.save.currentLevel >= 2 ? 0.5 : 1;
-    const currentSpawnRate = Math.max(0.8, this.spawnRate * rampFactor * levelMult);
+    const linearRate = SPAWN_RATE_BASE - (SPAWN_RATE_BASE - SPAWN_RATE_MIN) * progress;
+    // Boss kills shave off spawn time (rewards aggression)
+    const bossBonus = this.bossesKilledThisRun * SPAWN_RAMP_PER_BOSS;
+    // Cross-run difficulty: spawn rate tightens with roundNumber
+    const roundMult = 1 - Math.min(0.5, (this.save.roundNumber - 1) * ROUND_DIFFICULTY_SCALE);
+    const currentSpawnRate = Math.max(SPAWN_RATE_MIN, (linearRate - bossBonus) * roundMult);
 
     this.spawnTimer -= dt;
     if (this.spawnTimer <= 0) {
@@ -945,6 +1169,129 @@ export class Game implements IGame {
 
     this.spawner.handleEnemyShooting(this);
 
+    // ══════════════════════════════════════════════════════════════════════
+    // PHASE 2 — UPGRADE SYSTEMS (tick each frame)
+    // ══════════════════════════════════════════════════════════════════════
+
+    // ── Orbital Drones (guns_orbital) — fire bullets every 3 beats (~1.8s) ──
+    if (this._stats.orbitalDrones) {
+      this.orbitalDroneTimer -= dt;
+      if (this.orbitalDroneTimer <= 0) {
+        this.orbitalDroneTimer = 1.8; // ~3 beats at 100 BPM
+        const droneDmg = this._stats.damage * 0.3;
+        for (let i = 0; i < 2; i++) {
+          const droneAngle = this.gameTime * 2 + i * Math.PI;
+          const droneX = this.player.pos.x + Math.cos(droneAngle) * 30;
+          const droneY = this.player.pos.y + Math.sin(droneAngle) * 30;
+          const target = this.findNearestEnemy();
+          if (target) {
+            const dir = vecNormalize(vecSub(target.pos, vec2(droneX, droneY)));
+            const bullet = new Bullet(droneX, droneY, dir, 300, droneDmg, false, 0, false);
+            this.bullets.push(bullet);
+            this.particles.emitDirectional(vec2(droneX, droneY), vecAngle(dir), 0.2, 2, "#88aaff", 40, 0.1, 1);
+          }
+        }
+      }
+    }
+
+    // ── Afterimage trail (move_afterimage) — damage enemies near player trail ──
+    if (this._stats.afterimageActive && this.player.isMoving) {
+      this.afterimageTimer -= dt;
+      if (this.afterimageTimer <= 0) {
+        this.afterimageTimer = 0.15; // tick ~6.7 times/sec
+        const trailDmg = this._stats.damage * this._stats.afterimageDpsFraction;
+        for (const enemy of this.enemies) {
+          if (!enemy.alive) continue;
+          if (vecDist(this.player.pos, enemy.pos) <= 25) {
+            const wasAlive = enemy.alive;
+            enemy.takeDamage(trailDmg);
+            if (wasAlive && !enemy.alive) this.onEnemyKilled(enemy);
+          }
+        }
+        // Faint purple trail particle
+        this.particles.emit(this.player.pos, 1, "#cc44ff", 15, 0.2, 0.8);
+      }
+    }
+
+    // ── Warp Portal (move_warp) — tick portal timer ──
+    if (this.warpPortal) {
+      this.warpPortal.timer -= dt;
+      if (this.warpPortal.timer <= 0) {
+        this.warpPortal = null; // portal expired
+      }
+    }
+
+    // ── Mech Mode (ms_mech) — mothership follows player at 50% speed ──
+    if (this._stats.msMechActive && !this.mothership.isDestroyed) {
+      const mechSpeed = this._stats.moveSpeed * 0.5;
+      const toPlayer = vecSub(this.player.pos, this.mothership.pos);
+      const dist = vecDist(this.player.pos, this.mothership.pos);
+      if (dist > 40) { // don't crowd player
+        const dir = vecNormalize(toPlayer);
+        this.mothership.pos.x += dir.x * mechSpeed * dt;
+        this.mothership.pos.y += dir.y * mechSpeed * dt;
+      }
+      // Mech stomp — damage nearby enemies every 2s
+      this.mechStompTimer -= dt;
+      if (this.mechStompTimer <= 0) {
+        this.mechStompTimer = 2;
+        const stompDmg = this._stats.damage;
+        this.collisions.damageEnemiesInRadius(this, this.mothership.pos, 50, stompDmg);
+        this.particles.emit(this.mothership.pos, 8, "#4488ff", 60, 0.3, 2);
+      }
+    }
+
+    // ── Mech Overdrive (ms_overdrive) — fire homing missiles from mothership ──
+    if (this._stats.msOverdriveActive && !this.mothership.isDestroyed) {
+      this.mechMissileTimer -= dt;
+      if (this.mechMissileTimer <= 0) {
+        this.mechMissileTimer = 2.4; // every ~4 beats
+        const target = this.findNearestEnemy();
+        if (target) {
+          const dir = vecNormalize(vecSub(target.pos, this.mothership.pos));
+          const mDmg = this._stats.damage * 0.5;
+          const m = new Missile(this.mothership.pos.x, this.mothership.pos.y, dir, MISSILE_SPEED, mDmg, target);
+          this.bullets.push(m);
+          this.particles.emitDirectional(this.mothership.pos, vecAngle(dir), 0.3, 2, "#ff4466", 50, 0.1, 1.5);
+        }
+      }
+    }
+
+    // ── Fortress Mode (ms_fortress) — damage dome around immovable mothership ──
+    if (this._stats.msFortressActive && !this.mothership.isDestroyed) {
+      this.fortressDomeTimer -= dt;
+      if (this.fortressDomeTimer <= 0) {
+        this.fortressDomeTimer = 0.5; // pulse damage every 0.5s
+        const domeDmg = this._stats.damage * 0.3;
+        this.collisions.damageEnemiesInRadius(this, this.mothership.pos, this._stats.msFortressDomeRadius, domeDmg);
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════════
+    // PHASE 6 — IN-ROUND SKILLS (tick each frame)
+    // ══════════════════════════════════════════════════════════════════════
+    const skillCollected = this.skillSystem.update(
+      dt,
+      this.elapsedSurvivalTime,
+      this.player.pos,
+      SKILL_COLLECT_RANGE
+    );
+    // Pickup VFX for collected skills
+    for (const _id of skillCollected) {
+      this.particles.emit(this.player.pos, 20, "#ffffff", 100, 0.4, 3);
+      this.renderer.shake(1);
+    }
+
+    // ── Player HP regen (hp_regen upgrade) ──
+    if (this._stats.playerRegenInterval > 0 && this.player.hp < this.player.maxHp) {
+      this.playerRegenTimer -= dt;
+      if (this.playerRegenTimer <= 0) {
+        this.player.hp = Math.min(this.player.hp + 1, this.player.maxHp);
+        this.playerRegenTimer = this._stats.playerRegenInterval;
+        this.particles.emit(this.player.pos, 6, "#44ff44", 30, 0.3, 1.5);
+      }
+    }
+
     // ── Sacred Geometry background animation ──
     if (this.save.algoArtEnabled) this.sacredGeometry.update(dt);
 
@@ -961,7 +1308,7 @@ export class Game implements IGame {
 
     // ── Debris (harmless background asteroids) ──
     this.debrisTimer -= dt;
-    if (this.debrisTimer <= 0 && this.debris.length < 40) {
+    if (this.debrisTimer <= 0 && this.debris.length < 10) {
       // Spawn from random positions along all edges (wide spread to avoid trail effect)
       const edge = Math.random();
       let dx: number, dy: number;
@@ -979,7 +1326,7 @@ export class Game implements IGame {
         dy = randomRange(-50, GAME_HEIGHT * 0.4);
       }
       this.debris.push(new Debris(dx, dy));
-      this.debrisTimer = randomRange(0.3, 0.7);
+      this.debrisTimer = randomRange(1.0, 2.0);
     }
     for (const d of this.debris) d.update(dt);
     compactAlive(this.debris);
@@ -1022,42 +1369,44 @@ export class Game implements IGame {
     const dist = 350;
     const x = GAME_WIDTH / 2 + Math.cos(angle) * dist;
     const y = GAME_HEIGHT / 2 + Math.sin(angle) * dist;
-    const level = this.save.currentLevel;
-    const bossHP = 5 + level * 5;
+    const round = this.save.roundNumber;
+    // Boss HP scales with bosses killed this run + cross-run roundNumber
+    const bossHP =
+      BOSS_BASE_HP + this.bossesKilledThisRun * BOSS_HP_PER_KILL + round * BOSS_HP_PER_ROUND;
 
-    if (level === 1) {
-      // Level 1: mega asteroid boss — big and imposing
-      const megaRock = new Rock(x, y, bossHP, 15, true, 2, true);
+    // Cycle boss variants based on total bosses killed this run
+    const bossIndex = this.bossesKilledThisRun % 3;
+    if (bossIndex === 0) {
+      // Mega asteroid boss
+      const megaRock = new Rock(x, y, bossHP, 15 + round, true, 2, true);
       megaRock.radius = 45;
-      megaRock.coinValue = 10;
+      megaRock.coinValue = 10 + this.bossesKilledThisRun * 5;
       megaRock.isBoss = true;
       this.bossEnemy = megaRock;
       this.enemies.push(megaRock);
-    } else if (level === 2) {
-      // Level 2: Bee boss — fast, agile, shoots
-      const bee = new EnemyShip(x, y, bossHP, 35, true, "bee");
+    } else if (bossIndex === 1) {
+      // Bee boss — fast, agile, shoots
+      const bee = new EnemyShip(x, y, bossHP, 35 + round * 2, true, "bee");
       bee.radius = 20;
-      bee.coinValue = 15;
+      bee.coinValue = 15 + this.bossesKilledThisRun * 5;
       bee.isBoss = true;
       this.bossEnemy = bee;
       this.enemies.push(bee);
-    } else if (level === 3) {
-      // Level 3: Butterfly boss — tanky, shoots, beautiful
-      const butterfly = new EnemyShip(x, y, Math.floor(bossHP * 1.5), 25, true, "butterfly");
+    } else {
+      // Butterfly boss — tanky, shoots
+      const butterfly = new EnemyShip(
+        x,
+        y,
+        Math.floor(bossHP * 1.5),
+        25 + round,
+        true,
+        "butterfly"
+      );
       butterfly.radius = 24;
-      butterfly.coinValue = 20;
+      butterfly.coinValue = 20 + this.bossesKilledThisRun * 5;
       butterfly.isBoss = true;
       this.bossEnemy = butterfly;
       this.enemies.push(butterfly);
-    } else {
-      // Level 4+: Boss ship variant — cycles between bee and butterfly, getting stronger
-      const variant = level % 2 === 0 ? "bee" : "butterfly";
-      const boss = new EnemyShip(x, y, bossHP * 2, 30 + level * 2, true, variant);
-      boss.radius = 22 + level;
-      boss.coinValue = 15 + level * 5;
-      boss.isBoss = true;
-      this.bossEnemy = boss;
-      this.enemies.push(boss);
     }
 
     this.renderer.shake(2);
@@ -1073,6 +1422,7 @@ export class Game implements IGame {
     if (this.bossEnemy && enemy === this.bossEnemy) {
       this.bossDefeated = true;
       this.bossEnemy = null;
+      this.bossesKilledThisRun++;
       this.particles.emit(enemy.pos, 40, "#ff4444", 160, 0.7, 5);
       this.particles.emit(enemy.pos, 25, "#ffaa00", 130, 0.55, 4);
       this.particles.emit(enemy.pos, 15, "#ffffff", 90, 0.35, 2.5);
@@ -1080,29 +1430,25 @@ export class Game implements IGame {
       this.audio.playExplosion();
       {
         this.audio.stopConeTrack();
-        this.save.currentLevel++;
         this.save.starCoins++;
-        const level = this.save.currentLevel - 1; // level that was just beaten
-        // Auto-grant abilities for first 3 bosses; level 4+ shows choice screen
-        if (level === 1 && !hasAbility(this.save, "bomb_dash")) {
+        const totalBossesEver = this.bossesKilledThisRun + (this.save.roundNumber - 1) * 2;
+        // Auto-grant abilities for first 3 boss kills ever; after that show choice screen
+        if (totalBossesEver === 1 && !hasAbility(this.save, "bomb_dash")) {
           addAbility(this.save, "bomb_dash");
           this.autoGrantedAbility = "bomb_dash";
-        } else if (level === 2 && !hasAbility(this.save, "laser")) {
+        } else if (totalBossesEver === 2 && !hasAbility(this.save, "laser")) {
           addAbility(this.save, "laser");
           this.autoGrantedAbility = "laser";
-        } else if (level === 3 && !hasAbility(this.save, "flashbang")) {
+        } else if (totalBossesEver === 3 && !hasAbility(this.save, "flashbang")) {
           addAbility(this.save, "flashbang");
           this.autoGrantedAbility = "flashbang";
         } else {
           this.autoGrantedAbility = null;
         }
         saveGame(this.save);
+        // Mid-run boss reward — brief overlay, then resume gameplay
         this.state = "bossReward";
         this.stateChangeTime = this.gameTime;
-      }
-      if (this.save.currentLevel > this.save.highestLevel) {
-        this.save.highestLevel = this.save.currentLevel;
-        saveGame(this.save); // Bug #18 fix: persist highestLevel immediately
       }
       return;
     }
@@ -1133,18 +1479,64 @@ export class Game implements IGame {
     this.audio.playExplosion();
 
     this.killStreak++;
-    this.streakTimer = 1.5;
+    this.streakTimer = STREAK_TIMEOUT + this.perkSystem.getStreakTimeoutBonus();
     this.roundKills++;
 
-    const baseValue = enemy.coinValue + 1 + this._stats.extraCoinPerKill;
-    let value = Math.max(1, baseValue);
+    // Track best streak this run + all-time record
+    if (this.killStreak > this.bestStreakThisRun) {
+      this.bestStreakThisRun = this.killStreak;
+    }
+    if (this.killStreak > this.save.streakRecord) {
+      this.save.streakRecord = this.killStreak;
+    }
+
+    let baseValue = enemy.coinValue + 1 + this._stats.extraCoinPerKill;
+    // Elite bounty (econ_bounty) — elites drop multiplied coins
+    if (enemy.isElite && this._stats.eliteCoinMultiplier > 1) {
+      baseValue = Math.round(baseValue * this._stats.eliteCoinMultiplier);
+    }
+    // Logarithmic round scaling — higher rounds naturally drop more coins
+    const levelScale = 1 + COIN_LEVEL_SCALE * Math.log(this.save.roundNumber + 1);
+    let value = Math.max(1, Math.round(baseValue * levelScale));
 
     if (Math.random() < this._stats.luckyChance) {
       value *= 5;
     }
 
+    // Streak coin multiplier — apply highest matching tier
+    for (const tier of STREAK_TIERS) {
+      if (this.killStreak >= tier.threshold) {
+        value = Math.round(value * tier.multiplier);
+        break;
+      }
+    }
+
+    // Skill: gold_rush — 5× coin value
+    if (this.skillSystem.isActive("gold_rush")) {
+      value *= 5;
+    }
+
+    // Skill: overdrive — chain explosion on kill (60px radius, 50% damage)
+    if (this.skillSystem.isActive("overdrive")) {
+      const overdriveDmg = this._stats.damage * 0.5;
+      this.collisions.damageEnemiesInRadius(this, enemy.pos, 60, overdriveDmg);
+      this.particles.emit(enemy.pos, 15, "#ff8800", 80, 0.4, 2.5);
+    }
+
     const coin = new Coin(enemy.pos.x, enemy.pos.y, value);
     this.coins.push(coin);
+
+    // ── In-run perk XP ──
+    let xpGain = PERK_XP_PER_KILL;
+    if (enemy.isElite) xpGain += PERK_XP_ELITE_BONUS;
+    if (enemy.isBoss) xpGain += PERK_XP_BOSS_BONUS;
+    const leveledUp = this.perkSystem.addXP(xpGain);
+    if (leveledUp && this.perkSystem.pendingChoices.length > 0) {
+      // Pause gameplay for perk selection
+      this.audio.stopConeTrack();
+      this.state = "perkSelection";
+      this.stateChangeTime = this.gameTime;
+    }
   }
 
   endRound(mothershipDestroyed: boolean, cause?: "mothership" | "player" | "time") {
@@ -1167,6 +1559,16 @@ export class Game implements IGame {
     this.deathDelayActive = false;
     this.deathCause = cause || (mothershipDestroyed ? "mothership" : "time");
 
+    // Compound interest (econ_interest) — earn % of banked coins as bonus
+    if (this._stats.interestRate > 0) {
+      const interestBonus = Math.round(this.save.coins * this._stats.interestRate);
+      if (interestBonus > 0) {
+        this.roundCoins += interestBonus;
+        this.save.coins += interestBonus;
+        this.save.lifetimeCoins += interestBonus;
+      }
+    }
+
     // Apply round-end coin bonus (econ_combo upgrade)
     if (this._stats.roundCoinBonus > 0 && this.roundCoins > 0) {
       const bonus = Math.round(this.roundCoins * this._stats.roundCoinBonus);
@@ -1174,6 +1576,32 @@ export class Game implements IGame {
       this.save.coins += bonus;
       this.save.lifetimeCoins += bonus;
     }
+
+    // Round bonus — higher rounds naturally pay more at round end
+    const levelBonus = Math.round(this.roundCoins * ROUND_LEVEL_BONUS * this.save.roundNumber);
+    if (levelBonus > 0) {
+      this.roundCoins += levelBonus;
+      this.save.coins += levelBonus;
+      this.save.lifetimeCoins += levelBonus;
+    }
+
+    // Minimum coin floor — bad runs still progress
+    if (this.roundCoins < MIN_ROUND_COINS) {
+      const deficit = MIN_ROUND_COINS - this.roundCoins;
+      this.roundCoins = MIN_ROUND_COINS;
+      this.save.coins += deficit;
+      this.save.lifetimeCoins += deficit;
+    }
+
+    // Update best survival time + increment roundNumber
+    if (this.elapsedSurvivalTime > this.save.bestSurvivalTime) {
+      this.save.bestSurvivalTime = this.elapsedSurvivalTime;
+    }
+    this.save.roundNumber++;
+    if (this.save.roundNumber > this.save.highestRound) {
+      this.save.highestRound = this.save.roundNumber;
+    }
+
     this.save.lifetimeKills += this.roundKills;
     saveGame(this.save);
     // Clear lingering particles so mothership explosion debris doesn't
@@ -1219,6 +1647,15 @@ export class Game implements IGame {
           );
         }
         break;
+      case "perkSelection":
+        this.renderPlaying();
+        this.perkSelectionUI.render(
+          this.renderer,
+          this.perkSystem.pendingChoices,
+          this.perkSystem.level,
+          this.gameTime
+        );
+        break;
       case "bossReward":
         this.renderPlaying();
         this.bossRewardUI.render(this.renderer, this.save, this.autoGrantedAbility, this.gameTime);
@@ -1230,8 +1667,11 @@ export class Game implements IGame {
           roundCoins: this.roundCoins,
           roundKills: this.roundKills,
           totalCoins: this.save.coins,
-          currentLevel: this.save.currentLevel,
+          roundNumber: this.save.roundNumber,
+          survivalTime: this.elapsedSurvivalTime,
+          milestonesEarned: this.starMilestonesEarned,
           gameTime: this.gameTime,
+          bestStreak: this.bestStreakThisRun,
         });
         break;
     }
@@ -1284,6 +1724,9 @@ export class Game implements IGame {
       ctx.setLineDash([]);
       ctx.restore();
     }
+
+    // ── Skill pickups (glowing orbs) ──
+    this.skillSystem.renderPickups(this.renderer);
 
     this.mothership.render(this.renderer);
     for (const coin of this.coins) coin.render(this.renderer);
@@ -1347,31 +1790,41 @@ export class Game implements IGame {
       ctx.restore();
     }
 
-    // ── Pulse shockwaves — exact same render as upgrade screen purchase shockwaves ──
+    // ── Pulse shockwaves — prominent expanding rings ──
     {
       const ctx = this.renderer.ctx;
       const NODE_RADIUS = CONE_RANGE; // use cone range as the base radius
       for (const sw of this.pulseShockwaves) {
         const progress = 1 - sw.timer / sw.maxTimer;
-        const radius = NODE_RADIUS * (1 + progress * 2.5);
+        const radius = NODE_RADIUS * (1 + progress * 4); // bigger max radius (was 2.5)
         const alpha = 1 - progress;
 
         ctx.save();
-        // Outer ring
+        // Outer ring — thicker + more glow
         ctx.strokeStyle = sw.color;
-        ctx.globalAlpha = alpha * 0.8;
+        ctx.globalAlpha = alpha * 1.0; // brighter (was 0.8)
         ctx.shadowColor = sw.color;
-        ctx.shadowBlur = 10;
-        ctx.lineWidth = 3 * (1 - progress);
+        ctx.shadowBlur = 20; // bigger glow (was 10)
+        ctx.lineWidth = 5 * (1 - progress); // thicker (was 3)
         ctx.beginPath();
         ctx.arc(sw.x, sw.y, radius, 0, Math.PI * 2);
         ctx.stroke();
 
         // Inner ring
-        ctx.globalAlpha = alpha * 0.4;
-        ctx.lineWidth = 1;
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.lineWidth = 1.5;
         ctx.beginPath();
         ctx.arc(sw.x, sw.y, radius * 0.5, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // White core flash ring (pop effect)
+        ctx.globalAlpha = alpha * alpha * 0.3;
+        ctx.strokeStyle = "#ffffff";
+        ctx.shadowColor = "#ffffff";
+        ctx.shadowBlur = 8;
+        ctx.lineWidth = 2 * (1 - progress);
+        ctx.beginPath();
+        ctx.arc(sw.x, sw.y, radius * 0.25, 0, Math.PI * 2);
         ctx.stroke();
 
         ctx.restore();
@@ -1485,7 +1938,7 @@ export class Game implements IGame {
       roundCoins: this.roundCoins,
       roundKills: this.roundKills,
       killStreak: this.killStreak,
-      level: this.save.currentLevel,
+      level: this.save.roundNumber,
       mothershipHp: this.mothership.hp,
       mothershipMaxHp: this.mothership.maxHp,
       playerHp: this.player.hp,
@@ -1493,6 +1946,10 @@ export class Game implements IGame {
       dashReady: this.player.dashReady,
       dashCooldownRatio: this.player.dashCooldownRatio,
       isMobile: this.input.isTouchDevice,
+      perkLevel: this.perkSystem.level,
+      perkXpProgress: this.perkSystem.xpProgress(),
+      activePerks: [...this.perkSystem.activePerks.values()],
+      activeSkills: [...this.skillSystem.activeSkills.values()],
     });
 
     if (this.save.specialAbilities.length > 0) {
@@ -1637,9 +2094,9 @@ export class Game implements IGame {
 
   /** Manage algorithmic formation spawning — creates enemy waves in mathematical patterns */
   private updateFormations(dt: number) {
-    const level = this.save.currentLevel;
-    // Formations start at level 2+, and get more frequent at higher levels
-    if (level < 2) return;
+    const round = this.save.roundNumber;
+    // Formations start at round 2+, and get more frequent at higher rounds
+    if (round < 2) return;
 
     // If there's an active formation being spawned, tick its stagger timers
     if (this.activeFormation) {
@@ -1650,8 +2107,8 @@ export class Game implements IGame {
         const slot = f.slots[f.spawnedCount];
         if (f.elapsed < slot.delay) break; // not yet time for this one
         // Spawn a rock at the formation slot position
-        const hp = 1 + Math.floor(level * 0.3);
-        const speed = ROCK_BASE_SPEED + level * 2;
+        const hp = 1 + Math.floor(round * 0.3);
+        const speed = ROCK_BASE_SPEED + round * 2;
         const rock = new Rock(slot.x, slot.y, hp, speed, false, 0.8);
         rock.coinValue = 2;
         this.enemies.push(rock);
@@ -1660,8 +2117,8 @@ export class Game implements IGame {
       // Formation complete when all enemies spawned
       if (f.spawnedCount >= f.slots.length) {
         this.activeFormation = null;
-        // Next formation in 8–15 seconds (faster at higher levels)
-        this.formationCooldown = randomRange(8, 15) - Math.min(5, level * 0.5);
+        // Next formation in 8–15 seconds (faster at higher rounds)
+        this.formationCooldown = randomRange(8, 15) - Math.min(5, round * 0.5);
         this.formationTimer = 0;
       }
       return;
@@ -1672,7 +2129,7 @@ export class Game implements IGame {
     if (this.formationTimer >= this.formationCooldown) {
       // Generate a new formation
       const type = randomFormationType();
-      const count = Math.min(6 + level, 14); // 7–14 enemies depending on level
+      const count = Math.min(6 + round, 14); // 7–14 enemies depending on round
       const slots = generateFormation(type, count);
 
       this.activeFormation = { slots, type, spawnedCount: 0, elapsed: 0 };
@@ -1687,18 +2144,35 @@ export class Game implements IGame {
   private handleBossRewardClick(mx: number, my: number) {
     const result = this.bossRewardUI.handleClick(mx, my, this.autoGrantedAbility);
     if (result === "continue") {
-      // Boss 1-3 auto-grant path — persist kills before leaving
-      this.save.lifetimeKills += this.roundKills;
+      // Boss auto-grant — resume gameplay mid-run
       saveGame(this.save);
       this.audio.playClick();
-      this.manager.goToUpgradeScreen();
+      this.resumeMidRun();
     } else if (result) {
-      // Boss 4+ choice path — equip chosen ability then persist kills
+      // Boss choice — equip chosen ability then resume gameplay
       addAbility(this.save, result);
-      this.save.lifetimeKills += this.roundKills;
       saveGame(this.save);
       this.audio.playClick();
-      this.manager.goToUpgradeScreen();
+      this.resumeMidRun();
     }
+  }
+
+  /** Handle perk selection click — pick a perk and resume */
+  private handlePerkSelectionClick(mx: number, my: number) {
+    if (this.gameTime - this.stateChangeTime < 0.4) return;
+    const perkId = this.perkSelectionUI.handleClick(mx, my, this.perkSystem.pendingChoices);
+    if (perkId) {
+      this.perkSystem.selectPerk(perkId);
+      this.recalcStatsFromPerks();
+      this.audio.playClick();
+      this.resumeMidRun();
+    }
+  }
+
+  /** Resume gameplay after mid-run boss reward overlay */
+  private resumeMidRun() {
+    this.state = "playing";
+    this.stateChangeTime = this.gameTime;
+    this.audio.startConeTrack(() => this.onBeat());
   }
 }

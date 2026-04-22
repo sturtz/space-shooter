@@ -4,10 +4,31 @@ import { Vec2, vec2, randomRange } from "../utils/Math";
 import { COIN_SIZE, COIN_LIFETIME, COIN_SPEED, COLORS } from "../utils/Constants";
 import { ItemImages, imageReady } from "../utils/Assets";
 
+// ── Offscreen canvas for safe source-atop tinting ───────────────────
+let _tintCanvas: OffscreenCanvas | HTMLCanvasElement | null = null;
+let _tintCtx: CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null = null;
+
+function getTintCtx(
+  w: number,
+  h: number
+): CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D {
+  if (!_tintCanvas || _tintCanvas.width < w || _tintCanvas.height < h) {
+    const size = Math.max(w, h, 64);
+    if (typeof OffscreenCanvas !== "undefined") {
+      _tintCanvas = new OffscreenCanvas(size, size);
+    } else {
+      _tintCanvas = document.createElement("canvas");
+      _tintCanvas.width = size;
+      _tintCanvas.height = size;
+    }
+    _tintCtx = _tintCanvas.getContext("2d")!;
+  }
+  return _tintCtx!;
+}
+
 export class Coin extends Entity {
   value: number;
   lifetime: number;
-  magnetRange: number;
   attracted: boolean = false;
   sparkleTimer: number = 0;
   bobOffset: number;
@@ -16,7 +37,6 @@ export class Coin extends Entity {
     super(x, y, COIN_SIZE);
     this.value = value;
     this.lifetime = COIN_LIFETIME;
-    this.magnetRange = 0; // Set by game based on upgrades
     this.bobOffset = randomRange(0, Math.PI * 2);
     // Small initial velocity burst
     this.vel = vec2(randomRange(-40, 40), randomRange(-40, 40));
@@ -85,14 +105,30 @@ export class Coin extends Entity {
     if (coinSprite) {
       // Draw sprite — scaled up for mobile readability; high-value coins slightly bigger
       const drawSize = this.value >= 5 ? COIN_SIZE * 4.5 : COIN_SIZE * 3.5;
-      ctx.drawImage(coinSprite, drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
-
-      // Gold/purple tint overlay for high-value coins
+      // Gold/purple tint overlay for high-value coins — use offscreen canvas
+      // to avoid source-atop bleeding onto the main canvas (same fix as Rock/EnemyShip)
       if (this.value >= 5) {
-        ctx.globalCompositeOperation = "source-atop";
-        ctx.fillStyle = this.value >= 50 ? "rgba(200,0,255,0.35)" : "rgba(255,160,0,0.35)";
-        ctx.fillRect(drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
-        ctx.globalCompositeOperation = "source-over";
+        const s = Math.ceil(drawSize);
+        const tCtx = getTintCtx(s, s);
+        tCtx.clearRect(0, 0, s, s);
+        tCtx.globalCompositeOperation = "source-over";
+        tCtx.drawImage(coinSprite, 0, 0, s, s);
+        tCtx.globalCompositeOperation = "source-atop";
+        tCtx.fillStyle = this.value >= 50 ? "rgba(200,0,255,0.35)" : "rgba(255,160,0,0.35)";
+        tCtx.fillRect(0, 0, s, s);
+        ctx.drawImage(
+          tCtx.canvas,
+          0,
+          0,
+          s,
+          s,
+          drawX - drawSize / 2,
+          drawY - drawSize / 2,
+          drawSize,
+          drawSize
+        );
+      } else {
+        ctx.drawImage(coinSprite, drawX - drawSize / 2, drawY - drawSize / 2, drawSize, drawSize);
       }
     } else {
       // Canvas circle fallback

@@ -5,14 +5,6 @@ import { saveGame } from "../utils/SaveManager";
 import type { MusicTrack, SaveData } from "../utils/SaveManager";
 import type { AudioManager } from "../audio/AudioManager";
 
-/** Convert a hex color string (e.g. "#ff6644") to rgba with the given alpha */
-function hexToRgba(hex: string, alpha: number): string {
-  const r = parseInt(hex.slice(1, 3), 16);
-  const g = parseInt(hex.slice(3, 5), 16);
-  const b = parseInt(hex.slice(5, 7), 16);
-  return `rgba(${r},${g},${b},${alpha})`;
-}
-
 /** Pause menu layout rectangles — scaled for mobile fat-finger usability */
 interface PauseLayout {
   panel: { x: number; y: number; w: number; h: number };
@@ -279,7 +271,7 @@ export class PauseMenu {
             textColor: isActive ? color : "rgba(180, 180, 200, 0.7)",
             fontSize: 11,
             radius: 8,
-            glow: isActive ? hexToRgba(color, 0.2) : undefined,
+            glow: isActive ? renderer.hexToRgba(color, 0.2) : undefined,
           }
         );
       }

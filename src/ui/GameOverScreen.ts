@@ -6,8 +6,11 @@ export interface GameOverData {
   roundCoins: number;
   roundKills: number;
   totalCoins: number;
-  currentLevel: number;
+  roundNumber: number;
+  survivalTime: number;
+  milestonesEarned: number;
   gameTime: number;
+  bestStreak: number;
 }
 
 export class GameOverScreen {
@@ -56,7 +59,7 @@ export class GameOverScreen {
         break;
       default:
         title = "ROUND COMPLETE";
-        subtitle = `Level ${data.currentLevel}`;
+        subtitle = `Round ${data.roundNumber}`;
         titleColor = "#00d4ff";
         panelBorder = "rgba(0, 180, 255, 0.3)";
         panelGlow = "rgba(0, 180, 255, 0.15)";
@@ -64,7 +67,7 @@ export class GameOverScreen {
     }
 
     const panelW = 320;
-    const panelH = 220;
+    const panelH = 250;
     renderer.drawPanel(cx - panelW / 2, cy - panelH / 2, panelW, panelH, {
       bg: "rgba(6, 6, 20, 0.92)",
       border: panelBorder,
@@ -76,31 +79,31 @@ export class GameOverScreen {
     ctx.save();
     ctx.shadowColor = titleColor;
     ctx.shadowBlur = 15;
-    renderer.drawTitleTextOutline(title, cx, cy - 82, titleColor, "#000", 18, "center", "middle");
+    renderer.drawTitleTextOutline(title, cx, cy - 96, titleColor, "#000", 18, "center", "middle");
     ctx.restore();
 
     ctx.save();
-    ctx.font = "11px Tektur";
+    ctx.font = renderer.getFont(11);
     ctx.fillStyle = COLORS.textSecondary;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText(subtitle, cx, cy - 56);
+    ctx.fillText(subtitle, cx, cy - 70);
     ctx.restore();
 
     ctx.save();
     ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(cx - 100, cy - 40);
-    ctx.lineTo(cx + 100, cy - 40);
+    ctx.moveTo(cx - 100, cy - 54);
+    ctx.lineTo(cx + 100, cy - 54);
     ctx.stroke();
     ctx.restore();
 
-    const statY = cy - 22;
+    const statY = cy - 36;
     const lineH = 22;
 
     ctx.save();
-    ctx.font = "bold 11px Tektur";
+    ctx.font = renderer.getFont(11, true);
     ctx.textBaseline = "middle";
 
     ctx.textAlign = "left";
@@ -119,10 +122,26 @@ export class GameOverScreen {
 
     ctx.textAlign = "left";
     ctx.fillStyle = COLORS.textSecondary;
-    ctx.fillText("Total Coins", cx - 100, statY + lineH * 2);
+    ctx.fillText("Best Streak", cx - 100, statY + lineH * 2);
+    ctx.textAlign = "right";
+    ctx.fillStyle =
+      data.bestStreak >= 10 ? "#ffaa00" : data.bestStreak >= 5 ? "#ffff00" : COLORS.textSecondary;
+    ctx.fillText(`🔥 ${data.bestStreak}`, cx + 100, statY + lineH * 2);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Survived", cx - 100, statY + lineH * 3);
+    ctx.textAlign = "right";
+    ctx.fillStyle = COLORS.player;
+    const stars = "⭐".repeat(data.milestonesEarned);
+    ctx.fillText(`${data.survivalTime.toFixed(1)}s ${stars}`, cx + 100, statY + lineH * 3);
+
+    ctx.textAlign = "left";
+    ctx.fillStyle = COLORS.textSecondary;
+    ctx.fillText("Total Coins", cx - 100, statY + lineH * 4);
     ctx.textAlign = "right";
     ctx.fillStyle = COLORS.coin;
-    ctx.fillText(`${data.totalCoins}`, cx + 100, statY + lineH * 2);
+    ctx.fillText(`${data.totalCoins}`, cx + 100, statY + lineH * 4);
 
     ctx.restore();
 
@@ -132,7 +151,7 @@ export class GameOverScreen {
     const btnW = 260;
     const btnH = 44;
     const btnX = cx - btnW / 2;
-    const btnY = cy + 60;
+    const btnY = cy + 62;
 
     ctx.save();
     ctx.shadowColor = `rgba(0, 200, 255, ${0.15 + playPulse * 0.15})`;

@@ -42,6 +42,7 @@ export const AsteroidImages = {
   small: [img("./assets/items/pulse-asteroid-small.svg")],
   big: [img("./assets/items/pulse-asteroid-big.svg")],
   mega: img("./assets/items/pulse-asteroid-mega.svg"),
+  rockFace: img("./assets/items/dwayne.jpeg"),
 };
 
 // ─── Items / pickups ─────────────────────────────────────────────────────────

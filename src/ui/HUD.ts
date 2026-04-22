@@ -1,5 +1,7 @@
 import { Renderer } from "../rendering/Renderer";
-import { GAME_WIDTH, GAME_HEIGHT, COLORS } from "../utils/Constants";
+import { GAME_WIDTH, GAME_HEIGHT, COLORS, STREAK_TIERS } from "../utils/Constants";
+import type { ActivePerk } from "../systems/PerkSystem";
+import type { ActiveSkill } from "../systems/SkillSystem";
 
 export interface HUDData {
   roundTimer: number;
@@ -16,6 +18,22 @@ export interface HUDData {
   dashReady: boolean;
   dashCooldownRatio: number;
   isMobile: boolean;
+  /** Perk system level (0 = no perks yet) */
+  perkLevel: number;
+  /** XP progress toward next perk level (0-1) */
+  perkXpProgress: number;
+  /** Active perks this run */
+  activePerks: ActivePerk[];
+  /** Active skills this run (timed powerups) */
+  activeSkills: ActiveSkill[];
+}
+
+/** Get current streak tier info (color, label, multiplier) or null if below threshold */
+function getStreakTier(streak: number) {
+  for (const tier of STREAK_TIERS) {
+    if (streak >= tier.threshold) return tier;
+  }
+  return null;
 }
 
 export class HUD {
@@ -47,7 +65,7 @@ export class HUD {
       1
     );
     renderer.drawTitleText(
-      `LV ${data.level}`,
+      `RD ${data.level}`,
       pad + 4 + lvlW / 2,
       pad + topBarH / 2,
       COLORS.player,
@@ -106,10 +124,13 @@ export class HUD {
     // BOTTOM AREA — Streak + Kills
     // ═══════════════════════════════════════════════════════════
     if (data.killStreak > 1) {
-      const streakColor =
-        data.killStreak > 10 ? "#ff4444" : data.killStreak > 5 ? "#ffaa00" : "#ffff00";
+      const tier = getStreakTier(data.killStreak);
+      const streakColor = tier ? tier.color : "#ffff00";
+      const label = tier ? tier.label : "STREAK";
+      const mult = tier ? `×${tier.multiplier}` : "";
       const streakY = GAME_HEIGHT - 14;
-      renderer.drawPanel(pad, streakY - 12, 160, 22, {
+      const panelW = tier ? 200 : 160;
+      renderer.drawPanel(pad, streakY - 12, panelW, 22, {
         bg: "rgba(40, 20, 0, 0.7)",
         border: renderer.hexToRgba(streakColor, 0.3),
         radius: 4,
@@ -119,7 +140,10 @@ export class HUD {
       ctx.fillStyle = streakColor;
       ctx.textAlign = "left";
       ctx.textBaseline = "middle";
-      ctx.fillText(`🔥 ${data.killStreak}x STREAK`, pad + 8, streakY);
+      const streakText = mult
+        ? `🔥 ${data.killStreak} ${label} ${mult}`
+        : `🔥 ${data.killStreak}x ${label}`;
+      ctx.fillText(streakText, pad + 8, streakY);
       ctx.restore();
     }
 
@@ -183,6 +207,147 @@ export class HUD {
     ctx.textBaseline = "middle";
     ctx.fillText(`☠ ${data.roundKills}`, GAME_WIDTH - pad - 4, killY);
     ctx.restore();
+
+    // ═══════════════════════════════════════════════════════════
+    // XP BAR — thin bar below HP hearts showing perk XP progress
+    // ═══════════════════════════════════════════════════════════
+    {
+      const xpBarY = pad + topBarH + 24;
+      const xpBarX = pad + 4;
+      const xpBarW = 120;
+      const xpBarH = 5;
+
+      // Background
+      ctx.save();
+      ctx.fillStyle = "rgba(255, 221, 0, 0.08)";
+      ctx.beginPath();
+      ctx.roundRect(xpBarX, xpBarY, xpBarW, xpBarH, 2);
+      ctx.fill();
+
+      // Fill
+      if (data.perkXpProgress > 0) {
+        const fillW = xpBarW * data.perkXpProgress;
+        ctx.fillStyle = "#ffdd00";
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.roundRect(xpBarX, xpBarY, fillW, xpBarH, 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+
+      // Level label
+      if (data.perkLevel > 0) {
+        ctx.font = renderer.getFont(7, true);
+        ctx.fillStyle = "#ffdd00";
+        ctx.globalAlpha = 0.6;
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillText(`LV${data.perkLevel}`, xpBarX + xpBarW + 6, xpBarY + xpBarH / 2);
+        ctx.globalAlpha = 1;
+      }
+      ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ACTIVE PERKS — small icons along left side below XP bar
+    // ═══════════════════════════════════════════════════════════
+    if (data.activePerks.length > 0) {
+      const perkStartY = pad + topBarH + 36;
+      const perkSize = 16;
+      const perkGap = 2;
+      ctx.save();
+      for (let i = 0; i < data.activePerks.length; i++) {
+        const ap = data.activePerks[i];
+        const px = pad + 4 + i * (perkSize + perkGap);
+        const py = perkStartY;
+
+        // Tiny colored square with icon
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = ap.def.color;
+        ctx.beginPath();
+        ctx.roundRect(px, py, perkSize, perkSize, 3);
+        ctx.fill();
+
+        // Stack count badge
+        if (ap.stacks > 1) {
+          ctx.globalAlpha = 0.9;
+          ctx.font = renderer.getFont(6, true);
+          ctx.fillStyle = "#fff";
+          ctx.textAlign = "right";
+          ctx.textBaseline = "bottom";
+          ctx.fillText(`${ap.stacks}`, px + perkSize - 1, py + perkSize);
+        }
+
+        // Emoji icon
+        ctx.globalAlpha = 1;
+        ctx.font = "9px serif";
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(ap.def.icon, px + perkSize / 2, py + perkSize / 2);
+      }
+      ctx.restore();
+    }
+
+    // ═══════════════════════════════════════════════════════════
+    // ACTIVE SKILLS — timer bars along right side
+    // ═══════════════════════════════════════════════════════════
+    if (data.activeSkills.length > 0) {
+      const skillStartY = pad + topBarH + 8;
+      const skillBarW = 90;
+      const skillBarH = 14;
+      const skillGap = 3;
+      const skillX = GAME_WIDTH - pad - skillBarW - 4;
+
+      ctx.save();
+      for (let i = 0; i < data.activeSkills.length; i++) {
+        const skill = data.activeSkills[i];
+        const sy = skillStartY + i * (skillBarH + skillGap);
+        const ratio = Math.max(0, skill.remaining / skill.def.duration);
+
+        // Background
+        ctx.globalAlpha = 0.6;
+        ctx.fillStyle = "rgba(6, 6, 18, 0.8)";
+        ctx.beginPath();
+        ctx.roundRect(skillX, sy, skillBarW, skillBarH, 3);
+        ctx.fill();
+
+        // Fill bar
+        ctx.globalAlpha = 0.7;
+        ctx.fillStyle = skill.def.color;
+        ctx.beginPath();
+        ctx.roundRect(skillX, sy, skillBarW * ratio, skillBarH, 3);
+        ctx.fill();
+
+        // Border glow
+        ctx.globalAlpha = 0.4;
+        ctx.strokeStyle = skill.def.color;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.roundRect(skillX, sy, skillBarW, skillBarH, 3);
+        ctx.stroke();
+
+        // Icon + name + timer
+        ctx.globalAlpha = 1;
+        ctx.font = "9px serif";
+        ctx.textAlign = "left";
+        ctx.textBaseline = "middle";
+        ctx.fillStyle = "#fff";
+        ctx.fillText(skill.def.icon, skillX + 3, sy + skillBarH / 2);
+
+        ctx.font = renderer.getFont(7, true);
+        ctx.fillStyle = "#fff";
+        ctx.fillText(skill.def.name, skillX + 15, sy + skillBarH / 2);
+
+        ctx.textAlign = "right";
+        ctx.fillStyle = skill.remaining < 3 ? "#ff4444" : "#ffffff";
+        ctx.fillText(
+          `${skill.remaining.toFixed(1)}s`,
+          skillX + skillBarW - 3,
+          sy + skillBarH / 2
+        );
+      }
+      ctx.restore();
+    }
 
     if (data.isMobile) {
       ctx.save();

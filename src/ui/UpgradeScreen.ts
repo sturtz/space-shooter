@@ -84,9 +84,9 @@ export class UpgradeScreen {
   /* ── Layout constants (scaled up 2× from original) ── */
   readonly CX = GAME_WIDTH / 2;
   readonly CY = GAME_HEIGHT / 2 - 20;
-  readonly DEPTH_SPACING = 240;
+  readonly DEPTH_SPACING = 280; // more radial breathing room (was 240)
   readonly NODE_RADIUS = 32;
-  readonly BRANCH_SPREAD = 0.45;
+  readonly BRANCH_SPREAD = 0.55; // wider angular separation (was 0.45)
 
   time = 0;
   private sparkles: Sparkle[] = [];
@@ -334,7 +334,7 @@ export class UpgradeScreen {
     this.nodePositions.set("root", { x: this.CX, y: this.CY });
 
     for (const node of UPGRADE_TREE) {
-      if (node.id === "root") continue;
+      if (node.id === "root" || node.hidden) continue;
       const branchAngle = BRANCH_ANGLES[node.branch];
       const dist = node.depth * this.DEPTH_SPACING;
       const offsetAngle = node.angleOffset * this.BRANCH_SPREAD;
@@ -793,7 +793,7 @@ export class UpgradeScreen {
     ctx.restore();
 
     // Level chip
-    const lvlText = `LV ${this.upgrades.save.currentLevel ?? 1}`;
+    const lvlText = `RD ${this.upgrades.save.roundNumber ?? 1}`;
     ctx.save();
     ctx.font = "bold 11px Tektur";
     const lvlW = ctx.measureText(lvlText).width + 20;
@@ -1531,6 +1531,18 @@ export class UpgradeScreen {
       action: () => this.manager.startRunFromUpgrade(),
     });
 
+    // Controls hint below START RUN button
+    ctx.save();
+    ctx.font = renderer.getFont(8);
+    ctx.fillStyle = "rgba(170, 187, 204, 0.45)";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    const controlsHint = mob
+      ? "JOYSTICK move · TAP to dash"
+      : "WASD move · CLICK / SPACE to dash · Auto-fire on beat";
+    ctx.fillText(controlsHint, GAME_WIDTH / 2, btnY + btnH + 14);
+    ctx.restore();
+
     // ── RESET (top right corner, small) ──
     const resetBtnW = 70;
     const resetBtnH = 20;
@@ -1583,7 +1595,7 @@ export class UpgradeScreen {
     // ── PRESTIGE (left side of bottom bar) ──
     const pBtnW = 140;
     const pBtnX = 40;
-    const canPrestige = this.upgrades.save.highestLevel >= 10;
+    const canPrestige = this.upgrades.save.highestRound >= 10;
 
     if (canPrestige) {
       const pPulse = (Math.sin(this.time * 1.8 + 1) + 1) / 2;
@@ -1629,7 +1641,7 @@ export class UpgradeScreen {
       ctx.textAlign = "left";
       ctx.textBaseline = "bottom";
       ctx.fillText(
-        `Reach Lv10 (current: ${this.upgrades.save.highestLevel ?? 0})`,
+        `Reach Round 10 (current: ${this.upgrades.save.highestRound ?? 0})`,
         pBtnX + 4,
         btnY - 3
       );

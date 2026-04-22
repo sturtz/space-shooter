@@ -14,6 +14,7 @@ import { Coin } from "../entities/Coin";
 import { Debris } from "../entities/Debris";
 import { HUD } from "../ui/HUD";
 import { AudioManager } from "../audio/AudioManager";
+import { SkillSystem } from "../systems/SkillSystem";
 import { GameState } from "./Game";
 
 /**
@@ -28,6 +29,7 @@ export interface IGame {
   upgrades: UpgradeManager;
   hud: HUD;
   audio: AudioManager;
+  skillSystem: SkillSystem;
   save: SaveData;
   stats: PlayerStats;
 
@@ -52,6 +54,9 @@ export interface IGame {
   paused: boolean;
   bossEnemy: Rock | EnemyShip | null;
   bossDefeated: boolean;
+  bossesKilledThisRun: number;
+  elapsedSurvivalTime: number;
+  starMilestonesEarned: number;
 
   startRun(): void;
   deathCause: "mothership" | "player" | "time" | "forfeit" | "";

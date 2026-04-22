@@ -30,6 +30,7 @@ export class Rock extends Enemy {
   rotSpeed: number;
   vertices: Vec2[];
   isBig: boolean;
+  isMega: boolean = false;
   flashTimer: number = 0;
   private sprite: HTMLImageElement;
 
@@ -49,6 +50,7 @@ export class Rock extends Enemy {
     // Pick sprite based on size — no tiny pool, all small rocks use the small pool
     if (mega) {
       this.sprite = AsteroidImages.mega;
+      this.isMega = true;
     } else if (isBig) {
       this.sprite = pickRandom(AsteroidImages.big);
     } else {
@@ -131,6 +133,21 @@ export class Rock extends Enemy {
         ctx.drawImage(tCtx.canvas, 0, 0, s, s, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
       } else {
         ctx.drawImage(this.sprite, -drawSize / 2, -drawSize / 2, drawSize, drawSize);
+      }
+
+      // ── The Rock's face on mega asteroids (clipped to circle, counter-rotated) ──
+      if (this.isMega && imageReady(AsteroidImages.rockFace)) {
+        ctx.save();
+        ctx.rotate(-this.angle); // counter-rotate to keep face upright
+        const faceSize = drawSize * 0.75;
+        // Clip to circle so face fits the round rock
+        ctx.beginPath();
+        ctx.arc(0, 0, faceSize / 2, 0, Math.PI * 2);
+        ctx.clip();
+        ctx.globalAlpha = 0.85;
+        ctx.drawImage(AsteroidImages.rockFace, -faceSize / 2, -faceSize / 2, faceSize, faceSize);
+        ctx.globalAlpha = 1;
+        ctx.restore();
       }
     } else {
       // ── CANVAS FALLBACK (while image loads) ──────────────────────
